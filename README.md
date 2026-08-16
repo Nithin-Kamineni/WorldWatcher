@@ -37,6 +37,8 @@ Command Prompt:
 powershell -ExecutionPolicy Bypass -File .\scripts\up.ps1
 ```
 
+(or)
+
 PowerShell:
 ```
 .\scripts\up.ps1

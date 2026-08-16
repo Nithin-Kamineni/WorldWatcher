@@ -37,7 +37,7 @@ services:
       retries: 30
 
   server:
-    image: nihtin/worldwatcher:server_v1
+    image: nihtin/worldwatcher:server_v2
     restart: unless-stopped
     environment:
       WW_DB_HOST: db
@@ -61,7 +61,7 @@ services:
         condition: service_healthy
 
   client:
-    image: nihtin/worldwatcher:client_v1
+    image: nihtin/worldwatcher:client_v2
     restart: unless-stopped
     ports:
       - "80:80"
