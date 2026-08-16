@@ -9,7 +9,7 @@ import Container from '@mui/material/Container';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import CastleIcon from '@mui/icons-material/Castle';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useThemeMode } from '../../theme/ThemeModeContext';
 import { useTutorialStore } from '../../store/useTutorialStore';
 import { TutorialOverlay } from './TutorialOverlay';

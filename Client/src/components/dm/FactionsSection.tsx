@@ -43,7 +43,7 @@ export function FactionsSection({ campaignId }: FactionsSectionProps) {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [view, setView] = useState<'table' | 'graph'>('table');
+  const [view, setView] = useState<'table' | 'graph'>('graph');
 
   const filteredFactions = factions.filter((faction) => {
     const query = search.trim().toLowerCase();
