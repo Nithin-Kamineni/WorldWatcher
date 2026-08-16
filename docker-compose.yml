@@ -46,7 +46,7 @@ services:
       WW_DB_USER: ${WW_DB_USER:-postgres}
       WW_DB_PASSWORD: ${WW_DB_PASSWORD:-1234}
       WW_SECRET_KEY: ${WW_SECRET_KEY:-dev-secret-change-me}
-      WW_CORS_ORIGINS: ${WW_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      WW_CORS_ORIGINS: ${WW_CORS_ORIGINS:-*}
       WW_ASSETS_DIR: /assets
       WW_ASSET_UPLOAD_MAX_MB: ${WW_ASSET_UPLOAD_MAX_MB:-25}
       WW_HOST: 0.0.0.0
