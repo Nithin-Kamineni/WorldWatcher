@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+*.log
+.env
+.env.local
+.git
+Token_IMages
+Progress copy.txt
+Progress.txt
+TODo2.txt
+To-Do.txt

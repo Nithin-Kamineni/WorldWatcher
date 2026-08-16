@@ -4,7 +4,13 @@
  * after committing, so subscribing here is enough to see live updates
  * from other connected clients (or other browser tabs) without polling. */
 
-const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000/ws').replace(/\/+$/, '');
+/** Same reasoning as client.ts's API_BASE_URL: fall back to the page's own
+ * host/protocol (proxied by nginx) instead of a fixed URL, so the built
+ * image works from any host. */
+const WS_BASE_URL = (
+  import.meta.env.VITE_WS_BASE_URL ??
+  `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
+).replace(/\/+$/, '');
 
 export interface RoomMessage {
   type: string;

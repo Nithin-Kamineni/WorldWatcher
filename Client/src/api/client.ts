@@ -3,7 +3,12 @@
  * calling fetch() directly, so error handling and base-URL config stay
  * in exactly one place. */
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api').replace(/\/+$/, '');
+/** Falls back to the page's own origin (via the client container's nginx
+ * reverse proxy) so the built image works from any host - LAN IP, phone,
+ * etc - without baking in a fixed URL at build time. Local `npm run dev`
+ * keeps using the explicit URL from .env instead, since there's no proxy
+ * in front of the Vite dev server. */
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? `${window.location.origin}/api`).replace(/\/+$/, '');
 
 export class ApiError extends Error {
   status: number;

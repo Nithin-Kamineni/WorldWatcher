@@ -23,6 +23,40 @@ scattered notes.
 - **Guided tour** - click the **?** icon in the navbar for a spotlight walkthrough of
   the app's main tools.
 
+## Fast Docker deploy (no prereqs)
+
+Pulls prebuilt images and starts everything - client, server, and a seeded Postgres -
+no Node/Python/Postgres install needed. No Docker? Install
+[Docker Desktop](https://www.docker.com/products/docker-desktop/)
+([video walkthrough](https://www.youtube.com/watch?v=iMyCdd5nP5U)).
+
+### Windows
+
+Command Prompt:
+```
+powershell -ExecutionPolicy Bypass -File .\scripts\up.ps1
+```
+
+PowerShell:
+```
+.\scripts\up.ps1
+```
+
+### Linux
+
+```
+bash scripts/up.sh
+```
+
+### macOS
+
+```
+bash scripts/up.sh
+```
+
+Then open `http://localhost/campaigns` (the script also prints a LAN URL for other
+devices, like your phone, on the same WiFi).
+
 ## Tech stack
 
 - **Client**: React 19 + TypeScript, Vite, MUI, Zustand, Konva (for the map canvas)
