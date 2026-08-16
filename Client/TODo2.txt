@@ -1,0 +1,1101 @@
+D&D DATABASE ARCHITECTURE + 5ETOOLS IMPORT DESIGN
+========================================================
+
+Purpose
+-------
+Build a PostgreSQL database for a D&D campaign-management, encounter-preparation,
+map/VTT, and combat application.
+
+Current application entities:
+- Monsters / creatures
+- NPCs
+- Magic items
+- Spells
+- Maps
+- Encounters
+
+Planned entities:
+- Factions
+- Locations
+- Quests
+- Campaign/world data
+- Combat
+
+Primary structured source:
+- 5etools repository, especially its data/ directory.
+- Preserve the original 5etools JSON rather than attempting to completely
+  normalize it.
+- The 5etools data directory currently contains structured areas such as
+  bestiary, spells, class, actions, conditionsdiseases, items, races,
+  feats, backgrounds, encounters, vehicles, and many other data files.
+
+Architecture principle
+----------------------
+Use a HYBRID relational + JSONB architecture.
+
+SQL columns:
+- Frequently searched
+- Frequently filtered
+- Frequently sorted
+- Frequently joined
+- Frequently manipulated by the application
+- Important to the combat engine
+
+JSONB:
+- Complex structures
+- Irregular structures
+- Source-specific structures
+- Rarely queried structures
+- Structures not yet needed by the application
+- Future/unknown fields
+- Complete original source objects
+
+MOST IMPORTANT RULE:
+The importer must be LOSSLESS.
+
+Never discard a 5etools field merely because there is no SQL column for it.
+If a field is not modeled relationally, preserve it in raw_data and/or
+raw_entities.
+
+Do NOT make the entire PostgreSQL schema identical to 5etools.
+Do NOT fully normalize every 5etools field.
+Do NOT make the application depend directly on the 5etools JSON format.
+
+
+DATABASE TABLES
+===============
+
+1. sources
+---------
+Purpose:
+Track books, sourcebooks, adventures, SRDs, homebrew sources, and editions.
+
+Columns:
+- id: UUID, primary key
+- name: TEXT
+- abbreviation: TEXT
+- edition: TEXT
+- source_type: TEXT
+- publisher: TEXT
+- publication_date: DATE
+- page: INTEGER
+- license: TEXT
+- description: TEXT
+- raw_data: JSONB
+
+
+2. raw_entities
+---------------
+Purpose:
+Lossless storage of every imported 5etools entity, including entities that
+the application does not currently model.
+
+Columns:
+- id: UUID, primary key
+- source: TEXT
+- source_file: TEXT
+- source_key: TEXT
+- entity_type: TEXT
+- raw_data: JSONB
+- content_hash: TEXT
+- imported_at: TIMESTAMP
+
+Rules:
+- Never discard unsupported fields.
+- Preserve original source identifiers.
+- Preserve the complete original object.
+- This table is the safety net for future schema changes.
+
+
+3. creatures
+-------------
+Purpose:
+Main stat-block table for monsters and stat-block-style NPCs.
+
+Columns:
+- id: UUID, primary key
+- source_id: UUID, foreign key -> sources
+- name: TEXT
+- slug: TEXT
+- edition: TEXT
+- creature_type: TEXT
+- creature_subtype: TEXT
+- size: TEXT
+- alignment: TEXT
+- challenge_rating: NUMERIC
+- proficiency_bonus: INTEGER
+- armor_class: INTEGER
+- hit_points: INTEGER
+- hit_dice: TEXT
+- strength: INTEGER
+- dexterity: INTEGER
+- constitution: INTEGER
+- intelligence: INTEGER
+- wisdom: INTEGER
+- charisma: INTEGER
+- description: TEXT
+- portrait_asset_id: UUID, foreign key -> assets
+- token_asset_id: UUID, foreign key -> assets
+- raw_data: JSONB
+- created_at: TIMESTAMP
+- updated_at: TIMESTAMP
+
+Do NOT store ability modifiers.
+Calculate them from ability scores.
+
+Do not initially create relational columns for:
+- speed
+- senses
+- languages
+- skills
+- saving throws
+- resistances
+- immunities
+- vulnerabilities
+- traits
+- spellcasting
+- variants
+- special mechanics
+
+Keep those in raw_data until the application has a concrete reason
+to query them relationally.
+
+
+4. creature_actions
+-------------------
+Purpose:
+Partially normalize monster actions because the combat engine will need
+to query and manipulate them.
+
+Columns:
+- id: UUID, primary key
+- creature_id: UUID, foreign key -> creatures
+- name: TEXT
+- action_type: TEXT
+- sort_order: INTEGER
+- description: TEXT
+- attack_bonus: INTEGER
+- reach: INTEGER
+- range_normal: INTEGER
+- range_long: INTEGER
+- damage_formula: TEXT
+- damage_type: TEXT
+- save_ability: TEXT
+- save_dc: INTEGER
+- area: JSONB
+- mechanics: JSONB
+- raw_data: JSONB
+
+action_type examples:
+- action
+- bonus_action
+- reaction
+- legendary
+- mythic
+- lair
+- other
+
+area should support application-defined geometry such as:
+- POINT
+- CIRCLE
+- SPHERE
+- CONE
+- LINE
+- CUBE
+- CYLINDER
+- RECTANGLE
+- HEMISPHERE
+- WALL
+- CUSTOM
+
+Do not over-constrain the area schema.
+
+
+5. spells
+---------
+Purpose:
+Main spell table.
+
+Columns:
+- id: UUID, primary key
+- source_id: UUID, foreign key -> sources
+- name: TEXT
+- slug: TEXT
+- edition: TEXT
+- level: INTEGER
+- school: TEXT
+- casting_time: TEXT
+- range: TEXT
+- duration: TEXT
+- concentration: BOOLEAN
+- ritual: BOOLEAN
+- description: TEXT
+- classes: JSONB
+- components: JSONB
+- area: JSONB
+- damage: JSONB
+- saving_throw: JSONB
+- effects: JSONB
+- mechanics: JSONB
+- raw_data: JSONB
+- created_at: TIMESTAMP
+- updated_at: TIMESTAMP
+
+
+6. items
+--------
+Purpose:
+Magic items, weapons, armor, wondrous items, potions, etc.
+
+Columns:
+- id: UUID, primary key
+- source_id: UUID, foreign key -> sources
+- name: TEXT
+- slug: TEXT
+- edition: TEXT
+- item_type: TEXT
+- rarity: TEXT
+- requires_attunement: BOOLEAN
+- attunement_requirement: TEXT
+- weight: NUMERIC
+- cost: JSONB
+- description: TEXT
+- properties: JSONB
+- effects: JSONB
+- charges: JSONB
+- image_asset_id: UUID, foreign key -> assets
+- raw_data: JSONB
+- created_at: TIMESTAMP
+- updated_at: TIMESTAMP
+
+
+7. conditions
+------------
+Purpose:
+Standard conditions and similar rules references.
+
+Columns:
+- id: UUID, primary key
+- name: TEXT
+- description: TEXT
+- source_id: UUID, foreign key -> sources
+- raw_data: JSONB
+
+
+8. effects
+----------
+Purpose:
+Future rules-engine representation for effects applied by spells, actions,
+items, abilities, etc.
+
+Columns:
+- id: UUID, primary key
+- name: TEXT
+- effect_type: TEXT
+- description: TEXT
+- mechanics: JSONB
+- raw_data: JSONB
+
+Possible effect_type values:
+- DAMAGE
+- HEAL
+- CONDITION
+- REMOVE_CONDITION
+- MODIFIER
+- MOVEMENT
+- TELEPORT
+- SUMMON
+- BANISH
+- DISPEL
+- CREATE_AOE
+- DESTROY_AOE
+- GRANT_ADVANTAGE
+- GRANT_DISADVANTAGE
+- CUSTOM
+
+Do not attempt to implement every effect type immediately.
+
+
+9. assets
+---------
+Purpose:
+Store metadata and filesystem/object-storage references for images and
+other binary assets. Do not normally store large image files directly in
+PostgreSQL.
+
+Columns:
+- id: UUID, primary key
+- filename: TEXT
+- storage_path: TEXT
+- asset_type: TEXT
+- mime_type: TEXT
+- width: INTEGER
+- height: INTEGER
+- file_size: BIGINT
+- sha256: TEXT
+- source: TEXT
+- raw_data: JSONB
+- created_at: TIMESTAMP
+
+Supported asset types should include:
+- creature_portrait
+- creature_token
+- item_image
+- map
+- NPC_portrait
+- faction_image
+- location_image
+- other
+
+Actual files should live in filesystem/object storage, for example:
+
+assets/
+  creatures/
+  items/
+  maps/
+  tokens/
+  portraits/
+
+
+10. campaigns
+-------------
+Purpose:
+Top-level campaign/world container.
+
+Columns:
+- id: UUID, primary key
+- name: TEXT
+- description: TEXT
+- ruleset: TEXT
+- created_at: TIMESTAMP
+- updated_at: TIMESTAMP
+
+
+11. characters
+--------------
+Purpose:
+Player characters and other campaign characters.
+
+Columns:
+- id: UUID, primary key
+- campaign_id: UUID, foreign key -> campaigns
+- name: TEXT
+- character_type: TEXT
+- level: INTEGER
+- class: TEXT
+- subclass: TEXT
+- species: TEXT
+- background: TEXT
+- current_hp: INTEGER
+- max_hp: INTEGER
+- temporary_hp: INTEGER
+- armor_class: INTEGER
+- ability_scores: JSONB
+- skills: JSONB
+- saving_throws: JSONB
+- resources: JSONB
+- equipment: JSONB
+- features: JSONB
+- notes: TEXT
+- portrait_asset_id: UUID, foreign key -> assets
+
+
+12. locations
+-------------
+Purpose:
+Hierarchical world/campaign locations.
+
+Columns:
+- id: UUID, primary key
+- campaign_id: UUID, foreign key -> campaigns
+- parent_location_id: UUID, self-reference -> locations
+- name: TEXT
+- location_type: TEXT
+- description: TEXT
+- notes: TEXT
+- map_id: UUID, foreign key -> maps
+- raw_data: JSONB
+
+Supports:
+Continent -> Country -> Region -> City -> District -> Building -> Room
+
+
+13. factions
+------------
+Purpose:
+Campaign factions and organizations.
+
+Columns:
+- id: UUID, primary key
+- campaign_id: UUID, foreign key -> campaigns
+- name: TEXT
+- description: TEXT
+- faction_type: TEXT
+- goals: JSONB
+- beliefs: JSONB
+- resources: JSONB
+- relationships: JSONB
+- locations: JSONB
+- members: JSONB
+- notes: TEXT
+- image_asset_id: UUID, foreign key -> assets
+- raw_data: JSONB
+
+Do not immediately normalize every faction member or relationship.
+
+
+14. maps
+--------
+Purpose:
+Battle maps and campaign maps.
+
+Columns:
+- id: UUID, primary key
+- campaign_id: UUID, foreign key -> campaigns
+- location_id: UUID, foreign key -> locations
+- name: TEXT
+- map_type: TEXT
+- width: INTEGER
+- height: INTEGER
+- grid_type: TEXT
+- grid_size: INTEGER
+- background_asset_id: UUID, foreign key -> assets
+- settings: JSONB
+- walls: JSONB
+- doors: JSONB
+- lighting: JSONB
+- terrain: JSONB
+- objects: JSONB
+- raw_data: JSONB
+
+Do not create separate tables for every wall, door, tile, or map object
+unless the application later needs relational querying for them.
+
+
+15. encounters
+--------------
+Purpose:
+Prepared encounters before they are actually run.
+
+Columns:
+- id: UUID, primary key
+- campaign_id: UUID, foreign key -> campaigns
+- map_id: UUID, foreign key -> maps
+- name: TEXT
+- description: TEXT
+- difficulty: TEXT
+- environment: TEXT
+- creatures: JSONB
+- starting_positions: JSONB
+- special_rules: JSONB
+- notes: TEXT
+- raw_data: JSONB
+
+Example creatures JSON:
+[
+  {
+    "creature_id": "...",
+    "quantity": 6
+  },
+  {
+    "creature_id": "...",
+    "quantity": 1
+  }
+]
+
+
+16. combats
+-----------
+Purpose:
+Live or historical combat sessions.
+
+Columns:
+- id: UUID, primary key
+- encounter_id: UUID, foreign key -> encounters
+- campaign_id: UUID, foreign key -> campaigns
+- name: TEXT
+- round: INTEGER
+- current_turn: INTEGER
+- status: TEXT
+- events: JSONB
+- started_at: TIMESTAMP
+- ended_at: TIMESTAMP
+
+
+17. combatants
+-------------
+Purpose:
+Individual instances of creatures/characters participating in a combat.
+
+Columns:
+- id: UUID, primary key
+- combat_id: UUID, foreign key -> combats
+- creature_id: UUID, nullable, foreign key -> creatures
+- character_id: UUID, nullable, foreign key -> characters
+- display_name: TEXT
+- current_hp: INTEGER
+- temporary_hp: INTEGER
+- initiative: INTEGER
+- initiative_order: INTEGER
+- x: NUMERIC
+- y: NUMERIC
+- z: NUMERIC
+- movement_used: NUMERIC
+- conditions: JSONB
+- effects: JSONB
+- resources: JSONB
+- concentration: JSONB
+- action_used: BOOLEAN
+- bonus_action_used: BOOLEAN
+- reaction_used: BOOLEAN
+- visibility: JSONB
+- status: TEXT
+
+This table represents the LIVE INSTANCE of a creature in combat.
+It must not modify the underlying creature stat block.
+
+
+RAW_DATA DESIGN
+===============
+
+For each major content table, raw_data contains the complete original
+5etools object.
+
+For a creature:
+
+SQL fields:
+- name
+- source
+- edition
+- creature_type
+- size
+- alignment
+- challenge_rating
+- proficiency_bonus
+- armor_class
+- hit_points
+- hit_dice
+- strength
+- dexterity
+- constitution
+- intelligence
+- wisdom
+- charisma
+
+raw_data retains everything else, including:
+- speed
+- senses
+- languages
+- skills
+- saving throws
+- resistances
+- immunities
+- vulnerabilities
+- traits
+- spellcasting
+- actions
+- reactions
+- legendary actions
+- mythic actions
+- variants
+- special mechanics
+- source-specific fields
+- any future 5etools fields
+
+The rule is:
+SQL contains the important application-facing projection.
+JSONB contains the complete source representation.
+
+
+ABILITY MODIFIERS
+=================
+
+Do NOT store STR/DEX/etc. modifiers as separate columns.
+
+Store:
+- strength
+- dexterity
+- constitution
+- intelligence
+- wisdom
+- charisma
+
+Calculate modifiers from ability scores in application code.
+
+This prevents duplicated and inconsistent data.
+
+
+5ETOOLS IMPORT ARCHITECTURE
+===========================
+
+5etools raw JSON
+      |
+      v
+Python importer
+      |
+      +----------------------+
+      |                      |
+      v                      v
+raw_entities          relational extraction
+                             |
+                             v
+                       PostgreSQL tables
+                             |
+                             v
+                         application
+
+The original 5etools files must remain untouched.
+
+
+PYTHON IMPORTER REQUIREMENTS
+============================
+
+Build a Python import pipeline for the 5etools data/ directory.
+
+The importer must be LOSSLESS and IDEMPOTENT.
+
+It must:
+
+1. Recursively scan the configured 5etools data directory.
+2. Detect supported entity types.
+3. Parse JSON files.
+4. Preserve the complete original JSON object.
+5. Preserve original source filenames.
+6. Preserve original source identifiers.
+7. Determine source/book/edition metadata where available.
+8. Populate the sources table.
+9. Populate creatures.
+10. Populate creature_actions where applicable.
+11. Populate spells.
+12. Populate items.
+13. Populate conditions and other supported rules entities.
+14. Register imported assets.
+15. Extract only explicitly approved important fields into SQL columns.
+16. Store the complete original object in raw_data and/or raw_entities.
+17. Correctly handle optional fields.
+18. Correctly handle arrays and nested objects.
+19. Correctly handle 5etools _copy structures.
+20. Correctly handle variants and references.
+21. Never silently discard unknown fields.
+22. Never fail the entire import because one optional field is unfamiliar.
+23. Use deterministic source/entity identifiers.
+24. Use PostgreSQL upserts so imports can be safely repeated.
+25. Calculate content hashes to detect changes.
+26. Update existing records when source content changes.
+27. Avoid duplicate records.
+28. Calculate derived values only when appropriate.
+29. Do not store duplicated ability modifiers.
+30. Import image metadata and associate images with entities.
+31. Keep image bytes outside PostgreSQL.
+32. Produce useful logging.
+33. Report imported records.
+34. Report updated records.
+35. Report skipped records.
+36. Report malformed records.
+37. Report unsupported records.
+38. Generate a final import summary.
+39. Never modify the original 5etools source files.
+
+Before implementing the importer, inspect the real 5etools data and test
+against a diverse set of entities:
+- ordinary monster
+- dragon
+- legendary creature
+- mythic creature
+- spellcaster
+- creature with reactions
+- creature with bonus actions
+- creature with recharge abilities
+- creature with complex resistances
+- creature with variants
+- creature using _copy
+- creature with unusual movement
+- creature with multiple attacks
+- spells with different area geometries
+- complex magic items
+
+
+IMPORTANT IMPLEMENTATION RULE
+=============================
+
+Do not create a giant normalization framework.
+
+The importer should be a thin translation layer:
+
+5etools JSON
+    |
+    +--> important fields --> SQL columns
+    |
+    +--> everything else --> raw_data JSONB
+
+The importer is responsible for preserving information, not for inventing
+a new interpretation of every D&D rule.
+
+
+WHAT NOT TO NORMALIZE
+=====================
+
+Do not create a relational table merely because a JSON object exists.
+
+Initially keep these in JSONB unless the application needs to query them:
+- creature speeds
+- senses
+- languages
+- skill bonuses
+- saving throw details
+- resistances
+- immunities
+- vulnerabilities
+- complicated traits
+- complex spellcasting structures
+- unusual monster mechanics
+- map walls
+- map doors
+- map terrain
+- map objects
+- faction relationships
+- faction members
+- complex spell effects
+- item mechanics
+- source-specific structures
+
+Normalize something later when there is a concrete application requirement
+such as:
+- filtering by it
+- sorting by it
+- joining by it
+- executing it in the combat engine
+- displaying/manipulating it frequently
+
+
+FUTURE NORMALIZATION CANDIDATES
+===============================
+
+Potential future relational tables include:
+- detailed creature senses
+- creature skills
+- creature resistances/immunities
+- spell effects
+- action damage components
+- action targeting
+- area-of-effect definitions
+- conditions applied by effects
+- item modifiers
+- movement modes
+- map objects
+- map walls/doors
+- faction relationships
+- quest relationships
+
+Do not create these tables until the application's requirements justify them.
+
+
+IMAGE STORAGE
+=============
+
+Store actual images in filesystem or object storage.
+
+PostgreSQL stores:
+- asset ID
+- filename
+- storage path
+- MIME type
+- dimensions
+- file size
+- SHA-256 hash
+- source
+- asset type
+
+Do not store large images directly in JSONB.
+
+Use assets for:
+- monster portraits
+- monster tokens
+- NPC portraits
+- magic item images
+- spell images if available
+- maps
+- factions
+- locations
+- future artwork
+
+
+DATABASE DESIGN GOALS
+=====================
+
+Priorities, in order:
+
+1. Preserve all source data.
+2. Make initial implementation fast.
+3. Make common application queries simple.
+4. Make combat operations easy.
+5. Make map/VTT operations easy.
+6. Keep the application independent of 5etools internals.
+7. Allow future normalization.
+8. Support homebrew/custom content.
+9. Allow 5etools data to be re-imported safely.
+10. Avoid unnecessary database complexity.
+
+
+IMPORTANT DISTINCTION: RULES VS COMBAT STATE
+============================================
+
+creatures:
+"What is a Goblin?"
+
+combatants:
+"What is Goblin #3 doing right now?"
+
+The creature table stores the rules/stat block.
+
+The combatant table stores:
+- current HP
+- initiative
+- position
+- conditions
+- temporary effects
+- resources
+- action usage
+- visibility
+- concentration
+- current combat state
+
+Never modify the base creature stat block when a combatant takes damage
+or receives a condition.
+
+
+IMPORT DEVELOPMENT STRATEGY
+============================
+
+Do NOT initially import the entire dataset.
+
+First test with approximately 15-20 deliberately difficult entities.
+
+Recommended test cases:
+1. Goblin
+2. Dragon
+3. Legendary monster
+4. Mythic monster
+5. Spellcaster
+6. Monster with reaction
+7. Monster with bonus action
+8. Monster with recharge ability
+9. Monster with multiple damage types
+10. Monster with unusual movement
+11. Monster with variant
+12. Monster using _copy
+13. Monster with complex spellcasting
+14. Monster with legendary actions
+15. Monster with complex resistances
+16. Spell with cone AoE
+17. Spell with sphere/cylinder/line/etc.
+18. Complex magic item
+19. NPC/stat-block creature
+20. An entity with unusual or unknown fields
+
+Compare the database result against the original 5etools JSON.
+
+Verify:
+- no source fields were lost
+- source IDs are preserved
+- duplicate imports do not create duplicates
+- updates work
+- assets are linked
+- raw_data exactly preserves the source object
+
+
+CLAUDE CODE DESIGN-DOCUMENT PROMPT
+===================================
+
+Create a complete database architecture and implementation design document
+for the D&D campaign/combat application in this repository.
+
+FIRST inspect the existing application code, UI, API routes, database models,
+components, and current persistence layer.
+
+Identify all existing entities and fields currently required by the UI.
+The current application includes:
+- monsters
+- NPCs
+- magic items
+- spells
+- maps
+- encounters
+
+The application will soon include:
+- factions
+- locations
+- quests
+- campaign/world data
+- combat
+
+Do not remove existing application requirements.
+
+The database will use PostgreSQL.
+
+The primary structured D&D source is the 5etools repository and its data/
+directory.
+
+Use the hybrid relational + JSONB architecture described in this document.
+
+The most important architectural requirements are:
+
+1. Frequently queried/filtered/sorted/joined fields belong in SQL columns.
+2. Complex or irregular data belongs in JSONB.
+3. The complete original 5etools object must always be preserved.
+4. Unknown fields must never be discarded.
+5. The application must not depend directly on the 5etools schema.
+6. 5etools is an import source, not the application's permanent API model.
+7. The importer must be lossless.
+8. The importer must be idempotent.
+9. The database must support future homebrew/custom content.
+10. Do not over-normalize.
+
+Use these core tables where appropriate:
+- sources
+- raw_entities
+- creatures
+- creature_actions
+- spells
+- items
+- conditions
+- effects
+- assets
+- campaigns
+- characters
+- locations
+- factions
+- maps
+- encounters
+- combats
+- combatants
+
+If the existing application already has additional required tables, preserve
+and integrate them rather than deleting them.
+
+For every table document:
+- purpose
+- primary key
+- foreign keys
+- every column
+- PostgreSQL type
+- nullable/non-nullable
+- source of the field
+- whether it is application-generated
+- indexes
+- unique constraints
+- relationships
+- whether information belongs in JSONB
+
+For every major raw_data field, explain what remains inside JSONB.
+
+Also document:
+- 5etools import strategy
+- _copy handling
+- variants
+- references
+- source IDs
+- optional fields
+- nested entries
+- arrays
+- content hashes
+- upsert behavior
+- asset import
+- error handling
+- migration strategy
+- future normalization strategy
+
+Include a Mermaid ER diagram.
+
+Include a section titled:
+"WHAT NOT TO NORMALIZE"
+
+Include:
+"FUTURE NORMALIZATION CANDIDATES"
+
+Include:
+"5ETOOLS IMPORT ARCHITECTURE"
+
+Include:
+"IMAGE STORAGE ARCHITECTURE"
+
+Include:
+"RULES DATA VS COMBAT STATE"
+
+Do not implement code in the design document unless necessary to explain
+a concept. The design document should be detailed enough that another
+developer/LLM can implement the schema and importer without guessing.
+
+
+CLAUDE CODE PYTHON-IMPORTER PROMPT
+==================================
+
+Build a Python import pipeline for the 5etools data/ directory.
+
+The importer must implement the hybrid PostgreSQL architecture defined in
+the database design document.
+
+Requirements:
+
+- Inspect the actual 5etools structures before implementation.
+- Do not assume every entity has the same fields.
+- Support optional fields.
+- Support arrays.
+- Support nested objects.
+- Support _copy structures.
+- Support variants.
+- Support references.
+- Preserve original source IDs.
+- Preserve source filenames.
+- Preserve complete raw JSON.
+- Never silently discard data.
+- Extract only explicitly defined relational fields.
+- Store all remaining information in JSONB.
+- Use deterministic identifiers.
+- Make imports idempotent.
+- Use upserts.
+- Calculate content hashes.
+- Detect changes.
+- Avoid duplicates.
+- Import assets.
+- Keep image bytes outside PostgreSQL.
+- Log errors and continue processing independent records where safe.
+- Produce import statistics.
+- Provide a dry-run mode if practical.
+- Provide validation before bulk import.
+
+Test first with a diverse set of entities before importing everything.
+
+The final importer must allow the 5etools dataset to be updated in the
+future without requiring the database to be rebuilt from scratch.
+
+The original 5etools files must never be modified.
+
+
+FINAL ENGINEERING PRINCIPLE
+============================
+
+The database is NOT a copy of 5etools.
+
+It is:
+
+        5ETOOLS
+           |
+           v
+     LOSSLESS RAW DATA
+           |
+           v
+    APPLICATION PROJECTION
+           |
+           v
+      POSTGRESQL
+           |
+           v
+      D&D APPLICATION
+
+SQL provides structure and usability.
+
+JSONB provides flexibility and complete source preservation.
+
+The schema should evolve based on actual application requirements rather
+than attempting to predict every possible D&D rule in advance.

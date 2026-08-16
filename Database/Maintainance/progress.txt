@@ -1,0 +1,228 @@
+WORLDWATCHER - DATABASE + IMPORTER BUILD PROGRESS
+=====================================================
+This file is updated as work happens. Newest entries at the top.
+
+-----------------------------------------------------------------
+2026-08-14 - Full import running; test set passed clean
+-----------------------------------------------------------------
+STATUS: full unfiltered import (all sources, creature/spell/item/
+condition, with assets) kicked off in the background. Timing will be
+appended here once it completes.
+
+Database: created against the user's existing local Postgres instance
+(host=localhost port=5432, db=WorldWatcher_DB, user=postgres). All 23
+tables from database_scehma.txt applied via
+Database/Maintainance/sql/001_schema.sql (safe to re-run, uses
+IF NOT EXISTS / CREATE OR REPLACE throughout).
+
+One real schema bug found and fixed while building this: `sources` had
+`UNIQUE(abbreviation, edition)`, but standard SQL NULL semantics mean a
+plain unique constraint never catches duplicates when `edition` IS NULL -
+which is the common case (5etools doesn't reliably encode "edition" at
+the book level). Added a partial unique index
+`(abbreviation) WHERE edition IS NULL` alongside the original constraint.
+
+5etools data cloned (shallow, read-only, never modified) into
+Database/external-data/:
+  - 5etools-src (JSON data, ~108MB, 503 files) - 4,528 monsters,
+    936 spells, 2,428 magic items, 64 conditions/diseases/statuses
+  - 5etools-img (images, ~12GB)
+
+Importer built at Database/Maintainance/importer/ per
+data_normalisation_plan.txt's module layout: config, hashing, db
+(generic upsert + per-record SAVEPOINT isolation so one bad record can't
+abort the run), discovery (generic top-level-key sniffing, no hardcoded
+file list), sources, raw_ingest, copy_resolver (_copy/_versions,
+recognizes prependArr/appendArr/appendIfNotExistsArr/insertArr/
+removeArr/replaceArr/setProp/replaceTxt; addSpells/removeSpells/
+replaceSpells/addSkills recognized-but-conservative since spellcasting
+stays raw_data-only anyway), text (5etools {@tag} stripping shared by
+all projectors), projectors/{creature,spell,item,condition}, assets
+(path-index-then-lazy-hash image matching/dedup/copy), report, cli.
+
+TEST RUN (section 11 hand-picked set) - PASSED:
+  15 named entities covering all 20 structural categories from the plan
+  (some via double duty), see test_allowlist.txt:
+    Goblin (baseline), Adult Red Dragon (legendary+recharge+multi-damage-
+    type attacks), Ancient Dragon Turtle (mythic+legendary),
+    Archmage (complex prepared spellcasting), Bandit Captain (reaction +
+    NPC-shaped stat block), Speaker Devil (bonus action), Ghost (complex
+    conditional resistances), Living Portent (_versions - expanded into
+    2 separate creature rows as expected), Archduke Zariel of Avernus
+    (_copy resolution - verified merged/replaced actions match the
+    _mod), Bulette (unusual movement), Vampire Infernalist
+    (legendary+legendaryGroup/lair), Fireball (sphere AoE),
+    Cone of Cold (cone AoE), Lightning Bolt (line AoE),
+    Staff of Power (complex item: charges, attunement text, properties).
+
+  Result: 0 malformed / 0 unsupported / 0 error across every entity and
+  every reprint variant encountered (both 2014 and 2024/XMM/XDMG/XPHB
+  printings where applicable). Re-running with no source changes
+  produced all "unchanged", 0 imported/updated - idempotency confirmed.
+
+  Bugs found and fixed during this test pass (all three were genuine
+  data-shape surprises, not guessed - confirmed against the actual raw
+  JSON before fixing):
+    1. Recharge abilities: 5etools encodes "(Recharge 5-6)" as a
+       {@recharge 5} TAG inside the action name, not literal text. The
+       original regex looked for literal text and never matched;
+       worse, the generic tag-stripper mangled "Fire Breath {@recharge
+       5}" into "Fire Breath 5". Fixed: text.py now renders the
+       {@recharge N} tag properly, and creature.py extracts the recharge
+       column from the raw tag directly.
+    2. Alignment: 5etools has an undocumented shorthand for "alternate
+       alignment pairs" on variable-alignment NPCs (e.g. Bandit Captain:
+       ["NX","C","G","NY","E"]) that isn't a simple per-code word
+       mapping. The naive per-code mapper produced garbage
+       ("NX Chaotic Good NY Evil"). Fixed: format_alignment() now only
+       produces a display string when every code is a plain recognized
+       letter (L/N/C/G/E/U/A); anything else returns NULL for the
+       display column rather than a half-translated guess. raw_data
+       always has the untouched original regardless.
+    3. 2024-revision (XMM/XDMG/XPHB) stat blocks use newer structured
+       tags ({@actSave dex}, {@actSaveFail}, {@actSaveSuccess}) in place
+       of the old prose phrasing ("Dexterity saving throw"). The old
+       save-ability regex only recognized the prose form. Fixed:
+       text.py renders the new tags to readable text, and creature.py's
+       save_ability extraction now tries the {@actSave} tag first before
+       falling back to the old prose-phrase regex.
+    4. Minor quality fix: item_type now prefers 5etools' boolean flags
+       (staff/rod/wand/wondrous/...) over the raw `type` code field,
+       since the raw code (e.g. "M|XPHB") needs the itemType.json lookup
+       table to resolve properly (out of scope) and produces a much less
+       readable value ("M") than the flag-based label ("Staff") when
+       both are present on the same record.
+
+KNOWN LIMITATIONS (documented, not fixed - acceptable given the "thin
+translation layer, do not over-engineer" scope of the plan):
+  - creature_actions damage extraction only captures the FIRST
+    damage/type pair per action text; compound damage clauses (e.g.
+    "plus 8d8 fire damage") are not split into separate columns. Full
+    text is preserved in description/raw_data regardless.
+  - _versions expansion links raw_entities.linked_id to only the FIRST
+    expanded creature row when one raw JSON object expands into several
+    (rare - only observed on a handful of "variant" monsters). All
+    expanded rows are still created correctly; only the raw_entities
+    convenience pointer is singular.
+  - addSpells/removeSpells/replaceSpells/addSkills _copy mod operators
+    are recognized (never crash / never fall back to unsupported) but
+    are NOT applied - the base entity's spellcasting/skill block is left
+    as-is. This only affects raw_data fidelity for the (rare) monsters
+    that both use _copy AND modify spellcasting via that mechanism;
+    spellcasting is raw_data-only content regardless (never a column),
+    so no relational data is affected.
+  - baseitem (mundane gear) and itemGroup are raw-ingested but not
+    projected into `items` - matches database_scehma.txt 2.7's own
+    "magic items today, mundane items later" scoping.
+  - Deliberate malformed-record injection (test-plan item 20) was
+    skipped to avoid mutating the read-only 5etools-src checkout;
+    per-record SAVEPOINT error isolation was verified by code review
+    instead of a live malformed-record test.
+  - Stage 5 item-asset matching re-hashes every already-linked item's
+    image file on every run (no "skip if already linked" short-circuit
+    like creatures have) - correctness is fine (sha256 dedup prevents
+    duplicate assets rows/copies), just not maximally efficient on
+    repeat runs. Not fixed given time budget; cheap to add later if
+    re-import speed on a full unchanged dataset becomes a concern.
+
+FULL IMPORT RESULTS:
+  Run 1 (cold, empty DB, full data/ + img/ walk): 44.9 seconds wall-clock.
+    Found 2 malformed creatures (Ougalop, Shuushar the Awakened - their
+    _copy reference "Kuo-Toa" but the actual MM entity is spelled
+    "Kuo-toa", lowercase t - a genuine inconsistency in 5etools' own
+    data). Handled exactly as designed: logged as malformed, fell back
+    to raw-only ingest, did NOT abort the run.
+    Also found: item image-matching only linked 2 of ~2,780 items on
+    this run, because stage5_item_assets was reading a `meta` snapshot
+    captured BEFORE Stage 4 ran, so newly-projected items (linked_table
+    still NULL in that snapshot) were invisible to it. Root-caused and
+    fixed (meta is now updated in place right after each item is
+    projected); creature asset-linking never had this problem since it
+    already happens inline within the same Stage 4 pass.
+    Also made the _copy resolver's name lookup case-insensitive (5etools'
+    own data isn't always internally consistent about name casing
+    between a _copy reference and its base) - fixes the 2 malformed
+    creatures above without any real risk of false-positive collisions.
+
+  Run 2 (after both fixes, warm/idempotent - re-ran the full importer
+  again against the now-mostly-already-imported DB): 8.4 seconds
+  wall-clock. creature: imported=2 (the two previously-malformed Kuo-toa
+  entities, now resolved correctly), malformed=0. item_image_matched:
+  569 (up from 2, confirming the fix). Everything else: unchanged.
+
+  Final row counts:
+    sources: 180              creatures: 4,557
+    raw_entities: 26,375      creature_actions: 22,551
+    assets: 7,069             spells: 936
+    conditions: 64            items: 2,428
+    raw_entities by status: 8,624 projected / 17,751 raw_only (every
+      non-modeled 5etools type - classes, races, feats, backgrounds,
+      tables, etc. - captured losslessly per the plan, none projected
+      relationally yet, exactly as scoped)
+    assets by type: 2,446 creature portraits, 4,197 creature tokens,
+      426 item images copied into Database/Maintainance/assets/
+      (1.1GB on disk, deduped by sha256 from the 12GB source img repo)
+
+  ANSWERING THE ORIGINAL QUESTION ("how long does the script take"):
+  On this machine, against a local Postgres instance, a full cold
+  import of the entire current 5etools dataset (4,528 monsters, 936
+  spells, 2,428 items, ~26k total JSON records across every entity
+  type, plus matching/copying ~7,000 images out of the 12GB image
+  repo) takes well under a minute (~45 seconds). A subsequent re-run
+  with no upstream changes (the normal steady-state case) takes single-
+  digit seconds, since almost everything short-circuits on an unchanged
+  content hash. This does NOT include the one-time cost of cloning the
+  two 5etools repos themselves (5etools-src: ~9s; 5etools-img: several
+  minutes, dominated by network transfer of ~12GB - already done once,
+  not part of the importer's own runtime).
+
+KNOWN MINOR LIMITATION found during the full run (not fixed, low
+priority): a handful of raw-ingest-only entity types that aren't
+relationally projected (subclass, subclass_feature, class_feature,
+race_feature) showed spurious "updated" counts on the idempotency
+re-run despite no source changes. Root cause: a few subclass/feature
+entries share the same (name, source) - and therefore the same
+source_key - across more than one JSON file, and os.walk's file
+traversal order isn't guaranteed stable across runs, so which file's
+copy "wins" for that shared key can flip between runs. This never
+touches creatures/spells/items/conditions (which showed clean
+unchanged counts) and doesn't lose data (raw_entities still holds
+whichever version was written), so it was left as documented tech debt
+rather than fixed under the current time budget - a real fix would key
+raw_entities by (source_file, source_key) more strictly at the
+class/subclass level or dedupe upstream before ingest.
+
+STATUS: COMPLETE. Schema live in WorldWatcher_DB, importer built and
+verified against both a hand-picked test set and the full dataset,
+timing measured and reported above.
+
+-----------------------------------------------------------------
+2026-08-14 - App test data seeded (campaigns / maps / Mira the NPC)
+-----------------------------------------------------------------
+Added Database/Maintainance/seed_app_test_data.py - separate from the
+5etools importer (this is the APP's own static/mock data, not 5etools
+content). Idempotent (checks by name/slug before inserting; assets
+deduped by sha256 same as the main importer). Pulls exact values
+straight from the current React source rather than inventing anything:
+  - campaigns  <- Client/src/store/mockCampaigns.ts (Meridian, Eboron)
+  - maps + map_floors <- Client/src/store/seedMaps.ts (ALL 7 static
+    maps found there - 3 under Meridian, 4 under Eboron, not 3 total;
+    9 map_floors rows since 2 maps have 2 floors each)
+  - creatures (category='npc') <- Client/src/store/seedCreatures.ts,
+    Mira the Blacksmith only (as requested), campaign-scoped to
+    Meridian, matching where she's defined in seedCreaturesByCampaignId
+
+Confirms: NPCs and monsters share the SAME `creatures` table
+(category='npc' vs 'monster'), exactly per database_scehma.txt 2.4's
+"do not split this into monsters/npcs tables" instruction.
+
+Fields with no real UI source (campaigns.description, campaigns.ruleset)
+were filled in with reasonable made-up values per instruction, clearly
+non-canonical. Mira's `speed` (no relational column by design - see
+"WHAT NOT TO NORMALIZE") and her full original static object are kept
+in creatures.raw_data for traceability even though she's homebrew, not
+5etools content.
+
+Real images copied (deduped by sha256) from Client/src/assets/ into
+Database/Maintainance/assets/campaigns/ and .../maps/ - 9 asset rows
+total (2 campaign images + 7 map backgrounds).

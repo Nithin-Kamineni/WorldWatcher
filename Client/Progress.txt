@@ -1,0 +1,177 @@
+WorldWatcher - Feature Progress
+=========================================
+Last updated: 2026-08-14
+
+Covers three rounds of work: the map UX overhaul (toolbar/sidebar/
+fullscreen), the large follow-up round (drawing tools, grid/flip, DM
+content hub, encounters, creatures, initiative tracking), and this round
+(bug fixes + a second large feature batch: rotate, undo/redo, per-token
+sizing, dice roller, richer initiative tracking, creature/spell/item
+catalog split, advanced table search). Check marks = working and verified
+in-browser (Playwright smoke tests, no console errors).
+
+MAP UX (toolbar, sidebar, fullscreen)
+-------------------------------------------
+[x] Drag-and-drop tokens onto the map from the sidebar, the toolbar's
+    "Manage tokens -> Favorites" tab, and the toolbar's "Encounters" tab
+[x] Placed tokens: rename inline, numeric size field next to the slider
+[x] Per-token effects/conditions: searchable checklist (presets + custom),
+    ticked-to-top sort, remove by unticking or via chip delete, shown as a
+    small badge on the map token
+[x] Toolbar shapes consolidated into one "Shapes" popover; eraser lives in
+    the same popover
+[x] Explicit "Pointer" tool button (leftmost in the toolbar) plus Escape
+    key cancels whatever tool is active and returns to the pointer
+[x] Undo / redo for token add/move/update/delete, shape add/erase, flip,
+    and rotate - toolbar buttons (disabled when the stack is empty) and
+    Ctrl+Z / Ctrl+Y keyboard shortcuts
+[x] Fullscreen mode: floating FAB (bottom-right, over the sidebar) hides
+    the navbar/breadcrumbs/title
+[x] Toolbar is a floating, translucent, collapsible overlay pinned to the
+    bottom of the map
+
+DRAWING TOOLS, GRID, FLIP, ROTATE
+-------------------------------------------
+[x] AoE/drawing tools: circle, cone, square, rectangle, line, thin line
+    (fixed 3px), freehand marker (adjustable color + thickness), all
+    erasable
+[x] Ruler tool: temporary dashed line + live "N.N (N.N feet)" label,
+    disappears on mouseup, never persisted
+[x] Grid style popover: color, thickness, square-vs-hex type, per map
+[x] Map flip (horizontal + vertical) and 90-degree rotate (cumulative,
+    wraps at 360), both per floor
+[x] BUG FIX: shapes drawn and tokens dropped on a flipped/rotated floor
+    now land exactly under the cursor. Root cause was new points/shapes
+    being captured in raw screen space but then rendered a second time
+    through the flip/rotate transform (double-applying it). Fixed with an
+    explicit visual<->local coordinate conversion applied once, at commit
+    time, and by rendering the live draft preview outside the transform
+    entirely (same approach the ruler already used) so it always tracks
+    the cursor while dragging regardless of flip/rotate state.
+[x] Token art stays upright under flip (counter-scaled); tokens
+    deliberately rotate *with* the board under rotate (not counter-
+    rotated) - these were confirmed as the two different expected
+    behaviors (flip must not mirror art; rotate is "spin the board")
+
+DM PAGE HUB
+-------------------------------------------
+[x] DM page tabs: Maps / Encounters / Creatures / Quests / Notes
+[x] Quests and Notes remain empty "coming soon" placeholders
+[x] Advanced search: every DM table (Maps, Encounters, Monsters, NPCs,
+    Spells, Magic Items) has a search icon next to its "Add" button that
+    reveals a filter bar - free-text name search plus per-table chip
+    filters (Maps: kind; Encounters: theme/CR/creature type; Creatures:
+    relation/importance; Spells: school/level; Magic Items: rarity/
+    attunement)
+
+CREATURES, SPELLS, MAGIC ITEMS
+-------------------------------------------
+[x] Creatures tab is now a 4-way hub: Monsters (vanilla stat blocks),
+    NPCs (named campaign people, including bosses), Spells, Magic Items -
+    each with its own table + add/edit dialog + search/filter
+[x] Full stat-block data model per creature, plus relation, importance,
+    profession, and a grid-relative default/current size
+[x] Read-only stat block viewer matching your example table; opens from
+    the Creatures table OR by double-clicking a linked token on the map or
+    in the initiative bar (falls back to a "No stats available for this
+    token" warning for tokens with no linked creature - generic library
+    tokens, custom encounter entries)
+[x] Seeded: Goblin (your exact stat block), Hobgoblin, Merfolk, Pixie
+    (monsters); Mira the Blacksmith and Captain Thorne (NPCs, to
+    demonstrate the category); 4 sample spells; 3 sample magic items
+
+PER-TOKEN DEFAULT/CURRENT SIZE
+-------------------------------------------
+[x] Every token definition and creature has a "default size" (grid-
+    relative multiplier, 1.0 = one full grid cell) and a "current size"
+    that's actually used the next time it's dragged onto the map -
+    editable inline (with a reset-to-default icon) in 3 places: the
+    toolbar's Favorites tab, the sidebar Tokens panel, and the Creatures
+    table
+[x] Placed-token pixel size = current size x the map's grid size, clamped
+    to the existing 16-110px range
+[x] Initiative bar always uses fixed box sizes regardless of token size,
+    as requested
+
+ENCOUNTERS
+-------------------------------------------
+[x] Encounter Management: table (name, CR, theme, type of mobs, tags,
+    creature count) + add/edit dialog + advanced search/filter
+[x] Creatures added to an encounter: picked from the library (search) or
+    entered as one-off custom entries (name + image), each with a quantity
+[x] Manage Tokens' "Encounters" tab: search + filter (theme/CR/creature
+    type) the list of saved encounters, each row shows its CR; pick +
+    "Lock" an encounter to the floor; locked view shows "left: N" per
+    creature and drag-to-place; popover widened (300px -> 360px) to fit
+    the new search/filter row comfortably
+
+INITIATIVE TRACKING
+-------------------------------------------
+[x] Sidebar flow: Roll Initiative (d20 + DEX modifier, shown as an
+    editable "d20 [_] + N = total" breakdown per creature) -> Start
+    Encounter (or Cancel) -> Next Turn / End Encounter
+[x] Floating initiative bar over the top of the map: current-turn box
+    larger, border color matches the token's outline color, click the
+    current box to advance the turn
+[x] Rebuilt 3-state collapse: full (horizontally-scrollable row, themed
+    thin scrollbar) -> compact (previous/current/next only - 3 boxes if
+    there's no "previous" yet, 4 otherwise; current at 50% opacity, the
+    others at 80% transparent) -> hidden -> back to full. Collapse button
+    is now a fixed element next to the row instead of trailing after
+    however many tokens there are.
+[x] Bar background is more transparent (25% black, was 50%) so more of
+    the map shows through
+[x] Combat tracking moved into the Initiative panel itself (no need to
+    switch to Manage Tokens while running the encounter): each active
+    row expands to show current/max HP, a concentration checkbox,
+    death-save pips (once HP <= 0), and a freeform notes field for spell
+    slots/abilities/anything else
+
+DICE ROLLER
+-------------------------------------------
+[x] Toolbar icon opens a popover: pick a die (d4-d20), pick a count,
+    "Roll" triggers a ~0.7s animated number-cycle before settling on the
+    real result; shows each die plus the total. Fully ephemeral, nothing
+    persisted.
+
+KNOWN SIMPLIFICATIONS / NOT DONE
+-------------------------------------------
+[ ] Map flip/rotate pivot around the *stage* center, not the exact
+    background image center - visually identical whenever the image is
+    centered in the stage (the normal case)
+[ ] Hex/square grids are purely visual - no snapping for tokens or shapes
+[ ] Hobgoblin, Merfolk, and Pixie still have no real token art (fallback
+    initial-letter avatar shown instead, on the map, in the initiative
+    bar, and in every list)
+[ ] Encounter "Challenge Rating" is a freeform text field, not
+    auto-computed from the creatures added
+[ ] Combat tracking is intentionally lightweight (HP, concentration,
+    death saves, freeform notes) - no structured spell-slot/resource
+    system, per your "don't bother too much, I'll improve it later" note
+[ ] Custom (one-off) encounter creature entries don't have the
+    default/current size split - just a flat size, since there's no
+    reusable definition to "reset to" for a one-off entry
+[ ] Undo/redo covers floor-level edits only (tokens, shapes, flip,
+    rotate) - grid settings, initiative/roll state, and encounter lock
+    changes are intentionally excluded (not typical "oops" targets, and
+    would flood the history stack)
+[ ] "Cancel" only exists in the pre-start "rolling" initiative state;
+    once active, "End Encounter" is the one-click way to stop it
+[ ] Random Encounters is still a visible but disabled placeholder button
+[ ] Advanced table search is a shared visual pattern with per-table
+    filter logic, not one generic column-introspection engine - adding a
+    new filterable column to a table means adding a chip group for it,
+    not something that happens automatically
+[ ] No automated regression test suite - verified via manual Playwright
+    smoke tests during development
+[ ] Touch/mobile input hasn't been tested for any of the newer
+    interactions (drag-and-drop, drawing tools, dice roller)
+
+WHAT'S NEXT (suggested order)
+--------------------------------
+1. Real token art for Hobgoblin, Merfolk, Pixie (and any NPCs you add)
+2. Grid snapping for tokens/shapes on both square and hex grids
+3. Random Encounters generator
+4. Structured spell-slot / resource tracking during combat, if the
+   freeform notes field stops being enough
+5. Touch/mobile pass for the drawing tools and dice roller

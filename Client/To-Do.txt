@@ -1,0 +1,9 @@
+Cross-platform web app — a single React web application that looks and works well on both phone and PC.
+Large detailed maps, optimized — display maps with a lot of detail while staying performant.
+
+
+Enable/disable layers — toggle map layers on and off independently.
+
+Effects on creatures — apply visual status effects to creatures/tokens on the map.
+Fog of war — hide unexplored areas of the map from players.
+Line-of-sight (optional) — optionally drive fog of war with line-of-sight physics so vision is blocked by walls.

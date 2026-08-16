@@ -1,0 +1,12 @@
+1. Quests are not connected to the DB.
+2. Factions are not connected to the DB.
+3. Random encouners ar not connected to the DB.
+4. Add a tutorial button to the navbar. If the the button is clicked then a tutorial should be show with the tools being higlished (dark everywhere except the tool) and present what the tool does by asking the user to click it and stuff like that.
+5. Write a good read me file to make it easier for running this application (use images if possible or tell me what screenshots I need to include).
+6. Push the code to github https://github.com/Nithin-Kamineni/WorldWatcher
+
+
+
+
+
+6. Initiative row has tokens in the horizontal row. I want to display the effect/spell the token was on if the token was on any effect

@@ -1,0 +1,91 @@
+WorldWatcher - Map Page Feature Progress
+=========================================
+Last updated: 2026-08-14
+
+This tracks the "right sidebar + bottom toolbar" feature set requested for
+the Map (Konva canvas) page. Check marks = working and verified in-browser
+(Playwright, no console errors). Everything below lives under
+src/components/map/ (sidebar/ and toolbar/ subfolders) and src/pages/MapPage.tsx,
+with supporting types in src/types/token.ts, src/types/shape.ts, src/types/tool.ts,
+and store logic in src/store/useTokenLibraryStore.ts + useCampaignStore.ts.
+
+RIGHT SIDEBAR (collapsible, icon rail when collapsed)
+-------------------------------------------------------
+[x] Collapsible sidebar with an icon-only rail (Tokens icon, Floors icon,
+    collapse/expand chevron). Clicking an icon expands the sidebar to that
+    section; clicking the active section's icon again collapses it.
+[x] Tokens section:
+    [x] Shows currently available tokens (premade: Player, Zombie, seeded
+        from src/assets/tokens/player.png and zombie-token.png)
+    [x] Add new token (dialog: name + image upload)
+    [x] Edit existing token (same dialog, pre-filled)
+    [x] Delete token
+    [x] Favorite/unfavorite a token (star toggle)
+    [x] Search tokens by name
+    [x] Tokens are drag sources (native HTML5 drag) for placing on the map
+[x] Floors section:
+    [x] Vertical list of the map's floors (thumbnail + name), same concept
+        as the old horizontal switcher, click to switch the active floor
+
+BOTTOM TOOLBAR
+----------------
+[x] 1. Grid: enable/disable toggle + slider to change grid size (px),
+       persisted per-map (MapData.gridEnabled / gridSize)
+[x] 2/3/4. Zoom in, zoom out, reset view (centered zoom via the Konva Stage
+       ref, same math as scroll-wheel zoom)
+[x] 5. Semi-transparent AoE shapes: circle AND cone (Konva Wedge), placed by
+       click-drag on the canvas (drag defines radius / cone facing), with a
+       color swatch + preset palette + native color picker for the shape color
+[x] 6. Eraser: click a placed AoE shape while the eraser tool is active to
+       remove it (tokens are not affected by the eraser - they're deleted
+       via the token manager panel instead, see below)
+[x] 7. Token manager ("Manage tokens" icon on the toolbar) opens a popover
+       with two tabs:
+         - "This Floor": every token placed on the current floor, each with
+           a size slider (32-200px) and an outline color picker. Outline is
+           a constant 2px stroke that is drawn at the token's current radius,
+           so it visually scales with token size as requested. Includes a
+           delete (remove from map) action per token.
+         - "Favorites": favorited tokens from the library, drag-and-drop
+           straight onto the map from here
+[x] 8. Right-click (context menu) on a token placed on the map opens the same
+       popover, anchored at the click position, on the "This Floor" tab,
+       with that specific token highlighted
+[x] 9. Favorite tokens drag-and-drop onto the map from both the sidebar
+       Tokens panel and the toolbar's Favorites tab
+
+DATA MODEL / PERSISTENCE
+---------------------------
+[x] Tokens, AoE shapes, and grid settings are stored in Zustand
+    (useCampaignStore / useTokenLibraryStore), not local component state, so
+    they survive navigating away and back within the same browser session
+    (still no backend - everything resets on a full page reload, consistent
+    with the rest of the app's Phase 1 scope)
+[x] Placed tokens and AoE shapes are stored PER FLOOR (MapFloor.placedTokens,
+    MapFloor.shapes), so switching floors shows a clean slate per floor
+
+KNOWN SIMPLIFICATIONS / NOT DONE YET
+---------------------------------------
+[ ] Grid does not yet snap tokens/shapes to grid cells - it's purely visual
+[ ] No fog of war / line-of-sight (still out of scope per the original design doc)
+[ ] No "select" tool for multi-selecting or resizing tokens directly on the
+    canvas by dragging a handle - resizing is done only through the token
+    manager popover's slider, not by dragging a corner/edge on the token itself
+[ ] AoE shapes are fixed in the two requested types (circle, cone) - no
+    rectangle/line template, no ability to edit a shape's size/color after
+    it's placed (only delete-and-redraw via the eraser)
+[ ] Cone angle is fixed at ~53 degrees (a typical 5e cone template), not
+    user-adjustable
+[ ] Touch support for the new toolbar interactions (drawing AoE shapes,
+    drag-and-drop tokens) has not been tested - only mouse/desktop flows
+    were verified. Pinch-zoom/pan from Phase 1 still works.
+[ ] No undo/redo for any map edits (token placement/move, shapes, grid)
+[ ] Initiative order bar was intentionally skipped per your instruction
+
+WHAT'S NEXT (suggested order)
+--------------------------------
+1. Grid snapping for tokens (and optionally shapes)
+2. On-canvas token resize handle (drag corner) as an alternative to the
+   slider in the token manager
+3. Touch/mobile pass for the new toolbar tools
+4. Undo/redo for map edits

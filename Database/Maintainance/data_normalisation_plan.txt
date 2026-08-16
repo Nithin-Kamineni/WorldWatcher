@@ -1,0 +1,548 @@
+WORLDWATCHER - 5ETOOLS PYTHON IMPORTER: DATA NORMALIZATION PLAN
+===================================================================
+Status: DESIGN ONLY - describes how the importer SHOULD work, no code
+here. Pairs with database_scehma.txt (read that first - this plan
+targets the tables defined there).
+
+Sources this plan targets:
+  - JSON data:   https://github.com/5etools-mirror-3/5etools-src/tree/main/data
+  - Image data:  https://github.com/5etools-mirror-3/5etools-img/tree/main
+
+Both repos are treated as READ-ONLY inputs. The importer never writes
+back to them.
+
+
+0. GOALS (recap from the brief)
+==================================
+  - LOSSLESS: every field from every imported file ends up in
+    raw_entities.raw_data, no matter what. Fields also modeled
+    relationally get COPIED into SQL columns, never MOVED out of JSON.
+  - IDEMPOTENT: running the importer twice on unchanged data produces
+    zero new rows and zero changed rows. Running it after the source
+    files changed updates exactly the affected rows.
+  - A thin translation layer, not a rules engine: the importer maps
+    "important fields" -> SQL columns and dumps everything else into
+    JSONB. It does not try to interpret D&D rules.
+
+
+1. INPUTS
+===========
+1.1 data/ (5etools-src)
+  A directory of many JSON files, generally one "collection" per file,
+  each holding an array under a type-named key, e.g.:
+    bestiary/bestiary-<source>.json     -> { "monster": [ {...}, ... ] }
+    bestiary/fluff-bestiary-<source>.json -> flavor text + image refs
+    spells/spells-<source>.json         -> { "spell": [ {...}, ... ] }
+    items.json / items-base.json        -> { "item": [...] } / { "baseitem": [...] }
+    class/class-<name>.json             -> classes, subclasses, class features
+    conditionsdiseases.json             -> { "condition": [...], "disease": [...], "status": [...] }
+    feats.json, backgrounds.json, races.json, vehicles.json, deities.json,
+    objects.json, trapshazards.json, variantrules.json, optionalfeatures.json,
+    rewards.json, tables.json, languages.json, actions.json, books.json,
+    adventures.json, psionics.json, decksets/*, recipes.json, encounters.json,
+    and others.
+  Plus index/meta files (names vary by 5etools version, but conceptually):
+    a source list (book/adventure metadata: title, source abbreviation,
+    group, publication date, etc.) - this is what seeds the `sources`
+    table - and per-category index files mapping source abbreviation to
+    the filename that contains it.
+
+  IMPORTANT: do not hardcode an assumed file list. Step 1 of the importer
+  is always "walk data/ recursively, and for every .json file, sniff its
+  top-level keys against a registry of known entity-type keys (monster,
+  spell, item, class, condition, disease, ...)". New files/categories
+   5etools adds later are picked up automatically as "unknown" entity
+  types and still land safely in raw_entities (see section 5).
+
+1.2 img/ (5etools-img)
+  A directory tree of images, organized by category, generally mirroring
+  the data/ structure (bestiary tokens/art, item art, etc.), keyed by
+  source abbreviation and entity name.
+
+  IMPORTANT: like the JSON side, do not hardcode an assumed path scheme
+  from memory. The image importer's first step is to walk img/
+  recursively and build an in-memory index of {relative_path -> file},
+  then match entries against known (entity_type, source, name) triples
+  discovered from the JSON side. Treat "no image found for entity X" as
+  a normal, logged, non-fatal outcome - not every entity has art.
+
+
+2. PIPELINE STAGES (high level)
+===================================
+  Stage 0  - Discover
+             Walk data/, classify every JSON file's top-level arrays
+             against the known entity-type registry. Walk img/, index
+             every file by path.
+
+  Stage 1  - Load sources
+             Parse book/adventure metadata into `sources` rows (upsert
+             by abbreviation+edition). Every other stage needs this
+             done first, since almost everything has a source_id FK.
+
+  Stage 2  - Raw ingest (always, for everything)
+             For every entity found in Stage 0, regardless of whether it
+             will be relationally projected: compute source_key, compute
+             content_hash of the ORIGINAL (unresolved) object, upsert
+             into raw_entities. This stage alone guarantees losslessness
+             even if every later stage is buggy or incomplete.
+
+  Stage 3  - Resolve
+             For entity types that use 5etools' `_copy` / `_versions`
+             mechanism (mainly creatures, but also some items/other
+             types), resolve copies and expand versions into flattened,
+             standalone objects, in memory. See section 6.
+
+  Stage 4  - Project
+             For entity types WorldWatcher models relationally
+             (creature, spell, item, condition - per database_scehma.txt
+             section 1), map the resolved object's fields into SQL
+             columns per the extraction tables in section 4 below, and
+             upsert into the matching content table. Store the RESOLVED
+             object (not the raw `_copy` stub) in that row's own
+             raw_data column. Update raw_entities.linked_table/linked_id
+             to point at the new row.
+
+  Stage 5  - Assets
+             For every projected entity that can have art (creature,
+             item so far), look up matching image(s) in the img/ index
+             by (entity_type, source, name), hash the file, upsert into
+             `assets` (dedupe by sha256), copy/link the file into
+             WorldWatcher's own asset storage, and set the entity's
+             portrait_asset_id/token_asset_id/image_asset_id FK.
+
+  Stage 6  - Creature sub-entities
+             For creatures specifically, also project traits/actions/
+             bonus actions/reactions/legendary actions/mythic actions
+             into `creature_actions` rows (upsert by
+             (creature_id, action_type, name)).
+
+  Stage 7  - Report
+             Emit the import summary (section 9).
+
+Every stage is independently re-runnable. A partial failure in Stage 4
+for one entity must not stop Stage 4 from continuing to the next entity
+(see section 8), and must not have prevented Stage 2 from already
+capturing that entity losslessly.
+
+
+3. WHERE THE CODE LIVES (conceptual layout - no code written yet)
+=====================================================================
+Suggested module boundaries (names indicative, adjust freely):
+
+  importer/
+    config.py            - paths to the two source repos, DB connection,
+                            asset output dir, CLI flag definitions
+    discovery.py          - Stage 0: file walking + entity-type sniffing
+    sources.py            - Stage 1
+    raw_ingest.py          - Stage 2
+    copy_resolver.py       - Stage 3 (_copy / _versions resolution)
+    hashing.py            - canonical JSON + sha256 helpers, shared by
+                            raw_ingest and assets
+    projectors/
+      creature.py          - Stage 4 for creatures + Stage 6 (actions)
+      spell.py
+      item.py
+      condition.py
+    assets.py             - Stage 5 (image indexing, matching, hashing,
+                            copy-to-storage, dedupe)
+    db.py                 - upsert helpers (generic "upsert by natural
+                            key" used by every projector)
+    report.py             - Stage 7
+    cli.py                 - entry point: --dry-run, --only-types,
+                            --only-sources, --limit, --data-dir, --img-dir
+
+One projector module per entity type keeps the "thin translation layer"
+promise honest - each file is just a field-mapping table plus a call to
+the shared upsert helper, not a growing rules framework.
+
+
+4. FIELD EXTRACTION MAPPING (per entity type)
+================================================
+General rule for every mapping below: anything NOT listed as "-> column"
+stays ONLY in raw_data. This is intentionally a small list - see
+database_scehma.txt section 5 ("WHAT NOT TO NORMALIZE") for the full
+rationale.
+
+4.1 Creature (5etools "monster")
+  name                     -> creatures.name
+  source                   -> resolve to sources.id -> creatures.source_id
+  page                     -> (kept in raw_data only; not modeled)
+  size                     -> creatures.size
+  type (string or object)  -> creatures.creature_type / creature_subtype
+                              (5etools `type` can be a plain string like
+                              "humanoid" or an object like
+                              {"type":"humanoid","tags":["goblinoid"]} -
+                              normalize both shapes into the two columns)
+  alignment (array/string) -> creatures.alignment (joined to a display
+                              string, e.g. ["L","E"] -> "Lawful Evil")
+  ac (array/object/number) -> creatures.armor_class (take the first/
+                              highest numeric AC value for the column;
+                              the full array with conditional AC notes
+                              stays in raw_data)
+  hp.average               -> creatures.hit_points
+  hp.formula               -> creatures.hit_dice
+  speed                    -> raw_data only (see WHAT NOT TO NORMALIZE)
+  str/dex/con/int/wis/cha  -> creatures.strength..charisma
+  skill (object)           -> flattened to a display string ->
+                              creatures.skills (e.g. "Stealth +6")
+  senses (array)           -> flattened to a display string ->
+                              creatures.senses
+  passive                  -> creatures.passive_perception
+  languages (array/string) -> flattened to a display string ->
+                              creatures.languages
+  cr (string, may be an
+      object for special
+      lair/coven CR)        -> creatures.challenge_rating_display (raw
+                              string, e.g. "1/8") AND
+                              creatures.challenge_rating (parsed
+                              fraction -> NUMERIC, e.g. 0.125)
+  trait[] (short summary)  -> flattened to creatures.traits AND fully
+                              projected into creature_actions
+                              (action_type='trait')
+  action[]                 -> creature_actions (action_type='action')
+  bonus[]                  -> creature_actions (action_type='bonus_action')
+  reaction[]               -> creature_actions (action_type='reaction')
+  legendary[]              -> creature_actions (action_type='legendary')
+  mythic[]                 -> creature_actions (action_type='mythic')
+  legendaryGroup           -> raw_data only for now (lair actions live
+                              in a separate 5etools collection keyed by
+                              name+source; link informally via raw_data,
+                              real relational link is a "future
+                              normalization candidate")
+  hasToken / hasFluffImages -> consulted by the asset stage (Stage 5) to
+                              decide whether to even look for art; not a
+                              stored column
+  everything else (resist,
+    immune, vulnerable,
+    conditionImmune,
+    spellcasting,
+    environment, traitTags,
+    actionTags, damageTags,
+    miscTags, savingThrowForced,
+    variant, ...)           -> raw_data only
+
+  category (monster vs npc): 5etools has no such distinction - EVERY
+  imported bestiary entry is category='monster'. NPC-flavored entities
+  (with relation/importance/profession/motivations/etc.) are exclusively
+  homebrew, created inside the app, campaign-scoped (campaign_id set).
+  The importer never sets category='npc' and never touches the npc-only
+  columns.
+
+4.2 Spell
+  name, source, page        -> spells.name / source_id / (raw_data)
+  level                     -> spells.level
+  school                    -> spells.school (resolve single-letter code,
+                                e.g. "A" -> "Abjuration", via a small
+                                static lookup table)
+  time[]                    -> flattened -> spells.casting_time
+  range                     -> flattened -> spells.range
+  duration[]                -> flattened -> spells.duration
+  (duration[].concentration) -> spells.concentration BOOLEAN
+  meta.ritual               -> spells.ritual BOOLEAN
+  components                -> spells.components (structured JSONB,
+                                copied close to verbatim) AND
+                                spells.components_display (flattened
+                                string, e.g. "V, S, M (a bit of fur)")
+  classes                   -> spells.classes (structured JSONB) AND
+                                spells.classes_display (flattened
+                                comma list)
+  entries[] / entriesHigherLevel -> spells.description (flattened to
+                                plain text/markdown-ish string; original
+                                structured entries stay in raw_data)
+  everything else (damageInflict,
+    savingThrow, areaTags,
+    miscTags, conditionInflict,
+    scalingLevelDice, ...)   -> spells.area / damage / saving_throw /
+                                effects / mechanics JSONB where an
+                                obvious bucket exists, else raw_data only
+
+4.3 Item
+  name, source, page         -> items.name / source_id / (raw_data)
+  type / typeAlt              -> items.item_type (flattened display text)
+  rarity                      -> items.rarity (normalize 5etools' values
+                                 - "none" -> 'common', unrecognized ->
+                                 'unknown')
+  reqAttune (bool or string)   -> items.requires_attunement BOOLEAN,
+                                 plus items.attunement_requirement TEXT
+                                 when it's a qualifying string (e.g.
+                                 "by a spellcaster")
+  weight                      -> items.weight
+  value                       -> items.cost JSONB
+  entries[]                   -> items.description (flattened)
+  property / properties        -> items.properties JSONB
+  charges                     -> items.charges JSONB
+  everything else              -> items.effects / raw_data
+
+4.4 Condition / Disease / Status (conditionsdiseases.json)
+  name, source                -> conditions.name / source_id
+  entries[]                   -> conditions.description (flattened)
+  which array it came from
+    (condition/disease/status) -> conditions.condition_type
+  everything else              -> raw_data only
+
+4.5 Everything else (class, race, feat, background, vehicle, deity,
+  object, trap/hazard, variantrule, optionalfeature, reward, table,
+  language, action, book, adventure, psionic, deck, recipe, ...)
+  -> NOT projected into a relational table today. Lands in raw_entities
+     ONLY (import_status='raw_only', linked_table=NULL). This is exactly
+     what raw_entities is for, and it's fine - these become projectors
+     later (see database_scehma.txt section 6) once the app actually
+     needs them, without re-downloading or re-parsing anything.
+
+
+5. DETERMINISTIC IDENTIFIERS
+===============================
+  source_key (raw_entities): normalize(name) + '|' + lower(source
+    abbreviation), e.g. "goblin|mm". This is 5etools' own de-facto
+    uniqueness convention (name+source), so it's safe to rely on.
+  slug (creatures/spells/items): same slugify() algorithm the app
+    already uses client-side (lowercase, non-alphanumeric -> '-', trim
+    leading/trailing '-'), scoped uniquely by (source_id) or
+    (campaign_id) - never global (see database_scehma.txt section 10).
+  UUIDs are never derived from content - they're generated once when a
+  row is first created, then always looked up by natural key
+  (source_key / slug+scope) on every subsequent import run, so re-runs
+  update the SAME row instead of minting a new UUID.
+
+
+6. `_copy` AND `_versions` RESOLUTION
+========================================
+5etools' `_copy` mechanism lets an entity say "start from this other
+entity (identified by name+source), then apply these modifications"
+instead of repeating the whole statblock. `_versions` lets one JSON
+object expand into several related entities (e.g. size variants).
+
+Resolution algorithm (Stage 3, in-memory, before any DB write):
+  1. Load every entity of a type (e.g. all monsters across all bestiary
+     files) into a dict keyed by (name, source).
+  2. For any entity with a `_copy` key: look up the base entity by its
+     `_copy.name` + `_copy.source`. If the base itself has an unresolved
+     `_copy`, resolve it first (recursive, memoized, with cycle
+     detection - if a cycle is detected, log it as a malformed record
+     and fall back to raw-only ingest for that entity rather than
+     crashing).
+  3. Deep-clone the resolved base object, then apply `_copy._mod`
+     per-field operations: plain key overwrite for scalar/object
+     replacements, and the array operators 5etools uses (prepend/
+     append/replace/remove, sometimes keyed by matching an existing
+     array item's `name` via regex) for array fields like `action`/
+     `trait`. Implement the operators actually observed in real data
+     rather than the full theoretical spec - log and raw-only-ingest
+     anything using an operator the importer doesn't recognize yet
+     (never guess).
+  4. If the entity also has `_versions`, expand it into N separate
+     resolved objects (one per version), each getting its own
+     source_key (append a version discriminator, e.g.
+     "goblin (variant)|mm").
+  5. The result of this stage is a flat list of fully-resolved objects,
+     each still carrying a pointer back to its ORIGINAL unresolved JSON
+     (for raw_entities - see next paragraph).
+
+IMPORTANT distinction: raw_entities.raw_data always stores the ORIGINAL,
+UNRESOLVED object exactly as it appeared in the source file (true
+lossless capture - if the resolver has a bug, the original is still
+intact and can be re-resolved later). The projected content table's own
+raw_data column (e.g. creatures.raw_data) stores the RESOLVED, flattened
+object, because that's what the application actually consumes.
+
+
+7. CONTENT HASHING & IDEMPOTENT UPSERT
+=========================================
+  - Canonicalize before hashing: recursively sort object keys, use a
+    stable separator/encoding, then sha256 the result. This makes the
+    hash insensitive to key ordering so re-formatting upstream JSON
+    doesn't cause spurious "changed" detections.
+  - raw_entities: hash the ORIGINAL object. Upsert by
+    (source_file, source_key): if the row exists and the hash matches,
+    skip (no-op, just bump nothing). If it exists with a different hash,
+    UPDATE raw_data/content_hash/updated_at. If it doesn't exist,
+    INSERT.
+  - Projected tables: upsert by natural key (slug+source_id, or
+    slug+campaign_id for homebrew). Only re-run the field-extraction
+    mapping and write to the row if content_hash changed (or if the row
+    doesn't have a linked projection yet) - this keeps re-imports of an
+    unchanged 5etools dataset a fast no-op.
+  - Never DELETE rows automatically when a source file entry disappears
+    upstream. Log it as "missing upstream" and let a human decide
+    (upstream removals are rare and usually mean a rename, which the
+    importer would otherwise misdetect as a delete+create pair, losing
+    the stable UUID other tables may already reference).
+
+
+8. IMAGE PIPELINE (5etools-img)
+==================================
+  1. Build an index of every file under img/ once per run (path,
+     filename, sha256, size).
+  2. For each projected entity that can have art (creature, item),
+     search the index for a plausible match using (entity_type, source
+     abbreviation, entity name) - try a few naming variants (exact name,
+     slugified name, common punctuation differences) since 5etools'
+     actual filenames aren't perfectly regular. Log a clear "no image
+     found" (not an error) when nothing matches - most entities won't
+     have art initially and that's fine.
+  3. For creatures specifically, look for BOTH a token-style image and a
+     full portrait-style image where the repo has them; wire up
+     token_asset_id and portrait_asset_id separately.
+  4. For every matched file: hash it (sha256). If an `assets` row with
+     that hash already exists, reuse it (dedupe - the same art is often
+     reused across reprints/variants). Otherwise copy the file into
+     WorldWatcher's own asset storage directory (layout per
+     database_scehma.txt section 2.3), record width/height/mime_type/
+     file_size, and insert the new `assets` row with source='5etools-img'
+     and source_path = the original repo-relative path (for
+     traceability/re-sync later).
+  5. Update the owning entity's *_asset_id FK.
+  6. Never modify files in the 5etools-img checkout itself - only read
+     from it.
+
+
+9. CLI / CONFIGURATION
+=========================
+Minimum flags the importer should support:
+  --data-dir PATH        path to the 5etools-src data/ checkout
+  --img-dir PATH         path to the 5etools-img checkout
+  --asset-output PATH    where to copy matched images to
+  --db-url URL           Postgres connection string
+  --only-types a,b,c     restrict Stage 4 projection to these entity
+                         types (creature, spell, item, condition, ...) -
+                         Stage 2 (raw ingest) still runs for everything
+                         regardless, since that's the lossless guarantee
+  --only-sources MM,XPHB restrict to specific source abbreviations - the
+                         primary tool for the "test on 15-20 entities
+                         first" workflow (point it at a small hand-picked
+                         subset file, or filter by name list)
+  --limit N              hard cap on number of entities processed per
+                         type, for smoke tests
+  --dry-run              run every stage's logic and print what WOULD
+                         happen, but issue no writes (useful before a
+                         big re-import after upstream changes)
+  --verbose / --quiet    logging verbosity
+
+Config should also support a small allow-list file of specific entity
+names to import (for the 15-20-entity test set in section 11), so the
+test run doesn't depend on knowing which source file each test creature
+happens to live in.
+
+
+10. ERROR HANDLING
+=====================
+Classify every record outcome and keep counters per class (see report
+format in section 12):
+  IMPORTED   - new row created
+  UPDATED    - existing row's content changed and was updated
+  UNCHANGED  - content hash matched, nothing written
+  SKIPPED    - deliberately not projected (e.g. entity type has no
+              projector yet - still raw-ingested)
+  MALFORMED  - the record itself is broken JSON / missing a required
+              field the projector truly cannot proceed without (e.g. no
+              `name`) - still attempt raw ingest if the file at least
+              parsed; log with file + key
+  UNSUPPORTED - uses a JSON shape/operator the importer doesn't know how
+              to handle yet (e.g. an unrecognized `_copy` mod operator) -
+              falls back to raw-only ingest, never crashes the run
+  ERROR      - unexpected exception during processing of ONE record -
+              caught, logged with full context (file, key, entity type,
+              stack trace), and processing continues with the next
+              record. A single bad record must never abort the whole
+              import.
+
+The only things that should legitimately stop the whole run early are:
+  - cannot connect to the database
+  - cannot read the configured data-dir/img-dir at all (path doesn't
+    exist)
+  - an explicit --dry-run finished (exit 0, nothing written)
+
+
+11. TEST PLAN (run BEFORE importing everything)
+===================================================
+Do not import the whole dataset on the first real run. First import a
+deliberately difficult hand-picked set (use --only-sources / an allow-
+list, per section 9) covering:
+
+   1. Goblin                          - ordinary baseline monster
+   2. A dragon                        - large stat block, many actions
+   3. A legendary monster              - legendary[] actions
+   4. A mythic monster                 - mythic[] actions
+   5. A spellcaster monster            - spellcasting block in raw_data
+   6. A monster with a reaction         - reaction[]
+   7. A monster with a bonus action     - bonus[]
+   8. A monster with a recharge ability - "recharge" text parsing
+   9. A monster with multiple damage
+      types in one attack               - damage_formula/damage_type
+                                          extraction from a compound entry
+  10. A monster with unusual movement   - speed stays in raw_data, verify
+                                          it's actually there
+  11. A monster with a `_versions` entry - expansion into multiple rows
+  12. A monster using `_copy`           - resolution correctness
+  13. A monster with complex spellcasting (innate + prepared, say)
+  14. A monster with legendary actions AND a legendary group / lair
+  15. A monster with complex resistances (conditional, e.g.
+      "bludgeoning from nonmagical attacks")
+  16. A spell with a cone AoE
+  17. A spell with a sphere/cylinder/line area (pick 2-3 different
+      geometries across a few spells)
+  18. A complex magic item (charges, attunement requirement text,
+      multiple properties)
+  19. A plain NPC-shaped stat-block creature (e.g. "Bandit Captain" /
+      "Commoner") - confirms category stays 'monster' even for
+      humanoid/NPC-flavored stat blocks (see section 4.1 note)
+  20. One entity with a field the importer has never seen before
+      (pick anything obscure) - confirms it survives in raw_data intact
+      and doesn't crash the run
+
+For every one of these, after import, verify by hand:
+  [ ] every top-level key from the original JSON is present SOMEWHERE
+      (either as a SQL column or inside raw_data) - diff the original
+      file against raw_entities.raw_data (should be byte-for-byte
+      equivalent modulo key ordering) and against the projected row's
+      raw_data (should be the resolved/flattened equivalent)
+  [ ] source_key / slug are stable and correctly scoped
+  [ ] running the import a second time with no source changes produces
+      zero new rows and zero UPDATED counts (only UNCHANGED)
+  [ ] editing one field in the local copy of the test JSON and re-
+      running produces exactly one UPDATED row, and content_hash changed
+  [ ] matched images (where present) are linked, deduped correctly on a
+      second run, and traceable back to their source_path
+  [ ] creature_actions rows exist for every action/bonus/reaction/
+      legendary/mythic entry with the right action_type
+  [ ] no exception aborted the whole run for any of the 20 - if one was
+      deliberately malformed, confirm it was classified MALFORMED/
+      UNSUPPORTED/ERROR (as appropriate) and the other 19 still imported
+
+Only after this checklist passes on the hand-picked set should the
+importer be pointed at the full data/ and img/ directories.
+
+
+12. LOGGING / REPORTING
+==========================
+Produce, per run:
+  - a running log line per record: entity_type, source, name, outcome
+    class (section 10), and (for MALFORMED/UNSUPPORTED/ERROR) the reason
+  - a final summary grouped by entity_type x outcome class, e.g.:
+      creature:  imported=412  updated=3  unchanged=9001  skipped=0
+                 malformed=1  unsupported=2  error=0
+      spell:     imported=289  updated=0  unchanged=0  ...
+      (unmodeled types, e.g. class/feat/background/...): raw_ingested=N
+  - total wall-clock time, and asset stage stats (matched / deduped /
+    newly copied / no-image-found counts)
+  - the summary should be both printed to stdout AND written to a
+    timestamped log file, so a bad import run's exact per-record detail
+    is inspectable after the fact without re-running
+
+
+13. WHAT THE IMPORTER SHOULD NOT DO
+======================================
+  - Should not build a general-purpose "5etools schema mirror" - only
+    the fields listed in section 4 become columns; everything else is
+    JSONB, on purpose.
+  - Should not attempt to fully interpret game rules (e.g. computing
+    derived combat values beyond simple, unambiguous parsing like
+    "1/8" -> 0.125, or "V, S, M (...)" -> a components display string).
+  - Should not delete or rewrite files in the 5etools-src or
+    5etools-img checkouts.
+  - Should not silently swallow unknown fields - anything not explicitly
+    mapped in section 4 must still be present in raw_data.
+  - Should not require the whole dataset to import successfully before
+    any of it is usable - per-record isolation (section 10) means a
+    partial/interrupted run still leaves the database in a consistent,
+    query-able state.

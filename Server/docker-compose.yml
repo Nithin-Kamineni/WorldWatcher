@@ -1,0 +1,46 @@
+# Future deployment target. Local development currently runs the API
+# directly against the existing host Postgres instance (already
+# populated by Database/Maintainance/importer) - this compose file is
+# for when WorldWatcher_DB itself gets containerized too.
+#
+# To point this API container at your EXISTING host Postgres instead of
+# the bundled `db` service, set WW_DB_HOST=host.docker.internal in .env
+# and remove the `depends_on`/`db` service below.
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      WW_DB_HOST: db
+      WW_DB_PORT: 5432
+      WW_DB_NAME: ${WW_DB_NAME:-WorldWatcher_DB}
+      WW_DB_USER: ${WW_DB_USER:-postgres}
+      WW_DB_PASSWORD: ${WW_DB_PASSWORD:-1234}
+      WW_CORS_ORIGINS: ${WW_CORS_ORIGINS:-http://localhost:5173}
+      WW_ASSETS_DIR: /assets
+    volumes:
+      - ../Database/Maintainance/assets:/assets
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${WW_DB_NAME:-WorldWatcher_DB}
+      POSTGRES_USER: ${WW_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${WW_DB_PASSWORD:-1234}
+    volumes:
+      - worldwatcher_pgdata:/var/lib/postgresql/data
+      - ../Database/Maintainance/sql:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WW_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  worldwatcher_pgdata:

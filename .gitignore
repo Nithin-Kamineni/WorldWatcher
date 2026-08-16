@@ -1,0 +1,36 @@
+# Dependencies / virtual envs
+node_modules/
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build output
+dist/
+dist-ssr/
+build/
+
+# Env / secrets
+.env
+.env.local
+*.local
+
+# Logs
+*.log
+Server/server.log
+Server/server_restart.log
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# External / generated data - large, regenerable via Database/Maintainance/importer,
+# not meant to live in version control (5etools-img alone is multiple GB).
+Database/external-data/
+Database/Maintainance/assets/

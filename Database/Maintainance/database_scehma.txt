@@ -1,0 +1,1168 @@
+WORLDWATCHER - POSTGRESQL DATABASE SCHEMA (DESIGN DOCUMENT)
+=============================================================
+Status: DESIGN ONLY - nothing in this file has been implemented yet.
+Edit freely - this is the editable source of truth for the schema.
+
+This document was produced by:
+  1. Reading the actual current application source in Client/src (types,
+     stores, components) to find every field the UI already depends on.
+  2. Taking the hybrid relational+JSONB architecture and table list from
+     the design brief and adapting it so nothing the app already needs
+     gets lost or forced into a shape that doesn't fit.
+
+Every deviation from the original brief is called out explicitly with the
+word "DEVIATION" so you can push back on any of them.
+
+
+0. CORE PRINCIPLES (recap)
+===========================
+- Hybrid relational + JSONB. SQL columns for anything frequently searched,
+  filtered, sorted, joined, mutated by the app, or needed by the combat
+  engine. JSONB for everything irregular, source-specific, or not yet
+  queried by the app.
+- The importer must be LOSSLESS. Every field from 5etools ends up in
+  raw_data (on the projected row) and/or raw_entities (always, no matter
+  what). Nothing is silently dropped because there's no column for it.
+- The app never talks to 5etools JSON directly - it talks to these tables.
+- Ability modifiers are NEVER stored. Always computed from the ability
+  score column at read time: floor((score - 10) / 2).
+- Do not over-normalize. A JSONB column is the default; a new relational
+  column/table is something you have to justify (see "WHAT NOT TO
+  NORMALIZE" and "FUTURE NORMALIZATION CANDIDATES" below).
+- All primary keys are UUID (uuid_generate_v4() / gen_random_uuid()).
+- All tables that represent "content" (not join/link rows) get
+  created_at / updated_at TIMESTAMPTZ, defaulting to now().
+
+
+1. TABLE INVENTORY (grouped)
+==============================
+Import infrastructure:
+  1.  sources
+  2.  raw_entities
+  3.  assets
+
+Rules content (5etools + homebrew):
+  4.  creatures            (monsters AND npcs - matches app's unified model)
+  5.  creature_actions
+  6.  spells
+  7.  items
+  8.  conditions
+  9.  effects
+
+Campaign / world data:
+  10. campaigns
+  11. characters
+  12. locations
+  13. factions
+  14. quests                (new - app has an empty "Quests" tab already)
+
+Maps / VTT:
+  15. maps
+  16. map_floors            (new - see DEVIATION note in section 15)
+  17. map_tokens            (new - matches app's PlacedToken)
+  18. map_shapes            (new - matches app's AoEShape / drawn markers)
+  19. token_library          (new - matches app's reusable token art library)
+
+Encounters / Combat:
+  20. encounters
+  21. encounter_creatures   (new - upgraded from a JSONB array, see below)
+  22. combats
+  23. combatants
+
+23 tables total. Every one of them maps to something the current app
+either already has, or has a placeholder tab for (Quests), or is
+explicitly named in the "planned entities" list (Factions, Locations,
+Quests, Campaign/world data, Combat).
+
+
+2. PER-TABLE DETAIL
+=====================
+Legend for each column line:
+  column_name   TYPE   NULL|NOT NULL   -- note
+
+------------------------------------------------------------
+2.1 sources
+------------------------------------------------------------
+Purpose: books, sourcebooks, adventures, SRDs, homebrew sources, editions.
+PK: id
+
+Columns:
+  id                 UUID          NOT NULL  -- PK
+  name               TEXT          NOT NULL  -- "Monster Manual"
+  abbreviation       TEXT          NOT NULL  -- 5etools "source" code, e.g. MM, XPHB, ABH
+  edition            TEXT          NULL      -- '2014' | '2024' | 'homebrew' etc
+  source_type        TEXT          NOT NULL  -- core|supplement|adventure|homebrew|srd|unearthed_arcana
+  publisher          TEXT          NULL
+  publication_date   DATE          NULL
+  page               INTEGER       NULL      -- rarely meaningful at source level; entity-level `page` matters more
+  license            TEXT          NULL      -- 'OGL' | 'ORC' | 'proprietary' | 'CC-BY' ...
+  description        TEXT          NULL
+  raw_data           JSONB         NULL      -- original 5etools book/adventure metadata object, if any
+  created_at         TIMESTAMPTZ   NOT NULL
+  updated_at         TIMESTAMPTZ   NOT NULL
+
+Indexes: btree(abbreviation)
+Unique: (abbreviation, edition)
+Relationships: referenced by creatures, creature_actions(via creature), spells, items, conditions, effects(via condition), raw_entities(informally, by abbreviation text - see 2.2)
+
+
+------------------------------------------------------------
+2.2 raw_entities
+------------------------------------------------------------
+Purpose: lossless dump of EVERY imported 5etools object, including types
+the app doesn't model relationally at all (classes, races, feats,
+backgrounds, vehicles, deities, objects, traps/hazards, variant rules,
+optional features, rewards, tables, languages, books, adventures, decks,
+psionics, etc). This is the safety net - if a future schema change needs
+a field that isn't a column anywhere, it's still here.
+PK: id
+
+Columns:
+  id             UUID          NOT NULL  -- PK
+  source         TEXT          NOT NULL  -- source abbreviation, denormalized (works even before a `sources` row exists)
+  source_file    TEXT          NOT NULL  -- e.g. 'data/bestiary/bestiary-mm.json'
+  source_key     TEXT          NOT NULL  -- deterministic key, e.g. lower('goblin|mm') - see import plan
+  entity_type    TEXT          NOT NULL  -- 'creature'|'spell'|'item'|'condition'|'class'|'feat'|'background'|
+                                          --   'race'|'vehicle'|'deity'|'object'|'trap'|'hazard'|'variantrule'|
+                                          --   'optionalfeature'|'reward'|'table'|'language'|'action'|'disease'|
+                                          --   'status'|'book'|'adventure'|'deck'|'psionic'|'recipe'|'unknown'
+  raw_data       JSONB         NOT NULL  -- the COMPLETE original object, untouched
+  content_hash   TEXT          NOT NULL  -- sha256 of canonicalized raw_data, for change detection
+  linked_table   TEXT          NULL      -- e.g. 'creatures' - set when this entity was ALSO projected into a relational table
+  linked_id      UUID          NULL      -- id of the row in linked_table
+  import_status  TEXT          NOT NULL  -- 'projected' | 'raw_only' | 'error'
+  imported_at    TIMESTAMPTZ   NOT NULL
+  updated_at     TIMESTAMPTZ   NOT NULL
+
+Indexes: btree(entity_type), btree(content_hash), btree(linked_table, linked_id), gin(raw_data)
+Unique: (source_file, source_key)
+Relationships: loose/informal link to whichever table linked_table names (not a real FK, since linked_table is
+  polymorphic - enforce in application code, not in the database).
+
+NOTE (addition beyond the base brief): linked_table/linked_id/import_status/updated_at were added on top of the
+original 8-column proposal (id, source, source_file, source_key, entity_type, raw_data, content_hash,
+imported_at) because without them there is no way to answer "did this raw entity get projected into a real
+table, and if so which row?" without a full table scan of every content table. Drop them if you don't want the
+extra bookkeeping.
+
+
+------------------------------------------------------------
+2.3 assets
+------------------------------------------------------------
+Purpose: metadata + storage pointer for every image (creature art, tokens,
+item art, maps, portraits, faction/location art). Actual bytes live in
+filesystem/object storage, never in Postgres.
+PK: id
+
+Columns:
+  id             UUID          NOT NULL  -- PK
+  filename       TEXT          NOT NULL
+  storage_path   TEXT          NOT NULL  -- relative path in object storage, e.g. 'assets/creatures/tokens/mm/goblin.webp'
+  asset_type     TEXT          NOT NULL  -- creature_portrait|creature_token|item_image|map|npc_portrait|
+                                          --   faction_image|location_image|spell_image|character_portrait|
+                                          --   character_token|other
+  mime_type      TEXT          NULL
+  width          INTEGER       NULL
+  height         INTEGER       NULL
+  file_size      BIGINT        NULL
+  sha256         TEXT          NOT NULL  -- content hash, used to dedupe identical files
+  source         TEXT          NULL      -- '5etools-img' | 'upload' | 'generated'
+  source_path    TEXT          NULL      -- original path in the 5etools-img repo, for lossless re-sync traceability
+  raw_data       JSONB         NULL
+  created_at     TIMESTAMPTZ   NOT NULL
+
+Indexes: btree(asset_type), btree(storage_path)
+Unique: sha256   -- identical bytes are stored once and referenced from many tables
+Relationships: referenced by creatures (portrait/token), items (image), map_floors (background),
+  map_tokens (image), token_library (image), campaigns (image), factions (image), locations (image),
+  characters (portrait/token)
+
+Suggested filesystem layout (mirrors 5etools-img's own structure so the importer can copy near-verbatim):
+  assets/
+    creatures/
+      portraits/<source>/<slug>.webp
+      tokens/<source>/<slug>.webp
+    items/<source>/<slug>.webp
+    maps/<campaign>/<map>/<floor>.webp
+    tokens/                       (token_library art, campaign-agnostic)
+    portraits/                    (characters/NPCs, campaign-scoped)
+    factions/ locations/ campaigns/
+
+
+------------------------------------------------------------
+2.4 creatures
+------------------------------------------------------------
+Purpose: main stat-block table for BOTH monsters and NPCs. This
+intentionally matches what the app already does - `Creature.category` is
+'monster' | 'npc' on a single unified type, not two separate tables. Do
+not split this into monsters/npcs tables; the app's UI, filters, and
+encounter picker all assume one list.
+PK: id
+
+Columns:
+  id                        UUID        NOT NULL  -- PK
+  source_id                 UUID        NULL      -- FK -> sources.id (NULL = pure homebrew, no book)
+  campaign_id                UUID        NULL      -- FK -> campaigns.id (NULL = shared/global library entry;
+                                                    --   SET = campaign-specific homebrew monster/NPC, matches
+                                                    --   today's per-campaign creaturesByCampaignId store)
+  category                  TEXT        NOT NULL  -- 'monster' | 'npc'
+  name                      TEXT        NOT NULL
+  slug                      TEXT        NOT NULL  -- slugify(name), same algorithm the app's CreatureFormDialog already uses
+  edition                   TEXT        NULL
+  creature_type             TEXT        NULL      -- 'humanoid'|'dragon'|'construct'|...
+  creature_subtype          TEXT        NULL      -- parenthetical, e.g. "Goblinoid"
+  size                      TEXT        NULL
+  alignment                 TEXT        NULL
+  challenge_rating          NUMERIC     NULL      -- decimal for sorting/filtering, e.g. 0.125 for CR 1/8
+  challenge_rating_display  TEXT        NULL      -- original display string, e.g. "1/8" (app edits this directly today)
+  proficiency_bonus         INTEGER     NULL
+  armor_class                INTEGER     NULL
+  hit_points                 INTEGER     NULL
+  hit_dice                  TEXT        NULL      -- matches app's `hpFormula`, e.g. "2d6+2"
+  strength                  INTEGER     NULL
+  dexterity                 INTEGER     NULL
+  constitution               INTEGER     NULL
+  intelligence               INTEGER     NULL
+  wisdom                    INTEGER     NULL
+  charisma                  INTEGER     NULL
+  skills                    TEXT        NULL      -- freeform display line, matches app's single-line Skills field
+  senses                    TEXT        NULL      -- freeform display line, matches app
+  passive_perception         INTEGER     NULL
+  languages                 TEXT        NULL      -- freeform display line, matches app
+  traits                    TEXT        NULL      -- monster: special-ability summary; npc: personality traits (shared column, app reuses it the same way)
+  description                TEXT        NULL      -- long-form lore/notes, separate from `traits`
+  relation                  TEXT        NULL      -- npc-only: 'ally'|'enemy'|'neutral'
+  importance                TEXT        NULL      -- npc-only: boss|npc|side-character|recurring|important|quest-giver|minion|summon|monster
+  profession                 TEXT        NULL      -- npc-only
+  level                      INTEGER     NULL      -- npc-only
+  character_class            TEXT        NULL      -- npc-only ("class" avoided as a column-name choice purely for app/ORM
+                                                    --   code-gen friendliness - it is NOT a reserved word in Postgres itself)
+  motivations                TEXT        NULL      -- npc-only
+  pitfalls                   TEXT        NULL      -- npc-only
+  history                    TEXT        NULL      -- npc-only
+  portrait_asset_id           UUID        NULL      -- FK -> assets.id
+  token_asset_id              UUID        NULL      -- FK -> assets.id
+  default_size                NUMERIC     NOT NULL  -- grid-relative size multiplier, default 1
+  current_size                NUMERIC     NOT NULL  -- default 1 (see note below)
+  raw_data                   JSONB       NULL      -- full original 5etools bestiary object (NULL/absent for pure homebrew)
+  created_at                 TIMESTAMPTZ NOT NULL
+  updated_at                 TIMESTAMPTZ NOT NULL
+
+Indexes: gin(name gin_trgm_ops) for fuzzy search, btree(creature_type), btree(challenge_rating),
+  btree(source_id), btree(campaign_id), btree(category), gin(raw_data)
+Unique: (slug, source_id) where source_id is not null; (slug, campaign_id) where campaign_id is not null
+Relationships: creature_actions (1-many), map_tokens (1-many), encounter_creatures (1-many), combatants (1-many)
+
+Do NOT store: str/dex/con/int/wis/cha MODIFIERS. Compute floor((score-10)/2) in a SQL generated column or in
+  application code - do not persist it.
+
+Deliberately NOT columns yet (stay in raw_data until there's a concrete relational need - see section 5):
+  speed, resistances, immunities, vulnerabilities, spellcasting block, variants, legendary/mythic/lair block
+  (the STRUCTURED version lives in creature_actions once imported - raw_data always keeps the original too),
+  environment tags, source-specific fields.
+
+NOTE on current_size: this is genuinely UI/session state ("what size did the DM last drag this onto a map at"),
+not "what is a Goblin" data. It's kept on creatures for now because that's where the app currently has it
+(useCreatureStore). Flagged in section 6 as a future candidate to move to a per-user/per-campaign preference
+table once the app has real accounts.
+
+
+------------------------------------------------------------
+2.5 creature_actions
+------------------------------------------------------------
+Purpose: partially normalized monster/NPC actions, so the combat engine
+can query and execute them without parsing raw_data. NOT currently wired
+into the app UI (today's CreatureFormDialog just has one free-text
+`traits` field) - this table is forward-looking infrastructure for the
+combat engine, populated by the importer regardless.
+PK: id
+
+Columns:
+  id               UUID        NOT NULL  -- PK
+  creature_id       UUID        NOT NULL  -- FK -> creatures.id
+  name             TEXT        NOT NULL
+  action_type      TEXT        NOT NULL  -- 'trait'|'action'|'bonus_action'|'reaction'|'legendary'|'mythic'|'lair'|'other'
+  sort_order        INTEGER     NOT NULL  -- default 0, preserves original ordering
+  description       TEXT        NULL
+  attack_bonus      INTEGER     NULL
+  reach            INTEGER     NULL      -- feet
+  range_normal      INTEGER     NULL
+  range_long        INTEGER     NULL
+  damage_formula    TEXT        NULL      -- e.g. "2d6+3"
+  damage_type       TEXT        NULL
+  save_ability      TEXT        NULL      -- 'str'|'dex'|'con'|'int'|'wis'|'cha'
+  save_dc           INTEGER     NULL
+  recharge         TEXT        NULL      -- e.g. "5-6", "6" - needed for the "recharge ability" test case
+  uses_text         TEXT        NULL      -- e.g. "3/Day", "1/Long Rest"
+  area             JSONB       NULL      -- {type: POINT|CIRCLE|SPHERE|CONE|LINE|CUBE|CYLINDER|RECTANGLE|
+                                          --        HEMISPHERE|WALL|CUSTOM, ...geometry params}
+  mechanics         JSONB       NULL      -- multiattack composition, structured extras not worth their own columns
+  raw_data          JSONB       NULL      -- original 5etools trait/action/reaction/legendary/mythic entry object
+
+Indexes: btree(creature_id), btree(action_type)
+Relationships: creatures (many-1)
+
+Do not over-constrain `area` - it is intentionally a loose JSONB shape so new geometry kinds can be added
+without a migration.
+
+
+------------------------------------------------------------
+2.6 spells
+------------------------------------------------------------
+Purpose: main spell table.
+PK: id
+
+Columns:
+  id                 UUID        NOT NULL  -- PK
+  source_id           UUID        NULL      -- FK -> sources.id
+  campaign_id          UUID        NULL      -- FK -> campaigns.id (homebrew spell scoping)
+  name               TEXT        NOT NULL
+  slug               TEXT        NOT NULL
+  edition            TEXT        NULL
+  level              INTEGER     NOT NULL  -- 0 = cantrip
+  school             TEXT        NULL
+  casting_time        TEXT        NULL      -- display text, matches app
+  range              TEXT        NULL      -- display text, matches app
+  duration           TEXT        NULL      -- display text, matches app
+  concentration       BOOLEAN     NOT NULL  -- default false
+  ritual             BOOLEAN     NOT NULL  -- default false
+  components_display   TEXT        NULL      -- matches app's single-line Components field, e.g. "V, S, M (a bit of fur)"
+  components          JSONB       NULL      -- structured 5etools {v,s,m,m_text} shape, populated on import
+  classes_display      TEXT        NULL      -- matches app's freeform Classes field, e.g. "Wizard, Sorcerer"
+  classes             JSONB       NULL      -- structured per-class/subclass list, populated on import
+  description         TEXT        NULL
+  area               JSONB       NULL      -- same geometry shape as creature_actions.area
+  damage             JSONB       NULL
+  saving_throw        JSONB       NULL
+  effects            JSONB       NULL
+  mechanics           JSONB       NULL
+  raw_data            JSONB       NULL
+  created_at          TIMESTAMPTZ NOT NULL
+  updated_at          TIMESTAMPTZ NOT NULL
+
+Indexes: gin(name gin_trgm_ops), btree(level), btree(school), btree(source_id), btree(campaign_id)
+Unique: (slug, source_id) where source_id is not null; (slug, campaign_id) where campaign_id is not null
+Relationships: none inbound yet (no table references a spell by FK today - encounter/combat effects reference
+  spells by name/id inside JSONB for now; see section 6 for when that should become a real FK)
+
+
+------------------------------------------------------------
+2.7 items
+------------------------------------------------------------
+Purpose: magic items (today's app scope) and, later, mundane
+weapons/armor/gear from 5etools' items data.
+PK: id
+
+Columns:
+  id                       UUID        NOT NULL  -- PK
+  source_id                 UUID        NULL      -- FK -> sources.id
+  campaign_id                UUID        NULL      -- FK -> campaigns.id
+  name                     TEXT        NOT NULL
+  slug                     TEXT        NOT NULL
+  edition                  TEXT        NULL
+  item_type                 TEXT        NULL      -- free text, matches app's `type` field ("Weapon", "Wondrous Item", ...)
+  rarity                   TEXT        NOT NULL  -- 'common'|'uncommon'|'rare'|'very-rare'|'legendary'|'artifact'|'unknown'|'varies'
+  requires_attunement        BOOLEAN     NOT NULL  -- default false, matches app's `attunement`
+  attunement_requirement     TEXT        NULL      -- e.g. "by a spellcaster"
+  weight                   NUMERIC     NULL
+  cost                     JSONB       NULL      -- {value, unit} or 5etools coin structure
+  description               TEXT        NULL
+  properties                JSONB       NULL
+  effects                   JSONB       NULL
+  charges                   JSONB       NULL
+  image_asset_id             UUID        NULL      -- FK -> assets.id
+  raw_data                  JSONB       NULL
+  created_at                TIMESTAMPTZ NOT NULL
+  updated_at                TIMESTAMPTZ NOT NULL
+
+Indexes: gin(name gin_trgm_ops), btree(rarity), btree(item_type), btree(source_id), btree(campaign_id)
+Unique: (slug, source_id) where source_id is not null; (slug, campaign_id) where campaign_id is not null
+
+
+------------------------------------------------------------
+2.8 conditions
+------------------------------------------------------------
+Purpose: standard conditions/diseases and similar rules references.
+Seeds directly from the app's existing CONDITION_EFFECTS list (Blinded,
+Charmed, Deafened, Exhaustion, Frightened, Grappled, Incapacitated,
+Invisible, Paralyzed, Petrified, Poisoned, Prone, Restrained, Stunned,
+Unconscious) plus 5etools' conditionsdiseases/ data.
+PK: id
+
+Columns:
+  id              UUID        NOT NULL  -- PK
+  source_id        UUID        NULL      -- FK -> sources.id
+  name            TEXT        NOT NULL
+  condition_type   TEXT        NULL      -- 'condition' | 'disease' | 'status'
+  description      TEXT        NULL
+  raw_data         JSONB       NULL
+
+Indexes: btree(name)
+Unique: (name, source_id)
+Relationships: effects.condition_id -> conditions.id (optional)
+
+
+------------------------------------------------------------
+2.9 effects
+------------------------------------------------------------
+Purpose: catalog of applyable effects/status entries. This is what the
+app's PRESET_EFFECTS list (Bless, Bane, Hex, Concentration, Rage, Dying,
+Stable, ...) and its "custom effect" store (useCustomEffectsStore)
+graduate into once there's a real database. It also gives the future
+rules engine typed effects to execute instead of opaque strings.
+PK: id
+
+Columns:
+  id             UUID        NOT NULL  -- PK
+  campaign_id     UUID        NULL      -- NULL = global/shared catalog entry (matches today's PRESET_EFFECTS);
+                                        --   SET = a DM's campaign-specific custom effect
+  name           TEXT        NOT NULL
+  effect_type     TEXT        NOT NULL  -- DAMAGE|HEAL|CONDITION|REMOVE_CONDITION|MODIFIER|MOVEMENT|TELEPORT|
+                                        --   SUMMON|BANISH|DISPEL|CREATE_AOE|DESTROY_AOE|GRANT_ADVANTAGE|
+                                        --   GRANT_DISADVANTAGE|CUSTOM  (default 'CUSTOM')
+  condition_id    UUID        NULL      -- FK -> conditions.id, set when effect_type = 'CONDITION'
+  description     TEXT        NULL
+  icon           TEXT        NULL      -- color/icon hint for token badges
+  mechanics       JSONB       NULL
+  raw_data        JSONB       NULL
+
+Indexes: btree(campaign_id)
+Unique: (name, campaign_id)
+Relationships: conditions (many-1, optional)
+
+Migration note: today, PlacedToken.effects is just `string[]` of names. Once this table exists, map_tokens.effects
+and combatants.effects become arrays of {name, effect_id?, applied_at, duration_rounds?} objects (still JSONB -
+see section 5) that REFERENCE this catalog by name/id when possible, and still allow a bare freeform name for
+anything typed in ad hoc (matches TokenEffectsEditor's "add custom effect" flow exactly - it auto-creates a
+CUSTOM catalog row the same way).
+
+
+------------------------------------------------------------
+2.10 campaigns
+------------------------------------------------------------
+Purpose: top-level campaign/world container.
+PK: id
+
+Columns:
+  id             UUID        NOT NULL
+  name           TEXT        NOT NULL
+  description     TEXT        NULL
+  image_asset_id   UUID        NULL      -- FK -> assets.id (matches app's Campaign.imageSrc)
+  ruleset        TEXT        NULL      -- '5e-2014' | '5e-2024' | 'homebrew'
+  created_at      TIMESTAMPTZ NOT NULL
+  updated_at      TIMESTAMPTZ NOT NULL
+
+Relationships: parent of creatures/spells/items(homebrew scope), characters, locations, factions, quests, maps,
+  encounters, combats, token_library(optional scope), effects(optional scope)
+
+
+------------------------------------------------------------
+2.11 characters
+------------------------------------------------------------
+Purpose: player characters and other campaign-owned characters.
+PK: id
+
+Columns:
+  id              UUID        NOT NULL
+  campaign_id      UUID        NOT NULL  -- FK -> campaigns.id
+  name            TEXT        NOT NULL
+  character_type   TEXT        NOT NULL  -- 'pc'|'companion'|'hireling'|'other' (default 'pc')
+  level           INTEGER     NULL
+  class           TEXT        NULL
+  subclass        TEXT        NULL
+  species         TEXT        NULL
+  background       TEXT        NULL
+  current_hp       INTEGER     NULL
+  max_hp          INTEGER     NULL
+  temporary_hp     INTEGER     NOT NULL  -- default 0
+  armor_class      INTEGER     NULL
+  strength        INTEGER     NULL      -- DEVIATION: 6 individual columns instead of an `ability_scores JSONB`
+  dexterity       INTEGER     NULL      --   blob, to match `creatures` and keep the combat engine's modifier/
+  constitution     INTEGER     NULL      --   save math identical for creatures, characters, and combatants.
+  intelligence     INTEGER     NULL      --   Ability scores are exactly the "frequently used by the combat
+  wisdom          INTEGER     NULL      --   engine" case the hybrid rule calls out for real columns.
+  charisma        INTEGER     NULL
+  skills          JSONB       NULL      -- {skill: {proficient, expertise}} - genuinely structured, kept JSONB
+  saving_throws    JSONB       NULL
+  resources        JSONB       NULL      -- spell slots, class resources, hit dice remaining
+  equipment        JSONB       NULL
+  features         JSONB       NULL
+  notes           TEXT        NULL
+  portrait_asset_id UUID        NULL      -- FK -> assets.id
+  token_asset_id    UUID        NULL      -- FK -> assets.id
+  created_at       TIMESTAMPTZ NOT NULL
+  updated_at       TIMESTAMPTZ NOT NULL
+
+Indexes: btree(campaign_id)
+Relationships: map_tokens (1-many), combatants (1-many), quests.quest_giver_character_id (1-many, optional)
+
+
+------------------------------------------------------------
+2.12 locations
+------------------------------------------------------------
+Purpose: hierarchical world/campaign locations
+  (Continent -> Country -> Region -> City -> District -> Building -> Room).
+PK: id
+
+Columns:
+  id                  UUID        NOT NULL
+  campaign_id          UUID        NOT NULL  -- FK -> campaigns.id
+  parent_location_id    UUID        NULL      -- FK -> locations.id (self-reference)
+  name                TEXT        NOT NULL
+  location_type        TEXT        NULL      -- continent|country|region|city|district|building|room|dungeon|other
+  description          TEXT        NULL
+  notes                TEXT        NULL
+  map_id               UUID        NULL      -- FK -> maps.id
+  image_asset_id        UUID        NULL      -- FK -> assets.id
+  raw_data             JSONB       NULL
+  created_at            TIMESTAMPTZ NOT NULL
+  updated_at            TIMESTAMPTZ NOT NULL
+
+Indexes: btree(campaign_id), btree(parent_location_id)
+Relationships: locations (self, 1-many), maps (many-1, optional)
+
+Migration note: today's MapData.location is a free-text field and MapCustomDetail is an open label/value list.
+Both can graduate into a real `locations` row later; see section 6.
+
+
+------------------------------------------------------------
+2.13 factions
+------------------------------------------------------------
+Purpose: campaign factions and organizations.
+PK: id
+
+Columns:
+  id             UUID        NOT NULL
+  campaign_id     UUID        NOT NULL  -- FK -> campaigns.id
+  name           TEXT        NOT NULL
+  description     TEXT        NULL
+  faction_type    TEXT        NULL
+  goals          JSONB       NULL
+  beliefs        JSONB       NULL
+  resources       JSONB       NULL
+  relationships   JSONB       NULL      -- [{factionId, stance, notes}] - join table candidate later
+  locations       JSONB       NULL      -- array of location UUIDs - join table candidate later
+  members        JSONB       NULL      -- array of creature/character UUIDs - join table candidate later
+  notes          TEXT        NULL
+  image_asset_id   UUID        NULL      -- FK -> assets.id
+  raw_data        JSONB       NULL
+  created_at      TIMESTAMPTZ NOT NULL
+  updated_at      TIMESTAMPTZ NOT NULL
+
+Indexes: btree(campaign_id)
+
+
+------------------------------------------------------------
+2.14 quests   (new)
+------------------------------------------------------------
+Purpose: quest tracking. The app already has an empty "Quests" tab
+placeholder in the DM panel - this is what fills it.
+PK: id
+
+Columns:
+  id                       UUID        NOT NULL
+  campaign_id               UUID        NOT NULL  -- FK -> campaigns.id
+  name                     TEXT        NOT NULL
+  description               TEXT        NULL
+  status                   TEXT        NOT NULL  -- 'not_started'|'active'|'completed'|'failed'|'abandoned'
+  quest_giver_character_id   UUID        NULL      -- FK -> characters.id
+  quest_giver_creature_id    UUID        NULL      -- FK -> creatures.id (an NPC giving the quest - `creatures`
+                                                    --   with category='npc' covers this, matching the app's
+                                                    --   unified creature model)
+  related_faction_ids        JSONB       NULL      -- array of faction UUIDs - join table candidate later
+  related_location_ids       JSONB       NULL      -- array of location UUIDs - join table candidate later
+  objectives                JSONB       NULL      -- ordered checklist: [{text, done}]
+  rewards                   JSONB       NULL
+  notes                     TEXT        NULL
+  raw_data                  JSONB       NULL
+  created_at                TIMESTAMPTZ NOT NULL
+  updated_at                TIMESTAMPTZ NOT NULL
+
+Indexes: btree(campaign_id), btree(status)
+
+
+------------------------------------------------------------
+2.15 maps
+------------------------------------------------------------
+Purpose: map-level / shared settings for a map. Per-floor data lives in
+map_floors (see DEVIATION below).
+PK: id
+
+Columns:
+  id                  UUID        NOT NULL
+  campaign_id          UUID        NOT NULL  -- FK -> campaigns.id
+  location_id          UUID        NULL      -- FK -> locations.id
+  name                TEXT        NOT NULL
+  description          TEXT        NULL      -- matches app MapData.description
+  map_kinds            TEXT[]      NOT NULL  -- default '{}', matches app's MapKind[]: battle|city|region|continent|world
+  map_location_text     TEXT        NULL      -- app's freeform MapData.location text, kept alongside location_id
+                                              --   so the DM isn't forced to create a real Location row up front
+  setting              TEXT        NULL      -- 'indoor'|'outdoor'|'both'
+  activity             TEXT        NULL      -- "what's happening here"
+  grid_enabled          BOOLEAN     NOT NULL  -- default false
+  grid_size             INTEGER     NOT NULL  -- default 70
+  grid_color            TEXT        NOT NULL  -- default 'rgba(128,128,128,0.35)'
+  grid_thickness         INTEGER     NOT NULL  -- default 1
+  grid_type             TEXT        NOT NULL  -- 'square'|'hex', default 'square'
+  primary_floor_id       UUID        NULL      -- FK -> map_floors.id (added via ALTER TABLE after map_floors
+                                              --   exists, since the two tables mutually reference each other)
+  settings             JSONB       NULL      -- catch-all for future map-level settings
+  raw_data             JSONB       NULL
+  created_at            TIMESTAMPTZ NOT NULL
+  updated_at            TIMESTAMPTZ NOT NULL
+
+Indexes: btree(campaign_id), btree(location_id)
+
+DEVIATION from the base brief: the original draft put width/height/grid_type/grid_size/background_asset_id/
+walls/doors/lighting/terrain/objects directly on `maps`, implying one background per map. The REAL app models
+a map as MULTIPLE FLOORS, each with its own background image, its own flip/rotation state, its own drawn
+shapes, and its own "locked to this encounter" state. So that data was split out into map_floors (2.16),
+map_tokens (2.17), and map_shapes (2.18). `maps` keeps only what's genuinely shared across every floor
+(name, description, kinds, grid defaults, campaign/location scope, the new location/setting/activity fields).
+
+
+------------------------------------------------------------
+2.16 map_floors   (new)
+------------------------------------------------------------
+Purpose: one row per floor/background image of a map. Matches app's
+MapFloor type field-for-field.
+PK: id
+
+Columns:
+  id                      UUID        NOT NULL
+  map_id                   UUID        NOT NULL  -- FK -> maps.id
+  name                    TEXT        NOT NULL  -- e.g. "Floor 1"
+  sort_order                INTEGER     NOT NULL  -- default 0
+  background_asset_id       UUID        NOT NULL  -- FK -> assets.id
+  width                    INTEGER     NULL
+  height                   INTEGER     NULL
+  flipped_horizontal        BOOLEAN     NOT NULL  -- default false
+  flipped_vertical          BOOLEAN     NOT NULL  -- default false
+  rotation                 INTEGER     NOT NULL  -- default 0, cumulative 90deg steps, matches app
+  locked_encounter_id       UUID        NULL      -- FK -> encounters.id, matches app's lockedEncounterId
+  walls                    JSONB       NULL
+  doors                    JSONB       NULL
+  lighting                 JSONB       NULL
+  terrain                  JSONB       NULL
+  raw_data                 JSONB       NULL
+  created_at                TIMESTAMPTZ NOT NULL
+  updated_at                TIMESTAMPTZ NOT NULL
+
+Indexes: btree(map_id)
+Relationships: map_tokens (1-many), map_shapes (1-many), combats.map_floor_id (1-many)
+
+
+------------------------------------------------------------
+2.17 map_tokens   (new)
+------------------------------------------------------------
+Purpose: persistent placement of a creature/character/marker on a
+specific map floor. Matches app's PlacedToken type. This is what exists
+whether or not a fight is happening - it's the DM's staging/prep state.
+PK: id
+
+Columns:
+  id                        UUID        NOT NULL
+  map_floor_id               UUID        NOT NULL  -- FK -> map_floors.id
+  token_definition_id         UUID        NULL      -- FK -> token_library.id (which reusable art this came from)
+  creature_id                 UUID        NULL      -- FK -> creatures.id (linked stat block)
+  character_id                 UUID        NULL      -- FK -> characters.id (linked PC)
+  encounter_creature_id        UUID        NULL      -- FK -> encounter_creatures.id (matches app's encounterEntryId)
+  name                       TEXT        NOT NULL  -- editable independent of the linked creature's name
+  image_asset_id               UUID        NULL      -- FK -> assets.id
+  x                          NUMERIC     NOT NULL
+  y                          NUMERIC     NOT NULL
+  size                       NUMERIC     NOT NULL  -- stage-local px diameter, matches app
+  outline_color                TEXT        NOT NULL  -- default '#f5c542'
+  current_hp                  INTEGER     NULL
+  max_hp                     INTEGER     NULL
+  concentrating                BOOLEAN     NOT NULL  -- default false
+  death_save_successes         INTEGER     NOT NULL  -- default 0
+  death_save_failures          INTEGER     NOT NULL  -- default 0
+  effects                     JSONB       NOT NULL  -- default '[]', see 2.9 migration note
+  notes                       TEXT        NULL
+  raw_data                    JSONB       NULL
+  created_at                   TIMESTAMPTZ NOT NULL
+  updated_at                   TIMESTAMPTZ NOT NULL
+
+Indexes: btree(map_floor_id), btree(creature_id), btree(character_id), btree(encounter_creature_id)
+Relationships: combatants.map_token_id (1-1/optional, when a live combat is tracking this token)
+
+
+------------------------------------------------------------
+2.18 map_shapes   (new)
+------------------------------------------------------------
+Purpose: drawn AoE/annotation shapes on a floor (rulers, cones, circles,
+freehand marker lines). Matches app's AoEShape. Distinct from a spell's
+`area` JSONB, which is a TEMPLATE/rule, not a placed instance - when the
+combat engine later auto-draws a spell's AoE, it reads spells.area and
+INSERTs a row here.
+PK: id
+
+Columns:
+  id             UUID        NOT NULL
+  map_floor_id    UUID        NOT NULL  -- FK -> map_floors.id
+  shape_type      TEXT        NOT NULL  -- 'circle'|'cone'|'square'|'rectangle'|'line'|'thin-line'|'freehand'
+  x              NUMERIC     NOT NULL
+  y              NUMERIC     NOT NULL
+  radius         NUMERIC     NULL
+  rotation       NUMERIC     NOT NULL  -- default 0
+  width          NUMERIC     NULL
+  height         NUMERIC     NULL
+  points         JSONB       NULL      -- array of numbers, for line/freehand
+  color          TEXT        NOT NULL
+  stroke_width    NUMERIC     NULL
+  raw_data        JSONB       NULL
+  created_at      TIMESTAMPTZ NOT NULL
+
+Indexes: btree(map_floor_id)
+
+
+------------------------------------------------------------
+2.19 token_library   (new)
+------------------------------------------------------------
+Purpose: reusable token art definitions the DM drags onto maps,
+independent of any specific creature stat block (e.g. a generic
+"Player" or "Zombie" token). Matches app's TokenDefinition type.
+PK: id
+
+Columns:
+  id             UUID        NOT NULL
+  campaign_id     UUID        NULL      -- NULL = shared/global (matches today's single global library);
+                                        --   SET = campaign-specific custom token
+  name           TEXT        NOT NULL
+  image_asset_id   UUID        NOT NULL  -- FK -> assets.id
+  is_favorite     BOOLEAN     NOT NULL  -- default false
+  default_size    NUMERIC     NOT NULL  -- default 1
+  current_size    NUMERIC     NOT NULL  -- default 1
+  raw_data        JSONB       NULL
+  created_at      TIMESTAMPTZ NOT NULL
+  updated_at      TIMESTAMPTZ NOT NULL
+
+Indexes: btree(campaign_id)
+Relationships: map_tokens.token_definition_id (1-many)
+
+Note: is_favorite is really a per-user UI preference, not campaign data. Kept as a plain column for now because
+the app has no auth/multi-user model yet - flagged in section 6 as a future `user_token_favorites` join table.
+
+
+------------------------------------------------------------
+2.20 encounters
+------------------------------------------------------------
+Purpose: prepared encounters before they're actually run.
+PK: id
+
+Columns:
+  id                      UUID        NOT NULL
+  campaign_id              UUID        NOT NULL  -- FK -> campaigns.id
+  map_id                   UUID        NULL      -- FK -> maps.id
+  name                    TEXT        NOT NULL
+  description               TEXT        NULL
+  challenge_rating_display   TEXT        NULL      -- matches app's free-text challengeRating, e.g. "Medium (party level 3-4)"
+  computed_adjusted_xp       INTEGER     NULL      -- app-generated, from the difficulty calculator already in the app
+  computed_cr               TEXT        NULL      -- app-generated
+  difficulty                TEXT        NULL      -- short structured label, planned split-out of challenge_rating_display
+  theme                    TEXT        NULL
+  encounter_type            TEXT        NULL      -- Tavern Fight | Forest Ambush | Puzzle | Heist | NPC Interaction/Negotiation | ...
+  possible_locations         TEXT[]      NULL      -- Forest, Cave, Fort, ... (matches app's new field)
+  environment               TEXT        NULL      -- biome/terrain tag for future random-encounter tables
+  tags                     TEXT[]      NOT NULL  -- default '{}', matches app's "other features" tags
+  starting_positions         JSONB       NULL
+  special_rules             JSONB       NULL
+  notes                    TEXT        NULL
+  raw_data                  JSONB       NULL
+  created_at                TIMESTAMPTZ NOT NULL
+  updated_at                TIMESTAMPTZ NOT NULL
+
+Indexes: btree(campaign_id), btree(map_id)
+Relationships: encounter_creatures (1-many), map_floors.locked_encounter_id (1-many), combats.encounter_id (1-many)
+
+
+------------------------------------------------------------
+2.21 encounter_creatures   (new - see DEVIATION)
+------------------------------------------------------------
+Purpose: which creatures (and how many) are in an encounter.
+PK: id
+
+Columns:
+  id                     UUID        NOT NULL
+  encounter_id             UUID        NOT NULL  -- FK -> encounters.id
+  creature_id               UUID        NULL      -- FK -> creatures.id (NULL = one-off custom entry, matches app)
+  custom_name              TEXT        NULL      -- used when creature_id IS NULL
+  custom_image_asset_id      UUID        NULL      -- FK -> assets.id
+  quantity                 INTEGER     NOT NULL  -- default 1
+  size_override             NUMERIC     NULL      -- only meaningful for custom entries, matches app
+  sort_order                 INTEGER     NOT NULL  -- default 0
+  raw_data                  JSONB       NULL
+
+Indexes: btree(encounter_id), btree(creature_id)
+
+DEVIATION: the base brief kept this as a `creatures JSONB` array directly on `encounters`. Upgraded to a real
+join table because the app's encounter form adds/removes/adjusts quantity per entry constantly (the "frequently
+manipulated by the application" rule from the hybrid-architecture principle applies directly here) - that's
+much cleaner as rows you can UPDATE/DELETE individually than as an array you rewrite wholesale every edit.
+
+
+------------------------------------------------------------
+2.22 combats
+------------------------------------------------------------
+Purpose: a live or historical combat/initiative session.
+PK: id
+
+Columns:
+  id             UUID        NOT NULL
+  encounter_id    UUID        NULL      -- FK -> encounters.id (nullable: the app already allows "Roll Initiative"
+                                        --   for any tokens on a floor with no prepared encounter attached)
+  campaign_id     UUID        NOT NULL  -- FK -> campaigns.id
+  map_floor_id    UUID        NULL      -- FK -> map_floors.id (initiative state lives per-floor in the app today)
+  name           TEXT        NULL
+  round          INTEGER     NOT NULL  -- default 1
+  current_turn    INTEGER     NULL      -- convenience/derived; combatants.is_current_turn is the source of truth
+  status         TEXT        NOT NULL  -- 'idle'|'rolling'|'active'|'completed' (matches app's InitiativeState.status
+                                        --   literally, + 'completed' for history)
+  events         JSONB       NULL      -- combat log
+  started_at      TIMESTAMPTZ NULL
+  ended_at        TIMESTAMPTZ NULL
+  created_at      TIMESTAMPTZ NOT NULL
+  updated_at      TIMESTAMPTZ NOT NULL
+
+Indexes: btree(encounter_id), btree(campaign_id), btree(map_floor_id), btree(status)
+Relationships: combatants (1-many)
+
+
+------------------------------------------------------------
+2.23 combatants
+------------------------------------------------------------
+Purpose: the LIVE INSTANCE of a creature/character in a specific combat.
+Never mutate the base creature/character row when a combatant takes
+damage or gets a condition - that state lives here.
+PK: id
+
+Columns:
+  id                      UUID        NOT NULL
+  combat_id                 UUID        NOT NULL  -- FK -> combats.id
+  map_token_id              UUID        NULL      -- FK -> map_tokens.id (links back to the persistent placed
+                                                   --   token this combatant came from, when applicable)
+  creature_id               UUID        NULL      -- FK -> creatures.id
+  character_id               UUID        NULL      -- FK -> characters.id
+  display_name              TEXT        NOT NULL
+  current_hp                INTEGER     NULL
+  temporary_hp               INTEGER     NOT NULL  -- default 0
+  max_hp                    INTEGER     NULL
+  initiative_base_roll       INTEGER     NULL      -- matches app InitiativeEntry.baseRoll
+  initiative_modifier        INTEGER     NOT NULL  -- default 0, matches app InitiativeEntry.modifier
+  initiative                INTEGER     NULL      -- matches app InitiativeEntry.roll (baseRoll+modifier), denormalized for sort/display
+  initiative_order            INTEGER     NULL      -- explicit tiebreak/sort position
+  initiative_locked           BOOLEAN     NOT NULL  -- default false - matches the app's lock/unlock initiative feature
+  is_current_turn            BOOLEAN     NOT NULL  -- default false
+  x, y, z                   NUMERIC     NULL
+  movement_used              NUMERIC     NOT NULL  -- default 0
+  conditions                JSONB       NOT NULL  -- default '[]'
+  effects                   JSONB       NOT NULL  -- default '[]', matches app PlacedToken.effects while in combat
+  resources                 JSONB       NULL
+  concentration              JSONB       NULL      -- richer than app's boolean `concentrating`; app's boolean maps
+                                                   --   to (concentration->>'active')::boolean
+  death_save_successes        INTEGER     NOT NULL  -- default 0
+  death_save_failures         INTEGER     NOT NULL  -- default 0
+  action_used                BOOLEAN     NOT NULL  -- default false
+  bonus_action_used            BOOLEAN     NOT NULL  -- default false
+  reaction_used               BOOLEAN     NOT NULL  -- default false
+  visibility                 JSONB       NULL
+  status                    TEXT        NOT NULL  -- 'active'|'down'|'dead'|'fled'|'removed' (default 'active')
+  created_at                 TIMESTAMPTZ NOT NULL
+  updated_at                 TIMESTAMPTZ NOT NULL
+
+Indexes: btree(combat_id), btree(creature_id), btree(character_id), btree(map_token_id)
+
+Note: this table absorbs the app's InitiativeEntry type entirely (baseRoll/modifier/roll/locked ->
+initiative_* columns) plus the combat-relevant slice of PlacedToken (hp/concentrating/deathSaves/effects) - but
+ONLY once a formal `combats` table/engine exists. Until then, the app keeps using map_tokens + its own
+lightweight in-memory InitiativeState exactly as it does today; combatants is the durable/replayable version
+for when combat needs to be persisted, resumed, or logged.
+
+
+3. MAPPING FROM THE CURRENT APPLICATION MODEL
+================================================
+"Current app" = Client/src/types/*.ts as of this document. This section
+exists so nothing gets lost or reinterpreted during migration.
+
+Campaign (campaign.ts)
+  id, name, imageSrc              -> campaigns.id/name/image_asset_id (imageSrc becomes an assets row)
+
+Creature (creature.ts) - covers BOTH monsters and NPCs today
+  id, category, tokenImage, name  -> creatures.id/category/token_asset_id/name
+  relation, importance, profession -> creatures.relation/importance/profession (npc-only going forward)
+  size, type, alignment           -> creatures.size/creature_type/alignment
+  ac, hp, hpFormula               -> creatures.armor_class/hit_points/hit_dice
+  speed                          -> STAYS in creatures.raw_data (see section 5) until queried relationally
+  abilities.{str,dex,con,int,wis,cha} -> creatures.strength..charisma (6 columns, unchanged shape)
+  skills, senses, passivePerception, languages -> creatures.skills/senses/passive_perception/languages (unchanged, plain columns)
+  cr, proficiency                 -> creatures.challenge_rating_display(+numeric)/proficiency_bonus
+  traits                          -> creatures.traits
+  level, characterClass, motivations, pitfalls, history -> creatures.level/character_class/motivations/pitfalls/history (npc-only, unchanged)
+  defaultSize, currentSize        -> creatures.default_size/current_size
+
+Spell (spell.ts)
+  id, name, level, school, castingTime, range, components, duration, classes, description
+                                  -> spells.* (components/classes become *_display TEXT columns, with
+                                     structured components/classes JSONB populated only for imported spells)
+
+MagicItem (magicItem.ts)
+  id, name, type, rarity, attunement, description -> items.name/item_type/rarity/requires_attunement/description
+
+MapData / MapFloor (map.ts)
+  MapData.{id,name,description,kinds,primaryFloorId,gridEnabled,gridSize,gridColor,gridThickness,gridType,
+    location,setting,activity,customDetails} -> maps.* (kinds -> map_kinds TEXT[]; location -> map_location_text;
+    customDetails -> maps.settings JSONB list, OR promoted to real locations rows later - see section 6)
+  MapFloor.{id,name,imageSrc,flippedHorizontal,flippedVertical,rotation,lockedEncounterId}
+                                  -> map_floors.* (imageSrc becomes an assets row via background_asset_id)
+  MapFloor.placedTokens[]         -> map_tokens rows (one per PlacedToken)
+  MapFloor.shapes[]               -> map_shapes rows (one per AoEShape)
+  MapFloor.initiative             -> combats + combatants rows once the combat engine exists (see section 7);
+                                     until then this can keep living as JSON on map_floors.raw_data or a simple
+                                     `initiative_state JSONB` scratch column if you want a 1:1 port with zero
+                                     new tables first.
+
+PlacedToken (token.ts)
+  id, tokenId, name, imageSrc, x, y, size, outlineColor -> map_tokens.*
+  effects[]                       -> map_tokens.effects JSONB (array of names today; references into `effects`
+                                     catalog later)
+  encounterEntryId                -> map_tokens.encounter_creature_id
+  hp{current,max}                 -> map_tokens.current_hp/max_hp
+  concentrating                   -> map_tokens.concentrating
+  deathSaves{successes,failures}  -> map_tokens.death_save_successes/failures
+  notes                          -> map_tokens.notes
+
+TokenDefinition (token.ts)
+  id, name, imageSrc, isFavorite, defaultSize, currentSize -> token_library.* (imageSrc -> image_asset_id)
+
+InitiativeEntry / InitiativeState (initiative.ts)
+  entries[].{baseRoll,modifier,roll,locked} -> combatants.initiative_base_roll/modifier/initiative/initiative_locked
+  status, currentEntryId, round   -> combats.status/current_turn(or combatants.is_current_turn)/round
+
+AoEShape (shape.ts)
+  -> map_shapes.* (field names line up directly: type/x/y/radius/rotation/color/width/height/points/strokeWidth)
+
+Encounter / EncounterCreatureEntry (encounter.ts)
+  Encounter.{id,name,description,challengeRating,theme,encounterType,possibleLocations,tags}
+                                  -> encounters.* (challengeRating -> challenge_rating_display)
+  EncounterCreatureEntry[]        -> encounter_creatures rows
+
+effect.ts (PRESET_EFFECTS, CONDITION_EFFECTS, SPELL_STATUS_EFFECTS)
+  -> seed rows in `conditions` (for CONDITION_EFFECTS) and `effects` (for SPELL_STATUS_EFFECTS + custom ones
+     currently stored in useCustomEffectsStore)
+
+
+4. ER DIAGRAM (structural relationships only - not every column)
+====================================================================
+```mermaid
+erDiagram
+  SOURCES ||--o{ CREATURES : "sourced_from"
+  SOURCES ||--o{ SPELLS : "sourced_from"
+  SOURCES ||--o{ ITEMS : "sourced_from"
+  SOURCES ||--o{ CONDITIONS : "sourced_from"
+
+  CAMPAIGNS ||--o{ CREATURES : "homebrew scope"
+  CAMPAIGNS ||--o{ SPELLS : "homebrew scope"
+  CAMPAIGNS ||--o{ ITEMS : "homebrew scope"
+  CAMPAIGNS ||--o{ CHARACTERS : "has"
+  CAMPAIGNS ||--o{ LOCATIONS : "has"
+  CAMPAIGNS ||--o{ FACTIONS : "has"
+  CAMPAIGNS ||--o{ QUESTS : "has"
+  CAMPAIGNS ||--o{ MAPS : "has"
+  CAMPAIGNS ||--o{ ENCOUNTERS : "has"
+  CAMPAIGNS ||--o{ COMBATS : "has"
+  CAMPAIGNS ||--o{ TOKEN_LIBRARY : "optional scope"
+  CAMPAIGNS ||--o{ EFFECTS : "optional scope"
+
+  LOCATIONS ||--o{ LOCATIONS : "parent of"
+  LOCATIONS |o--o| MAPS : "depicted by"
+
+  MAPS ||--o{ MAP_FLOORS : "has"
+  MAP_FLOORS ||--o{ MAP_TOKENS : "has"
+  MAP_FLOORS ||--o{ MAP_SHAPES : "has"
+  MAP_FLOORS |o--o| ENCOUNTERS : "locked to"
+
+  CREATURES ||--o{ CREATURE_ACTIONS : "has"
+  CREATURES ||--o{ MAP_TOKENS : "instantiated as"
+  CREATURES ||--o{ ENCOUNTER_CREATURES : "listed in"
+  CREATURES ||--o{ COMBATANTS : "instantiated as"
+
+  CHARACTERS ||--o{ MAP_TOKENS : "instantiated as"
+  CHARACTERS ||--o{ COMBATANTS : "instantiated as"
+
+  TOKEN_LIBRARY ||--o{ MAP_TOKENS : "art for"
+
+  ENCOUNTERS ||--o{ ENCOUNTER_CREATURES : "has"
+  ENCOUNTERS ||--o{ MAP_TOKENS : "spawned from (optional)"
+  ENCOUNTERS |o--o| COMBATS : "runs as"
+
+  COMBATS ||--o{ COMBATANTS : "has"
+  MAP_TOKENS |o--o| COMBATANTS : "tracked as"
+
+  CONDITIONS ||--o{ EFFECTS : "backs (optional)"
+
+  ASSETS ||--o{ CREATURES : "portrait/token"
+  ASSETS ||--o{ ITEMS : "image"
+  ASSETS ||--o{ MAP_FLOORS : "background"
+  ASSETS ||--o{ MAP_TOKENS : "image"
+  ASSETS ||--o{ TOKEN_LIBRARY : "image"
+  ASSETS ||--o{ CAMPAIGNS : "image"
+  ASSETS ||--o{ FACTIONS : "image"
+  ASSETS ||--o{ LOCATIONS : "image"
+  ASSETS ||--o{ CHARACTERS : "portrait/token"
+```
+
+raw_entities is deliberately left off the diagram - it has no real FK to anything (linked_table/linked_id is
+polymorphic and enforced in application code, not the database).
+
+
+5. WHAT NOT TO NORMALIZE
+===========================
+Keep these in JSONB until the application has a CONCRETE reason to query
+them relationally (filter by it, sort by it, join by it, execute it in
+the combat engine, or display/manipulate it frequently):
+
+  - creature speeds, senses/skills/languages BEYOND the flat display-text
+    columns already kept (the flat columns satisfy today's UI; the
+    structured 5etools objects stay in raw_data)
+  - creature resistances / immunities / vulnerabilities
+  - creature spellcasting blocks
+  - creature variants and "unusual mechanics"
+  - map walls, doors, terrain, lighting, generic map "objects"
+  - faction relationships, faction members, faction locations
+  - complex spell effects (area/damage/saving_throw/effects columns are
+    already JSONB on purpose)
+  - item mechanics/properties/charges
+  - source-specific fields of any kind (book layout metadata, art
+    credits, indexing hints, etc.)
+  - quest related_faction_ids / related_location_ids (arrays for now)
+
+Do not create a table just because a JSON object exists in 5etools. A
+table is for data the app actually reads/writes/filters/joins on
+regularly - everything else is dead weight until proven otherwise.
+
+
+6. FUTURE NORMALIZATION CANDIDATES
+=====================================
+Promote these to real tables/columns only when a concrete requirement
+shows up:
+
+  - creature_senses, creature_skills, creature_resistances/immunities/
+    vulnerabilities (once monster-filter search needs "find all
+    creatures resistant to fire", for example)
+  - spell_effects, action_damage_components, action_targeting (once the
+    combat engine needs to execute them step by step instead of reading
+    a blob)
+  - map_objects, map_walls, map_doors (once the VTT needs collision/
+    line-of-sight queries against them)
+  - faction_relationships, faction_members (once the UI needs to list
+    "all factions this NPC belongs to" without scanning JSONB)
+  - quest_related_factions, quest_related_locations (same reasoning)
+  - locations promoted from maps.map_location_text / maps' MapCustomDetail
+    list, once the DM starts actually building out a location hierarchy
+    instead of loose text notes
+  - user_token_favorites (once there's a real multi-user/auth model -
+    token_library.is_favorite is a per-user preference masquerading as
+    campaign data right now)
+  - spells referenced by real FK from creature_actions/combatant
+    concentration/effects (once "cast a specific known spell" becomes a
+    combat-engine operation instead of a free-text mechanic)
+  - initiative history / combat replay log as its own table, if
+    `combats.events` JSONB ever needs to be queried instead of just
+    replayed linearly
+
+
+7. 5ETOOLS IMPORT ARCHITECTURE (summary - full plan in
+   data_normalisation_plan.txt)
+=========================================================================
+  5etools JSON (data/, img/)
+        |
+        v
+  Python importer (read-only against the 5etools repos)
+        |
+        +-----------------------+
+        |                       |
+        v                       v
+  raw_entities (always)   relational projection
+        |                       |
+        v                       v
+  (safety net,             creatures / spells / items / conditions /
+   nothing lost)           creature_actions / assets / sources
+
+The original 5etools `data/` and `img/` files are NEVER modified. The
+importer only reads from them and writes to Postgres + the app's own
+asset storage directory. See data_normalisation_plan.txt for the full
+field-by-field extraction rules, _copy handling, hashing/upsert strategy,
+and test plan.
+
+
+8. IMAGE STORAGE ARCHITECTURE
+================================
+- Actual image bytes live in filesystem/object storage, never as bytes in
+  Postgres.
+- Postgres (`assets` table) stores only: id, filename, storage_path,
+  asset_type, mime_type, width, height, file_size, sha256, source,
+  source_path, raw_data, created_at.
+- sha256 is UNIQUE - if the importer encounters an image whose hash
+  already exists, it reuses the existing assets row instead of creating a
+  duplicate (this matters a lot for 5etools-img, where the same token art
+  is sometimes reused across multiple statblocks/variants).
+- Suggested on-disk layout mirrors the 5etools-img repo's own structure
+  (see section 2.3) so the importer can copy files close to verbatim and
+  keep `source_path` traceable back to the original repo path.
+- Every entity that has art (creatures, items, maps, factions, locations,
+  characters, token_library) references assets by UUID FK, never by raw
+  path string, so storage can be relocated/re-hosted without touching
+  content tables.
+
+
+9. RULES DATA VS COMBAT STATE
+================================
+creatures / creature_actions answer:  "What IS a Goblin?"
+combatants (and map_tokens, pre-combat) answer:  "What is Goblin #3 doing
+  right now?"
+
+The `creatures` row for "Goblin" is shared, rarely changes, and is safe
+to reuse across every campaign and every encounter. A `combatants` row
+(or, before a formal combat exists, a `map_tokens` row) is a disposable,
+per-placement instance: current HP, position, conditions, temporary
+effects, resource usage, concentration, visibility.
+
+Hard rule: nothing in combat ever writes to creatures/characters. Taking
+damage, gaining a condition, losing concentration, dying - all of it
+mutates combatants (or map_tokens, before a fight formally starts), never
+the base stat block or character sheet row.
+
+
+10. INDEXING / CONSTRAINT SUMMARY
+====================================
+- Every table: btree on every foreign key column used in a WHERE/JOIN
+  (already listed per-table above).
+- Trigram (pg_trgm) GIN index on `name` for creatures/spells/items, to
+  support fast fuzzy "search as you type" in the DM panel.
+- GIN index on raw_data for creatures/spells/items/raw_entities, for the
+  rare ad-hoc "does any monster mention X in its raw JSON" query.
+- Slug uniqueness is always scoped to (source_id) or (campaign_id), never
+  global, since the same name can legitimately exist in two different
+  sourcebooks (reprints) or two different campaigns (homebrew).
+- assets.sha256 is globally unique (content-addressed storage).
+- raw_entities (source_file, source_key) is globally unique - this is the
+  importer's core idempotency key.
+
+
+11. MIGRATION / VERSIONING STRATEGY (brief)
+==============================================
+- Use a standard forward-only migration tool (e.g. Alembic if the
+  importer is Python, or node-pg-migrate/Prisma Migrate if the app layer
+  ends up owning schema changes - pick ONE, don't split migration
+  ownership between two tools).
+- Every migration that ADDS a column to a "content" table should be
+  backfillable from existing raw_data where possible (e.g. adding
+  creatures.senses later can be backfilled by re-parsing raw_data for
+  every row that has it, instead of requiring a full re-import).
+  This is the entire point of keeping raw_data around even on rows that
+  already have relational columns.
+- Never write a migration that DELETES data from raw_data/raw_entities.
+  Those two are the lossless safety net - only application-facing
+  relational columns are allowed to be dropped/renamed/reshaped over
+  time.
