@@ -17,6 +17,7 @@ from app.api.routers import (
     map_tokens,
     maps,
     quests,
+    random_bank,
     random_encounter_tables,
     raw_entities,
     search,
@@ -41,6 +42,7 @@ api_router.include_router(items.router)
 api_router.include_router(conditions.router)
 api_router.include_router(effects.router)
 api_router.include_router(sources.router)
+api_router.include_router(random_bank.router)
 
 api_router.include_router(maps.router)
 api_router.include_router(maps.floors_router)

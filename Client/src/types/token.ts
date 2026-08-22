@@ -42,9 +42,9 @@ export interface PlacedToken {
   isCurrentTurn?: boolean;
 }
 
-export const DEFAULT_TOKEN_SIZE = 60;
-export const MIN_TOKEN_SIZE = 16;
-export const MAX_TOKEN_SIZE = 110;
+export const DEFAULT_TOKEN_SIZE = 20;
+export const MIN_TOKEN_SIZE = 10;
+export const MAX_TOKEN_SIZE = 50;
 export const DEFAULT_TOKEN_OUTLINE_COLOR = '#f5c542';
 export const TOKEN_OUTLINE_WIDTH = 2;
 /** fallback max/current HP given to any token placed on the map without linked creature stats */

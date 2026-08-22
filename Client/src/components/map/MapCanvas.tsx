@@ -44,6 +44,9 @@ interface MapCanvasProps {
   flippedHorizontal?: boolean;
   flippedVertical?: boolean;
   rotation?: number;
+  /** See MapBackgroundLayer's fitResetEpoch - forces both the background's fit and this
+   * component's rotate/flip pivot to recompute against the live container size. */
+  fitResetEpoch?: number;
 }
 
 const MIN_DRAFT_SIZE = 6;
@@ -169,6 +172,7 @@ export function MapCanvas({
   flippedHorizontal,
   flippedVertical,
   rotation,
+  fitResetEpoch = 0,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { width, height } = useResponsiveStageSize(containerRef);
@@ -189,11 +193,18 @@ export function MapCanvas({
   // container size - otherwise resizing the container (e.g. opening/closing the sidebar)
   // while flipped/rotated shifts the pivot and visibly drags the whole floor (background,
   // tokens, grid, shapes) with it. Freeze it to the first valid measurement per floor.
-  const pivotSizeRef = useRef<{ src: string; width: number; height: number } | null>(null);
-  if (width > 0 && height > 0 && pivotSizeRef.current?.src !== backgroundImageSrc) {
-    pivotSizeRef.current = { src: backgroundImageSrc, width, height };
+  const pivotSizeRef = useRef<{ src: string; epoch: number; width: number; height: number } | null>(null);
+  if (
+    width > 0 &&
+    height > 0 &&
+    (pivotSizeRef.current?.src !== backgroundImageSrc || pivotSizeRef.current?.epoch !== fitResetEpoch)
+  ) {
+    pivotSizeRef.current = { src: backgroundImageSrc, epoch: fitResetEpoch, width, height };
   }
-  const pivotSize = pivotSizeRef.current?.src === backgroundImageSrc ? pivotSizeRef.current : { width, height };
+  const pivotSize =
+    pivotSizeRef.current?.src === backgroundImageSrc && pivotSizeRef.current?.epoch === fitResetEpoch
+      ? pivotSizeRef.current
+      : { width, height };
   const flipPivot = { x: pivotSize.width / 2, y: pivotSize.height / 2 };
   const transform: FloorTransform = { pivot: flipPivot, flippedHorizontal, flippedVertical, rotation };
 
@@ -380,6 +391,7 @@ export function MapCanvas({
           flippedHorizontal={flippedHorizontal}
           flippedVertical={flippedVertical}
           rotation={rotation}
+          fitResetEpoch={fitResetEpoch}
         />
         <MapObjectsLayer
           tokens={tokens}

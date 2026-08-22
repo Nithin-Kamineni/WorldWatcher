@@ -12,9 +12,11 @@ import Slider from '@mui/material/Slider';
 import Autocomplete from '@mui/material/Autocomplete';
 import Chip from '@mui/material/Chip';
 import {
+  RELATION_IMPORTANCE_OPTIONS,
   RELATION_TYPES,
   RELATION_TYPE_META,
   type FactionRelation,
+  type FactionRelationImportance,
   type FactionRelationType,
 } from '../../types/factionRelation';
 import type { Faction } from '../../types/faction';
@@ -43,6 +45,7 @@ export function FactionRelationDialog({
   initialRelation,
 }: FactionRelationDialogProps) {
   const [type, setType] = useState<FactionRelationType>('neutral');
+  const [importance, setImportance] = useState<FactionRelationImportance>('secondary');
   const [strength, setStrength] = useState(40);
   const [treaties, setTreaties] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
@@ -50,6 +53,7 @@ export function FactionRelationDialog({
   useEffect(() => {
     if (!open) return;
     setType(initialRelation?.type ?? 'neutral');
+    setImportance(initialRelation?.importance ?? 'secondary');
     setStrength(initialRelation?.strength ?? 40);
     setTreaties(initialRelation?.treaties ?? []);
     setNotes(initialRelation?.notes ?? '');
@@ -66,6 +70,7 @@ export function FactionRelationDialog({
       factionBId,
       type,
       strength,
+      importance,
       treaties,
       notes: notes.trim(),
     };
@@ -89,6 +94,21 @@ export function FactionRelationDialog({
             {RELATION_TYPES.map((t) => (
               <MenuItem key={t} value={t}>
                 {RELATION_TYPE_META[t].label}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <TextField
+            select
+            label="Relation importance"
+            helperText="Primary relations sit closer to the center in the diplomacy graph"
+            value={importance}
+            onChange={(e) => setImportance(e.target.value as FactionRelationImportance)}
+            fullWidth
+          >
+            {RELATION_IMPORTANCE_OPTIONS.map((o) => (
+              <MenuItem key={o.value} value={o.value}>
+                {o.label}
               </MenuItem>
             ))}
           </TextField>

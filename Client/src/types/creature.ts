@@ -150,6 +150,13 @@ export interface Creature {
   pitfalls?: string;
   /** npc-only */
   history?: string;
+  /** npc-only: freeform appearance/summary blurb, distinct from the narrative `history` field */
+  description?: string;
+  /** npc-only: which monster (if any) this NPC's stats were last autofilled from */
+  baseCreatureId?: string;
+  /** npc-only: 'custom' form mode (manual class/level/etc) vs 'creature' mode (picked from
+   * the monster catalog, autofilled, still editable) */
+  isCustomBuild: boolean;
   /** grid-relative size multiplier (1.0 = one full grid cell); reset target for currentSize */
   defaultSize: number;
   /** grid-relative size multiplier actually used the next time this creature is placed */

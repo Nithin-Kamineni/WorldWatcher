@@ -46,11 +46,20 @@ interface CreatureStoreState {
   creatureBrowse: CreatureBrowseResult | null;
   creatureBrowseLoading: boolean;
   fetchCreatureBrowse: (params: CreatureBrowseParams) => Promise<void>;
+
+  /** Separate slot for "pick a creature" UI nested inside another view (NpcFormDialog's
+   * base-creature search/randomizer) - must not share `creatureBrowse` with the table it's
+   * nested inside of, or fetching monsters for the picker clobbers the parent NPC/Monster
+   * table's own browse results out from under it. */
+  creaturePickerBrowse: CreatureBrowseResult | null;
+  creaturePickerBrowseLoading: boolean;
+  fetchCreaturePickerBrowse: (params: CreatureBrowseParams) => Promise<void>;
 }
 
 // Module-level (not store state) so setting it doesn't trigger a re-render - it only guards
 // against a slow, stale request overwriting a newer one's result.
 let browseRequestId = 0;
+let pickerBrowseRequestId = 0;
 
 export const useCreatureStore = create<CreatureStoreState>((set, get) => ({
   creaturesByCampaignId: {},
@@ -153,6 +162,33 @@ export const useCreatureStore = create<CreatureStoreState>((set, get) => ({
       if (requestId !== browseRequestId) return;
       console.error('Failed to load creatures page', err);
       set({ creatureBrowseLoading: false });
+    }
+  },
+
+  creaturePickerBrowse: null,
+  creaturePickerBrowseLoading: false,
+
+  fetchCreaturePickerBrowse: async (params) => {
+    const requestId = ++pickerBrowseRequestId;
+    set({ creaturePickerBrowseLoading: true });
+    try {
+      const page = await creaturesApi.listCreatures({
+        campaign_id: params.campaignId,
+        scope: params.scope,
+        category: params.category,
+        q: params.search || undefined,
+        limit: params.pageSize,
+        offset: (params.page - 1) * params.pageSize,
+      });
+      if (requestId !== pickerBrowseRequestId) return;
+      set({
+        creaturePickerBrowse: { items: page.items.map(apiCreatureToCreature), total: page.meta.total },
+        creaturePickerBrowseLoading: false,
+      });
+    } catch (err) {
+      if (requestId !== pickerBrowseRequestId) return;
+      console.error('Failed to load creature picker page', err);
+      set({ creaturePickerBrowseLoading: false });
     }
   },
 }));

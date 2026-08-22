@@ -7,6 +7,27 @@ export const FACTION_TYPE_PRESETS = [
   'Religious Order',
 ];
 
+export type FactionInfluence = 'petty' | 'local' | 'minor' | 'regional' | 'major';
+
+export interface FactionInfluenceOption {
+  value: FactionInfluence;
+  label: string;
+  /** node diameter (px) in the diplomacy graph's outer/inner rings */
+  ringNodeSize: number;
+}
+
+export const FACTION_INFLUENCE_OPTIONS: FactionInfluenceOption[] = [
+  { value: 'petty', label: 'Petty', ringNodeSize: 0 },
+  { value: 'local', label: 'Local', ringNodeSize: 44 },
+  { value: 'minor', label: 'Minor', ringNodeSize: 54 },
+  { value: 'regional', label: 'Regional', ringNodeSize: 64 },
+  { value: 'major', label: 'Major', ringNodeSize: 80 },
+];
+
+export function getFactionInfluenceOption(influence: FactionInfluence): FactionInfluenceOption {
+  return FACTION_INFLUENCE_OPTIONS.find((o) => o.value === influence) ?? FACTION_INFLUENCE_OPTIONS[3];
+}
+
 export interface Faction {
   id: string;
   name: string;
@@ -35,6 +56,8 @@ export interface Faction {
   naval: number;
   economy: number;
   reputation: number;
+  /** Drives node size in the diplomacy graph; 'petty' factions never appear in the graph. */
+  influence: FactionInfluence;
   createdAt: number;
   updatedAt: number;
 }

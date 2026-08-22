@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import type Konva from 'konva';
+import useImage from 'use-image';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
@@ -21,19 +22,28 @@ import { TokenManagerPopover, type TokenManagerTab } from '../components/map/too
 import { CreatureStatBlockDialog } from '../components/dm/CreatureStatBlockDialog';
 import { useCampaignStore, getCampaignById, getMapsForCampaign } from '../store/useCampaignStore';
 import { useTokenLibraryStore } from '../store/useTokenLibraryStore';
+import { useTokenManagerUiStore } from '../store/useTokenManagerUiStore';
 import { useEncounterStore, getEncountersForCampaign } from '../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../store/useCreatureStore';
 import { apiMapShapeToAoEShape, apiMapTokenToPlacedToken } from '../api/adapters';
 import { connectRoom, floorRoom } from '../api/ws';
 import type { ApiMapShape, ApiMapToken } from '../api/types';
 import { getPrimaryFloor, type GridType, type MapFloor } from '../types/map';
-import { DEFAULT_TOKEN_HP, DEFAULT_TOKEN_OUTLINE_COLOR, MAX_TOKEN_SIZE, MIN_TOKEN_SIZE, type PlacedToken } from '../types/token';
+import {
+  DEFAULT_TOKEN_HP,
+  DEFAULT_TOKEN_OUTLINE_COLOR,
+  DEFAULT_TOKEN_SIZE,
+  MAX_TOKEN_SIZE,
+  MIN_TOKEN_SIZE,
+  type PlacedToken,
+} from '../types/token';
 import { DEFAULT_MARKER_WIDTH, DEFAULT_SHAPE_COLOR, type AoEShape } from '../types/shape';
 import { DEFAULT_INITIATIVE_STATE, type InitiativeEntry } from '../types/initiative';
 import { abilityModifier, getCreatureRelationOption, type Creature } from '../types/creature';
 import type { Encounter, EncounterCreatureEntry } from '../types/encounter';
 import type { MapToolMode } from '../types/tool';
 import type { StagePoint } from '../utils/tokenDrag';
+import { computeBestFitRotation, type MapRotation } from '../utils/mapFit';
 
 const ZOOM_STEP = 1.2;
 const MIN_SCALE = 0.2;
@@ -69,6 +79,7 @@ export function MapPage() {
   const [tokenManagerPosition, setTokenManagerPosition] = useState<{ top: number; left: number } | null>(null);
   const [tokenManagerFocusId, setTokenManagerFocusId] = useState<string | null>(null);
   const [tokenManagerTab, setTokenManagerTab] = useState<TokenManagerTab>('floor');
+  const [fitResetEpoch, setFitResetEpoch] = useState(0);
   const [statsCreature, setStatsCreature] = useState<Creature | null>(null);
   const [noStatsWarning, setNoStatsWarning] = useState(false);
   const [undoStack, setUndoStack] = useState<MapFloor[]>([]);
@@ -84,6 +95,10 @@ export function MapPage() {
   const activeFloor = map
     ? (map.floors.find((f) => f.id === activeFloorId) ?? getPrimaryFloor(map) ?? map.floors[0])
     : undefined;
+  // Shares use-image's internal cache with MapBackgroundLayer's own useImage(src) call for
+  // the same URL, so this doesn't trigger a second fetch - just gives Reset View access to
+  // the image's natural (unscaled) dimensions to compute the best-fit rotation.
+  const [backgroundImage] = useImage(activeFloor?.imageSrc ?? '');
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -219,7 +234,7 @@ export function MapPage() {
   keyHandlersRef.current = { undo: handleUndo, redo: handleRedo };
 
   const resolvePlacementSize = (relativeSize: number): number =>
-    Math.min(MAX_TOKEN_SIZE, Math.max(MIN_TOKEN_SIZE, relativeSize * map.gridSize));
+    Math.min(MAX_TOKEN_SIZE, Math.max(MIN_TOKEN_SIZE, relativeSize * DEFAULT_TOKEN_SIZE));
 
   const handleTokenMove = (tokenId: string, x: number, y: number) => {
     mutateActiveFloorWithHistory((floor) => ({
@@ -474,7 +489,10 @@ export function MapPage() {
     setTokenManagerPosition(null);
     setTokenManagerAnchor(anchorEl);
     setTokenManagerFocusId(null);
-    setTokenManagerTab('floor');
+    // Restore whichever tab (This Floor/Favorites/Encounters) the DM was last on, rather
+    // than always resetting to 'floor' - right-clicking a specific token still forces
+    // 'floor' below, since that's a deliberate jump to that token's row.
+    setTokenManagerTab(useTokenManagerUiStore.getState().lastTab);
     setTokenManagerOpen(true);
   };
 
@@ -543,7 +561,23 @@ export function MapPage() {
 
   const handleResetView = () => {
     const stage = stageRef.current;
-    if (!stage) return;
+    if (!stage || !activeFloor || !backgroundImage) return;
+    // Read the live, fullscreen-aware viewport size directly off the Stage (its width/height
+    // props already come from useResponsiveStageSize's ResizeObserver, so this reflects an F11
+    // toggle or the browser chrome hiding without any extra plumbing).
+    const viewportW = stage.width();
+    const viewportH = stage.height();
+    const { rotation } = computeBestFitRotation(viewportW, viewportH, backgroundImage.width, backgroundImage.height);
+
+    if (rotation !== ((activeFloor.rotation ?? 0) as MapRotation)) {
+      mutateActiveFloorWithHistory((floor) => ({ ...floor!, rotation }));
+    }
+    // Force MapBackgroundLayer/MapCanvas's frozen fit + rotate pivot to recompute against
+    // the current viewport and the (possibly just-changed) rotation above - see
+    // MapBackgroundLayer's fitResetEpoch doc comment for why this doesn't happen on every
+    // render/resize. Once that recompute lands, the background layer itself best-fits the
+    // viewport, so the Stage-level transform just resets to identity on top of it.
+    setFitResetEpoch((e) => e + 1);
     stage.scale({ x: 1, y: 1 });
     stage.position({ x: 0, y: 0 });
     stage.batchDraw();
@@ -612,6 +646,7 @@ export function MapPage() {
               flippedHorizontal={activeFloor.flippedHorizontal}
               flippedVertical={activeFloor.flippedVertical}
               rotation={activeFloor.rotation}
+              fitResetEpoch={fitResetEpoch}
             />
           )}
           {activeFloor && (

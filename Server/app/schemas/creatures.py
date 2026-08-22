@@ -117,6 +117,8 @@ class CreatureRead(BaseModel):
     history: Optional[str] = None
     portrait_asset_id: Optional[uuid.UUID] = None
     token_asset_id: Optional[uuid.UUID] = None
+    base_creature_id: Optional[uuid.UUID] = None
+    is_custom_build: bool = True
     default_size: float
     current_size: float
     is_favorite: bool = False
@@ -169,6 +171,8 @@ class CreatureCreate(BaseModel):
     history: Optional[str] = None
     portrait_asset_id: Optional[uuid.UUID] = None
     token_asset_id: Optional[uuid.UUID] = None
+    base_creature_id: Optional[uuid.UUID] = None
+    is_custom_build: bool = True
     default_size: float = 1
     current_size: float = 1
     is_favorite: bool = False
@@ -214,6 +218,8 @@ class CreatureUpdate(BaseModel):
     history: Optional[str] = None
     portrait_asset_id: Optional[uuid.UUID] = None
     token_asset_id: Optional[uuid.UUID] = None
+    base_creature_id: Optional[uuid.UUID] = None
+    is_custom_build: Optional[bool] = None
     default_size: Optional[float] = None
     current_size: Optional[float] = None
     is_favorite: Optional[bool] = None

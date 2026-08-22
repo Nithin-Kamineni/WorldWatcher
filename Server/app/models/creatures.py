@@ -55,6 +55,11 @@ class Creature(Base):
     history: Mapped[Optional[str]] = mapped_column(Text)
     portrait_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"))
     token_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"))
+    # NPC-only: which monster (if any) this NPC's stats were autofilled from, and whether the
+    # NPC form is in "custom" mode (manual class/level/etc) vs "creature" mode (picked from
+    # the monster catalog above). Self-referential - only ever points at a category='monster' row.
+    base_creature_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("creatures.id"))
+    is_custom_build: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     default_size: Mapped[float] = mapped_column(Numeric(asdecimal=False), nullable=False, default=1)
     current_size: Mapped[float] = mapped_column(Numeric(asdecimal=False), nullable=False, default=1)
     is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -41,7 +41,7 @@ function ComparisonBar({
       </Typography>
       {[
         { name: centerName, value: centerValue, color: 'primary.main' },
-        { name: selectedName, value: selectedValue, color: 'secondary.main' },
+        { name: selectedName, value: selectedValue, color: 'info.main' },
       ].map((row) => (
         <Stack key={row.name} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Typography variant="caption" sx={{ width: 84, flexShrink: 0 }} noWrap>

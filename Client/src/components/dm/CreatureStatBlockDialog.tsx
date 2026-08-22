@@ -67,6 +67,7 @@ export function CreatureStatBlockDialog({ open, creature, onClose }: CreatureSta
           <TableBody>
             {isNpc && <Row label="Relation" value={getCreatureRelationOption(creature.relation).label} />}
             {isNpc && <Row label="Importance" value={getCreatureImportanceOption(creature.importance).label} />}
+            {isNpc && <Row label="Description" value={creature.description} />}
             {isNpc && <Row label="Profession" value={creature.profession} />}
             {isNpc && <Row label="Level" value={creature.level} />}
             {isNpc && <Row label="Class" value={creature.characterClass} />}

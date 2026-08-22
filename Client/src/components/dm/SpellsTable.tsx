@@ -16,6 +16,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import {
   formatCastingTimeShort,
+  formatComponentsShort,
   formatRangeShort,
   formatSpellLevel,
   schoolTextColor,
@@ -113,7 +114,7 @@ export function SpellsTable({ spells, onEdit, onDelete }: SpellsTableProps) {
               </TableCell>
               <TableCell>{formatCastingTimeShort(spell.castingTime)}</TableCell>
               <TableCell>{formatRangeShort(spell.range)}</TableCell>
-              <TableCell>{spell.components}</TableCell>
+              <TableCell>{formatComponentsShort(spell.components)}</TableCell>
               <TableCell>{spell.duration}</TableCell>
               <TableCell align="right">
                 <Tooltip title="View details">

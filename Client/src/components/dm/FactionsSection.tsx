@@ -16,9 +16,10 @@ import { FactionsTable } from './FactionsTable';
 import { FactionFormDialog } from './FactionFormDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { FilterBar } from './FilterBar';
+import { FilterChipGroup } from './FilterChipGroup';
 import { FactionsRelationsGraph } from './FactionsRelationsGraph';
-import { useFactionStore, getFactionsForCampaign } from '../../store/useFactionStore';
-import type { Faction } from '../../types/faction';
+import { useFactionStore, getFactionsForCampaign, getFactionRelationsForCampaign } from '../../store/useFactionStore';
+import { FACTION_INFLUENCE_OPTIONS, type Faction, type FactionInfluence } from '../../types/faction';
 
 interface FactionsSectionProps {
   campaignId: string;
@@ -34,16 +35,26 @@ export function FactionsSection({ campaignId }: FactionsSectionProps) {
   const updateFactionInCampaign = useFactionStore((s) => s.updateFactionInCampaign);
   const deleteFactionFromCampaign = useFactionStore((s) => s.deleteFactionFromCampaign);
   const fetchFactionsForCampaign = useFactionStore((s) => s.fetchFactionsForCampaign);
+  const relationsByCampaignId = useFactionStore((s) => s.relationsByCampaignId);
+  const fetchRelationsForCampaign = useFactionStore((s) => s.fetchRelationsForCampaign);
+  const addRelation = useFactionStore((s) => s.addRelation);
+  const updateRelation = useFactionStore((s) => s.updateRelation);
+  const deleteRelation = useFactionStore((s) => s.deleteRelation);
 
   const factions = getFactionsForCampaign(factionsByCampaignId, campaignId);
+  const relations = getFactionRelationsForCampaign(relationsByCampaignId, campaignId);
 
   useEffect(() => {
     fetchFactionsForCampaign(campaignId);
-  }, [campaignId, fetchFactionsForCampaign]);
+    fetchRelationsForCampaign(campaignId);
+  }, [campaignId, fetchFactionsForCampaign, fetchRelationsForCampaign]);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [view, setView] = useState<'table' | 'graph'>('graph');
+  const [influenceFilter, setInfluenceFilter] = useState<FactionInfluence[]>(
+    FACTION_INFLUENCE_OPTIONS.filter((o) => o.value !== 'petty').map((o) => o.value),
+  );
 
   const filteredFactions = factions.filter((faction) => {
     const query = search.trim().toLowerCase();
@@ -102,13 +113,26 @@ export function FactionsSection({ campaignId }: FactionsSectionProps) {
               search={search}
               onSearchChange={setSearch}
               searchPlaceholder="Search factions by name…"
-              hasActiveFilters={false}
-              onClearFilters={() => {}}
+              hasActiveFilters={influenceFilter.length < FACTION_INFLUENCE_OPTIONS.length - 1}
+              onClearFilters={() =>
+                setInfluenceFilter(FACTION_INFLUENCE_OPTIONS.filter((o) => o.value !== 'petty').map((o) => o.value))
+              }
             >
-              <></>
+              <FilterChipGroup
+                label="Influence / power shown"
+                options={FACTION_INFLUENCE_OPTIONS.filter((o) => o.value !== 'petty')}
+                selected={influenceFilter}
+                onToggle={(value) =>
+                  setInfluenceFilter((prev) =>
+                    prev.includes(value as FactionInfluence)
+                      ? prev.filter((v) => v !== value)
+                      : [...prev, value as FactionInfluence],
+                  )
+                }
+              />
             </FilterBar>
           )}
-          <FactionsRelationsGraph campaignId={campaignId} search={search} />
+          <FactionsRelationsGraph campaignId={campaignId} search={search} influenceFilter={influenceFilter} />
         </>
       ) : (
         <>
@@ -153,6 +177,12 @@ export function FactionsSection({ campaignId }: FactionsSectionProps) {
             open={dialogOpen}
             onClose={() => setDialogOpen(false)}
             initialFaction={editingFaction}
+            campaignId={campaignId}
+            allFactions={factions}
+            relations={relations}
+            onAddRelation={addRelation}
+            onUpdateRelation={updateRelation}
+            onDeleteRelation={deleteRelation}
             onSubmit={(faction) => {
               if (editingFaction) updateFactionInCampaign(campaignId, faction);
               else addFactionToCampaign(campaignId, faction);

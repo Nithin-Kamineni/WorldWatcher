@@ -77,8 +77,14 @@ export function TokenLibraryPanel({ campaignId }: TokenLibraryPanelProps) {
     if (!creatureBrowse) return;
     setLoadedCreatures((prev) => {
       if (page === 1) return creatureBrowse.items;
-      const seen = new Set(prev.map((c) => c.id));
-      return [...prev, ...creatureBrowse.items.filter((c) => !seen.has(c.id))];
+      // Upsert rather than filter-then-append: creatureBrowse.items only ever holds the most
+      // recently fetched page, so a filter-out-seen-ids merge silently drops in-place updates
+      // (e.g. favorite toggles) to creatures loaded on an earlier page - they'd never show
+      // until a full remount rebuilt `prev` from scratch.
+      const incoming = new Map(creatureBrowse.items.map((c) => [c.id, c]));
+      const merged = prev.map((c) => incoming.get(c.id) ?? c);
+      const newOnes = creatureBrowse.items.filter((c) => !prev.some((p) => p.id === c.id));
+      return [...merged, ...newOnes];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [creatureBrowse]);

@@ -13,7 +13,8 @@ import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
 import MapIcon from '@mui/icons-material/Map';
 import SwordsIcon from '@mui/icons-material/Shield';
-import PetsIcon from '@mui/icons-material/Pets';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
+import BadgeIcon from '@mui/icons-material/Badge';
 import GroupsIcon from '@mui/icons-material/Groups';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import NotesIcon from '@mui/icons-material/Notes';
@@ -24,7 +25,8 @@ import { MapsTable } from '../components/dm/MapsTable';
 import { MapFormDialog } from '../components/dm/MapFormDialog';
 import { ConfirmDeleteDialog } from '../components/dm/ConfirmDeleteDialog';
 import { EncountersSection } from '../components/dm/EncountersSection';
-import { CreaturesSection } from '../components/dm/CreaturesSection';
+import { CompendiumSection } from '../components/dm/CompendiumSection';
+import { NpcsSection } from '../components/dm/NpcsSection';
 import { FactionsSection } from '../components/dm/FactionsSection';
 import { QuestsSection } from '../components/dm/QuestsSection';
 import { BastionsSection } from '../components/dm/BastionsSection';
@@ -33,7 +35,7 @@ import { FilterChipGroup } from '../components/dm/FilterChipGroup';
 import { useCampaignStore, getCampaignById, getMapsForCampaign } from '../store/useCampaignStore';
 import { MAP_KIND_OPTIONS, type MapData } from '../types/map';
 
-type DMSection = 'maps' | 'encounters' | 'creatures' | 'factions' | 'quests' | 'bastions' | 'notes';
+type DMSection = 'maps' | 'encounters' | 'compendium' | 'npcs' | 'factions' | 'quests' | 'bastions' | 'notes';
 
 function EmptyPlaceholder({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
@@ -144,7 +146,8 @@ export function DMPanelPage() {
       <Tabs value={section} onChange={(_e, v) => setSection(v)} sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
         <Tab value="maps" label="Maps" icon={<MapIcon fontSize="small" />} iconPosition="start" data-tour="tab-maps" />
         <Tab value="encounters" label="Encounters" icon={<SwordsIcon fontSize="small" />} iconPosition="start" data-tour="tab-encounters" />
-        <Tab value="creatures" label="Creatures" icon={<PetsIcon fontSize="small" />} iconPosition="start" data-tour="tab-creatures" />
+        <Tab value="compendium" label="Compendium" icon={<MenuBookIcon fontSize="small" />} iconPosition="start" data-tour="tab-compendium" />
+        <Tab value="npcs" label="NPCs" icon={<BadgeIcon fontSize="small" />} iconPosition="start" data-tour="tab-npcs" />
         <Tab value="factions" label="Factions" icon={<GroupsIcon fontSize="small" />} iconPosition="start" data-tour="tab-factions" />
         <Tab value="quests" label="Quests" icon={<AssignmentIcon fontSize="small" />} iconPosition="start" data-tour="tab-quests" />
         <Tab value="bastions" label="Bastions" icon={<CastleIcon fontSize="small" />} iconPosition="start" data-tour="tab-bastions" />
@@ -239,7 +242,8 @@ export function DMPanelPage() {
       )}
 
       {section === 'encounters' && <EncountersSection campaignId={campaignId} />}
-      {section === 'creatures' && <CreaturesSection campaignId={campaignId} />}
+      {section === 'compendium' && <CompendiumSection campaignId={campaignId} />}
+      {section === 'npcs' && <NpcsSection campaignId={campaignId} />}
       {section === 'factions' && <FactionsSection campaignId={campaignId} />}
       {section === 'quests' && <QuestsSection campaignId={campaignId} />}
       {section === 'bastions' && <BastionsSection campaignId={campaignId} />}

@@ -104,7 +104,7 @@ pip install -r requirements.txt
 cp .env.example .env          # then edit WW_DB_* to match your local Postgres
 alembic upgrade head          # creates all tables
 
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 The API is now served at `http://localhost:8000` (interactive docs at `/docs`).

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -13,21 +13,35 @@ import Divider from '@mui/material/Divider';
 import Autocomplete from '@mui/material/Autocomplete';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
+import MenuItem from '@mui/material/MenuItem';
 import Slider from '@mui/material/Slider';
+import Avatar from '@mui/material/Avatar';
 import TuneIcon from '@mui/icons-material/Tune';
-import { FACTION_TYPE_PRESETS, type Faction } from '../../types/faction';
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
+import { isAllowedImageFile } from '../../utils/fileValidation';
+import { FACTION_INFLUENCE_OPTIONS, FACTION_TYPE_PRESETS, type Faction, type FactionInfluence } from '../../types/faction';
+import { FactionRelationsField } from './FactionRelationsField';
+import type { FactionRelation } from '../../types/factionRelation';
 
 interface FactionFormDialogProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (faction: Faction) => void;
   initialFaction?: Faction;
+  /** Only needed to power the Relations subsection - omitted, that subsection is hidden. */
+  campaignId?: string;
+  allFactions?: Faction[];
+  relations?: FactionRelation[];
+  onAddRelation?: (relation: FactionRelation) => void;
+  onUpdateRelation?: (relation: FactionRelation) => void;
+  onDeleteRelation?: (campaignId: string, relationId: string) => void;
 }
 
 function emptyState() {
   return {
     name: '',
     description: '',
+    imageSrc: '',
     factionType: '',
     goals: [] as string[],
     beliefs: [] as string[],
@@ -43,6 +57,7 @@ function emptyState() {
     naval: 30,
     economy: 30,
     reputation: 30,
+    influence: 'regional' as FactionInfluence,
   };
 }
 
@@ -50,6 +65,7 @@ function stateFromFaction(faction: Faction) {
   return {
     name: faction.name,
     description: faction.description,
+    imageSrc: faction.imageSrc,
     factionType: faction.factionType,
     goals: faction.goals,
     beliefs: faction.beliefs,
@@ -65,6 +81,7 @@ function stateFromFaction(faction: Faction) {
     naval: faction.naval,
     economy: faction.economy,
     reputation: faction.reputation,
+    influence: faction.influence,
   };
 }
 
@@ -105,10 +122,22 @@ function TagListField({ label, placeholder, value, onChange }: TagListFieldProps
   );
 }
 
-export function FactionFormDialog({ open, onClose, onSubmit, initialFaction }: FactionFormDialogProps) {
+export function FactionFormDialog({
+  open,
+  onClose,
+  onSubmit,
+  initialFaction,
+  campaignId,
+  allFactions,
+  relations,
+  onAddRelation,
+  onUpdateRelation,
+  onDeleteRelation,
+}: FactionFormDialogProps) {
   const isEditMode = !!initialFaction;
   const [state, setState] = useState(emptyState());
   const [moreOpen, setMoreOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -118,6 +147,13 @@ export function FactionFormDialog({ open, onClose, onSubmit, initialFaction }: F
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !isAllowedImageFile(file)) return;
+    set('imageSrc', URL.createObjectURL(file));
   };
 
   const isValid = state.name.trim().length > 0;
@@ -136,7 +172,7 @@ export function FactionFormDialog({ open, onClose, onSubmit, initialFaction }: F
       locations: state.locations,
       members: state.members,
       notes: state.notes.trim(),
-      imageSrc: initialFaction?.imageSrc ?? '',
+      imageSrc: state.imageSrc,
       governance: state.governance.trim(),
       power: state.power,
       powerLabel: state.powerLabel.trim() || String(state.power),
@@ -145,6 +181,7 @@ export function FactionFormDialog({ open, onClose, onSubmit, initialFaction }: F
       naval: state.naval,
       economy: state.economy,
       reputation: state.reputation,
+      influence: state.influence,
       createdAt: initialFaction?.createdAt ?? now,
       updatedAt: now,
     };
@@ -156,6 +193,18 @@ export function FactionFormDialog({ open, onClose, onSubmit, initialFaction }: F
       <DialogTitle sx={{ fontWeight: 700 }}>{isEditMode ? 'Edit Faction' : 'Add Faction'}</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={3} sx={{ pt: 1 }}>
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+            {state.imageSrc ? (
+              <Avatar src={state.imageSrc} sx={{ width: 56, height: 56 }} />
+            ) : (
+              <Avatar sx={{ width: 56, height: 56 }}>{state.name.charAt(0) || '?'}</Avatar>
+            )}
+            <Button size="small" variant="outlined" startIcon={<AddPhotoAlternateIcon />} onClick={() => fileInputRef.current?.click()}>
+              Upload image
+            </Button>
+            <input ref={fileInputRef} type="file" accept="image/png,image/jpeg" hidden onChange={handleFileSelected} />
+          </Stack>
+
           <TextField label="Name" value={state.name} onChange={(e) => set('name', e.target.value)} required fullWidth autoFocus />
           <TextField
             label="Description"
@@ -249,6 +298,20 @@ export function FactionFormDialog({ open, onClose, onSubmit, initialFaction }: F
                     />
                   </Grid>
                 </Grid>
+                <TextField
+                  select
+                  label="Influence / power"
+                  helperText="Sizes this faction's node in the diplomacy graph"
+                  value={state.influence}
+                  onChange={(e) => set('influence', e.target.value as FactionInfluence)}
+                  fullWidth
+                >
+                  {FACTION_INFLUENCE_OPTIONS.map((o) => (
+                    <MenuItem key={o.value} value={o.value}>
+                      {o.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
                 <Typography variant="caption" color="text.secondary">
                   Strength stats used by the diplomacy graph's comparison bars
                 </Typography>
@@ -256,6 +319,24 @@ export function FactionFormDialog({ open, onClose, onSubmit, initialFaction }: F
                 <StatSlider label="Naval" value={state.naval} onChange={(v) => set('naval', v)} />
                 <StatSlider label="Economy" value={state.economy} onChange={(v) => set('economy', v)} />
                 <StatSlider label="Reputation" value={state.reputation} onChange={(v) => set('reputation', v)} />
+
+                {isEditMode && campaignId && allFactions && relations && onAddRelation && onUpdateRelation && onDeleteRelation && (
+                  <>
+                    <Divider />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                      Relations
+                    </Typography>
+                    <FactionRelationsField
+                      campaignId={campaignId}
+                      factionId={initialFaction!.id}
+                      allFactions={allFactions}
+                      relations={relations}
+                      onAddRelation={onAddRelation}
+                      onUpdateRelation={onUpdateRelation}
+                      onDeleteRelation={onDeleteRelation}
+                    />
+                  </>
+                )}
               </Stack>
             </Collapse>
           </Box>

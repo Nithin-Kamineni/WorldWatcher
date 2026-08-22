@@ -166,6 +166,8 @@ class LocationUpdate(BaseModel):
 
 
 FactionRelationType = Literal["ally", "trade", "peace", "neutral", "war", "enemy"]
+FactionRelationImportance = Literal["primary", "secondary"]
+FactionInfluence = Literal["petty", "local", "minor", "regional", "major"]
 
 
 class FactionRead(BaseModel):
@@ -190,6 +192,7 @@ class FactionRead(BaseModel):
     naval: int
     economy: int
     reputation: int
+    influence: FactionInfluence
     raw_data: Optional[Any] = None
     created_at: datetime
     updated_at: datetime
@@ -215,6 +218,7 @@ class FactionCreate(BaseModel):
     naval: int = 30
     economy: int = 30
     reputation: int = 30
+    influence: FactionInfluence = "regional"
     raw_data: Optional[Any] = None
 
 
@@ -238,6 +242,7 @@ class FactionUpdate(BaseModel):
     naval: Optional[int] = None
     economy: Optional[int] = None
     reputation: Optional[int] = None
+    influence: Optional[FactionInfluence] = None
     raw_data: Optional[Any] = None
 
 
@@ -249,6 +254,7 @@ class FactionRelationRead(BaseModel):
     faction_b_id: uuid.UUID
     relation_type: FactionRelationType
     strength: int
+    importance: FactionRelationImportance
     treaties: Optional[Any] = None
     notes: Optional[str] = None
     created_at: datetime
@@ -261,6 +267,7 @@ class FactionRelationCreate(BaseModel):
     faction_b_id: uuid.UUID
     relation_type: FactionRelationType = "neutral"
     strength: int = 40
+    importance: FactionRelationImportance = "secondary"
     treaties: Optional[Any] = None
     notes: Optional[str] = None
 
@@ -268,6 +275,7 @@ class FactionRelationCreate(BaseModel):
 class FactionRelationUpdate(BaseModel):
     relation_type: Optional[FactionRelationType] = None
     strength: Optional[int] = None
+    importance: Optional[FactionRelationImportance] = None
     treaties: Optional[Any] = None
     notes: Optional[str] = None
 

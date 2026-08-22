@@ -36,10 +36,16 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     targetSelector: '[data-tour="tab-encounters"]',
   },
   {
-    id: 'tab-creatures',
-    title: 'Creatures',
-    description: 'Click Creatures to browse monsters, NPCs, spells and magic items.',
-    targetSelector: '[data-tour="tab-creatures"]',
+    id: 'tab-compendium',
+    title: 'Compendium',
+    description: 'Click Compendium to browse monster stat blocks, spells, and magic items.',
+    targetSelector: '[data-tour="tab-compendium"]',
+  },
+  {
+    id: 'tab-npcs',
+    title: 'NPCs',
+    description: 'Click NPCs to manage the people in your campaign - build one from scratch or base it on a monster stat block.',
+    targetSelector: '[data-tour="tab-npcs"]',
   },
   {
     id: 'tab-factions',

@@ -36,6 +36,27 @@ export interface ApiAsset {
   url: string | null;
 }
 
+export interface ApiRandomName {
+  id: string;
+  name: string;
+  name_type: 'first' | 'last';
+}
+
+export interface ApiRandomProfession {
+  id: string;
+  name: string;
+}
+
+export interface ApiRandomMotivation {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomPitfall {
+  id: string;
+  text: string;
+}
+
 export interface ApiCondition {
   id: string;
   source_id: string | null;
@@ -119,6 +140,8 @@ export interface ApiCreature {
   history: string | null;
   portrait_asset_id: string | null;
   token_asset_id: string | null;
+  base_creature_id: string | null;
+  is_custom_build: boolean;
   default_size: number;
   current_size: number;
   is_favorite: boolean;
@@ -260,6 +283,7 @@ export interface ApiFaction {
   naval: number;
   economy: number;
   reputation: number;
+  influence: string;
   raw_data: unknown;
   created_at: string;
   updated_at: string;
@@ -274,6 +298,7 @@ export interface ApiFactionRelation {
   faction_b_id: string;
   relation_type: ApiFactionRelationType;
   strength: number;
+  importance: string;
   treaties: unknown;
   notes: string | null;
   created_at: string;

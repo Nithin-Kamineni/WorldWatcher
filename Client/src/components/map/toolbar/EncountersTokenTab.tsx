@@ -26,6 +26,7 @@ import {
   useRandomEncounterTableStore,
   getRandomEncounterTablesForCampaign,
 } from '../../../store/useRandomEncounterTableStore';
+import { useTokenManagerUiStore } from '../../../store/useTokenManagerUiStore';
 import {
   getEncounterFallbackImage,
   type Encounter,
@@ -360,21 +361,22 @@ function RandomEncounterRollBlock({
     [tablesByCampaignId, campaignId],
   );
 
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // Remembers which random table the DM was last rolling against, per campaign, across
+  // Manage Tokens popover close/reopen and page reload (client-side UI convenience only).
+  const lastEncounterTableIdByCampaignId = useTokenManagerUiStore((s) => s.lastEncounterTableIdByCampaignId);
+  const setLastEncounterTableId = useTokenManagerUiStore((s) => s.setLastEncounterTableId);
+  const selectedTableId = lastEncounterTableIdByCampaignId[campaignId] ?? null;
   const [roll, setRoll] = useState<DieRoll | null>(null);
   const [pickedIndex, setPickedIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    if (campaignTables.length === 0) {
-      setSelectedTableId(null);
-      return;
-    }
+    if (campaignTables.length === 0) return;
     if (!campaignTables.some((t) => t.id === selectedTableId)) {
-      setSelectedTableId(campaignTables[0].id);
+      setLastEncounterTableId(campaignId, campaignTables[0].id);
       setRoll(null);
       setPickedIndex(null);
     }
-  }, [campaignTables, selectedTableId]);
+  }, [campaignTables, selectedTableId, campaignId, setLastEncounterTableId]);
 
   if (campaignTables.length === 0) return null;
 
@@ -407,10 +409,11 @@ function RandomEncounterRollBlock({
             size="small"
             value={table.id}
             onChange={(e) => {
-              setSelectedTableId(e.target.value);
+              setLastEncounterTableId(campaignId, e.target.value);
               setRoll(null);
               setPickedIndex(null);
             }}
+            slotProps={{ select: { MenuProps: { disablePortal: true } } }}
           >
             {campaignTables.map((t) => (
               <MenuItem key={t.id} value={t.id}>

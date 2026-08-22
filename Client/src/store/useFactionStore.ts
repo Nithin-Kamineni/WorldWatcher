@@ -50,8 +50,8 @@ export const useFactionStore = create<FactionStoreState>((set, get) => ({
         [campaignId]: [...(state.factionsByCampaignId[campaignId] ?? []), faction],
       },
     }));
-    factionsApi
-      .createFaction({ id: faction.id, ...factionToApiPayload(faction, campaignId) })
+    factionToApiPayload(faction, campaignId)
+      .then((payload) => factionsApi.createFaction({ id: faction.id, ...payload }))
       .catch((err) => console.error('Failed to persist new faction', err));
   },
 
@@ -64,8 +64,8 @@ export const useFactionStore = create<FactionStoreState>((set, get) => ({
         ),
       },
     }));
-    factionsApi
-      .updateFaction(faction.id, factionToApiPayload(faction, campaignId))
+    factionToApiPayload(faction, campaignId)
+      .then((payload) => factionsApi.updateFaction(faction.id, payload))
       .catch((err) => console.error('Failed to persist faction update', err));
   },
 

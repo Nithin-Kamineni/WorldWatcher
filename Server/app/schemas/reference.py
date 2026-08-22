@@ -144,3 +144,31 @@ class EffectUpdate(BaseModel):
     icon: Optional[str] = None
     mechanics: Optional[Any] = None
     raw_data: Optional[Any] = None
+
+
+RandomNameType = Literal["first", "last"]
+
+
+class RandomNameRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    name_type: RandomNameType
+
+
+class RandomProfessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+
+
+class RandomMotivationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomPitfallRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str

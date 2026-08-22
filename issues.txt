@@ -1,0 +1,13 @@
+Understand how improved initiative works. Make the initiative in the application work with way fewer clicks
+
+Implement bulk initiative where I can add multiple creaturees actions at the same time. multiple creatures damage can be added the same time.
+
+Add keyboard shortcuts and options to customise keyboard shortcuts for operating the map and other parts of the applcaition.
+
+Generation (Random table):
+Roll/generate the economy and shops for a settlement.
+Rumor and hook generator
+Loot tables
+World weather and travel generator
+
+Session prep templates - checklist

@@ -16,6 +16,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import { useTokenLibraryStore } from '../../../store/useTokenLibraryStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../../../store/useCreatureStore';
+import { useTokenManagerUiStore } from '../../../store/useTokenManagerUiStore';
 import { MAX_TOKEN_SIZE, MIN_TOKEN_SIZE, TOKEN_OUTLINE_WIDTH, type PlacedToken } from '../../../types/token';
 import { TOKEN_DRAG_MIME, FAVORITE_CREATURE_DRAG_MIME } from '../../../utils/tokenDrag';
 import type { EncounterCreatureEntry } from '../../../types/encounter';
@@ -251,6 +252,7 @@ export function TokenManagerPopover({
   encounterActive,
 }: TokenManagerPopoverProps) {
   const [tab, setTab] = useState<TokenManagerTab>(initialTab);
+  const setLastTab = useTokenManagerUiStore((state) => state.setLastTab);
   const libraryTokens = useTokenLibraryStore((state) => state.tokens);
   const updateLibraryToken = useTokenLibraryStore((state) => state.updateToken);
   const favoriteTokens = useMemo(() => libraryTokens.filter((t) => t.isFavorite), [libraryTokens]);
@@ -291,7 +293,14 @@ export function TokenManagerPopover({
     >
       <ClickAwayListener onClickAway={onClose}>
       <Box sx={{ width: 360 }}>
-        <Tabs value={tab} onChange={(_e, v) => setTab(v)} variant="fullWidth">
+        <Tabs
+          value={tab}
+          onChange={(_e, v) => {
+            setTab(v);
+            setLastTab(v);
+          }}
+          variant="fullWidth"
+        >
           <Tab value="floor" label="This Floor" />
           <Tab value="favorites" label="Favorites" />
           <Tab value="encounters" label="Encounters" />

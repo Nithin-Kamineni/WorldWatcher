@@ -86,3 +86,49 @@ class Effect(Base):
     icon: Mapped[Optional[str]] = mapped_column(Text)
     mechanics: Mapped[Optional[Any]] = mapped_column(JSONB)
     raw_data: Mapped[Optional[Any]] = mapped_column(JSONB)
+
+
+class RandomName(Base):
+    """NPC-creation randomizer name bank (Bugs.txt) - seeded from 5etools' names.json,
+    first/last names only. Global reference data, not campaign-scoped."""
+
+    __tablename__ = "random_names"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    name_type: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_data: Mapped[Optional[Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RandomProfession(Base):
+    __tablename__ = "random_professions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    raw_data: Mapped[Optional[Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RandomMotivation(Base):
+    __tablename__ = "random_motivations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RandomPitfall(Base):
+    __tablename__ = "random_pitfalls"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

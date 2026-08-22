@@ -163,6 +163,11 @@ CREATE TABLE IF NOT EXISTS creatures (
   history                   TEXT        NULL,
   portrait_asset_id         UUID        NULL REFERENCES assets (id),
   token_asset_id            UUID        NULL REFERENCES assets (id),
+  -- NPC-only: which monster (if any) this NPC's stats were autofilled from, and whether the
+  -- NPC form is in "custom" (manual class/level/etc) vs "creature" (picked from the monster
+  -- catalog) mode. Only ever points at a category='monster' row (app-layer enforced).
+  base_creature_id          UUID        NULL REFERENCES creatures (id),
+  is_custom_build            BOOLEAN     NOT NULL DEFAULT true,
   default_size              NUMERIC     NOT NULL DEFAULT 1,
   current_size              NUMERIC     NOT NULL DEFAULT 1,
   is_favorite                BOOLEAN     NOT NULL DEFAULT false,
@@ -176,6 +181,7 @@ CREATE INDEX IF NOT EXISTS creatures_challenge_rating_idx ON creatures (challeng
 CREATE INDEX IF NOT EXISTS creatures_source_id_idx ON creatures (source_id);
 CREATE INDEX IF NOT EXISTS creatures_campaign_id_idx ON creatures (campaign_id);
 CREATE INDEX IF NOT EXISTS creatures_category_idx ON creatures (category);
+CREATE INDEX IF NOT EXISTS creatures_base_creature_id_idx ON creatures (base_creature_id);
 CREATE INDEX IF NOT EXISTS creatures_raw_data_gin ON creatures USING gin (raw_data);
 CREATE UNIQUE INDEX IF NOT EXISTS creatures_slug_source_uidx ON creatures (slug, source_id) WHERE source_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS creatures_slug_campaign_uidx ON creatures (slug, campaign_id) WHERE campaign_id IS NOT NULL;
@@ -417,6 +423,9 @@ CREATE TABLE IF NOT EXISTS factions (
   naval             INTEGER     NOT NULL DEFAULT 30,
   economy           INTEGER     NOT NULL DEFAULT 30,
   reputation        INTEGER     NOT NULL DEFAULT 30,
+  -- Node size in the diplomacy graph; 'petty' factions are excluded from the graph.
+  influence         TEXT        NOT NULL DEFAULT 'regional'
+    CHECK (influence IN ('petty','local','minor','regional','major')),
   raw_data          JSONB       NULL,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -440,6 +449,10 @@ CREATE TABLE IF NOT EXISTS faction_relations (
   relation_type  TEXT        NOT NULL DEFAULT 'neutral'
     CHECK (relation_type IN ('ally','trade','peace','neutral','war','enemy')),
   strength       INTEGER     NOT NULL DEFAULT 40,
+  -- Drives the diplomacy graph's radial position (primary = inner ring) and edge
+  -- stroke-width tier (primary = thick); `strength` still varies weight within a tier.
+  importance     TEXT        NOT NULL DEFAULT 'secondary'
+    CHECK (importance IN ('primary','secondary')),
   treaties       JSONB       NULL,
   notes          TEXT        NULL,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -873,6 +886,42 @@ CREATE INDEX IF NOT EXISTS bastion_facility_instances_facility_id_idx ON bastion
 DROP TRIGGER IF EXISTS trg_bastion_facility_instances_updated_at ON bastion_facility_instances;
 CREATE TRIGGER trg_bastion_facility_instances_updated_at BEFORE UPDATE ON bastion_facility_instances
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- NPC randomizer reference banks
+-- Global reference data (no campaign_id), same shape convention as `conditions` above -
+-- these are DM-tool-wide banks the NPC randomizer picks from client-side, not per-campaign
+-- data. random_names.raw_data carries {race, option, source} provenance from the 5etools
+-- import for traceability only.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS random_names (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  name       TEXT        NOT NULL,
+  name_type  TEXT        NOT NULL CHECK (name_type IN ('first','last')),
+  raw_data   JSONB       NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (name, name_type)
+);
+CREATE INDEX IF NOT EXISTS random_names_name_type_idx ON random_names (name_type);
+
+CREATE TABLE IF NOT EXISTS random_professions (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  name       TEXT        NOT NULL UNIQUE,
+  raw_data   JSONB       NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_motivations (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_pitfalls (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ============================================================
 -- Deferred FKs (mutual references resolved after all tables exist)

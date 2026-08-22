@@ -38,8 +38,8 @@ import type {
   RandomTableCreature,
   RandomTableRow,
 } from '../types/encounter';
-import type { Faction } from '../types/faction';
-import type { FactionRelation, FactionRelationType } from '../types/factionRelation';
+import type { Faction, FactionInfluence } from '../types/faction';
+import type { FactionRelation, FactionRelationImportance, FactionRelationType } from '../types/factionRelation';
 import type { MagicItem, MagicItemRarity } from '../types/magicItem';
 import type { MapFloor } from '../types/map';
 import type { Quest, QuestObjective, QuestStatus } from '../types/quest';
@@ -153,7 +153,15 @@ export async function resolveImageAsset(
 // ---------------------------------------------------------------------
 
 export function apiCampaignToCampaign(c: ApiCampaign): Campaign {
-  return { id: c.id, name: c.name, imageSrc: assetFileUrl(c.image_asset_id) };
+  return {
+    id: c.id,
+    name: c.name,
+    imageSrc: assetFileUrl(c.image_asset_id),
+    description: c.description ?? '',
+    ruleset: c.ruleset ?? '',
+    createdAt: toEpochMs(c.created_at),
+    updatedAt: toEpochMs(c.updated_at),
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -198,6 +206,9 @@ export function apiCreatureToCreature(c: ApiCreature | ApiCreatureDetail): Creat
     motivations: c.motivations ?? undefined,
     pitfalls: c.pitfalls ?? undefined,
     history: c.history ?? undefined,
+    description: c.description ?? undefined,
+    baseCreatureId: c.base_creature_id ?? undefined,
+    isCustomBuild: c.is_custom_build ?? true,
     defaultSize: c.default_size,
     currentSize: c.current_size,
     isFavorite: c.is_favorite,
@@ -248,6 +259,9 @@ export async function creatureToApiPayload(
     motivations: isNpc ? (creature.motivations ?? null) : null,
     pitfalls: isNpc ? (creature.pitfalls ?? null) : null,
     history: isNpc ? (creature.history ?? null) : null,
+    description: isNpc ? (creature.description ?? null) : null,
+    base_creature_id: isNpc ? (creature.baseCreatureId ?? null) : null,
+    is_custom_build: isNpc ? creature.isCustomBuild : true,
     token_asset_id: assetId,
     default_size: creature.defaultSize,
     current_size: creature.currentSize,
@@ -611,12 +625,14 @@ export function apiFactionToFaction(f: ApiFaction): Faction {
     naval: f.naval,
     economy: f.economy,
     reputation: f.reputation,
+    influence: (f.influence as FactionInfluence) ?? 'regional',
     createdAt: toEpochMs(f.created_at),
     updatedAt: toEpochMs(f.updated_at),
   };
 }
 
-export function factionToApiPayload(faction: Faction, campaignId: string): Record<string, unknown> {
+export async function factionToApiPayload(faction: Faction, campaignId: string): Promise<Record<string, unknown>> {
+  const { assetId } = await resolveImageAsset(faction.imageSrc, 'faction_image');
   return {
     campaign_id: campaignId,
     name: faction.name,
@@ -628,6 +644,7 @@ export function factionToApiPayload(faction: Faction, campaignId: string): Recor
     locations: faction.locations,
     members: faction.members,
     notes: faction.notes || null,
+    image_asset_id: assetId,
     governance: faction.governance || null,
     power: faction.power,
     power_label: faction.powerLabel || null,
@@ -636,6 +653,7 @@ export function factionToApiPayload(faction: Faction, campaignId: string): Recor
     naval: faction.naval,
     economy: faction.economy,
     reputation: faction.reputation,
+    influence: faction.influence,
   };
 }
 
@@ -651,6 +669,7 @@ export function apiFactionRelationToFactionRelation(r: ApiFactionRelation): Fact
     factionBId: r.faction_b_id,
     type: r.relation_type as FactionRelationType,
     strength: r.strength,
+    importance: (r.importance as FactionRelationImportance) ?? 'secondary',
     treaties: toStringArray(r.treaties),
     notes: r.notes ?? '',
   };
@@ -663,6 +682,7 @@ export function factionRelationToApiPayload(relation: FactionRelation, campaignI
     faction_b_id: relation.factionBId,
     relation_type: relation.type,
     strength: relation.strength,
+    importance: relation.importance,
     treaties: relation.treaties,
     notes: relation.notes || null,
   };

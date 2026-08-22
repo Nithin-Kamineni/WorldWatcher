@@ -14,7 +14,7 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
-import type { Faction } from '../../types/faction';
+import { getFactionInfluenceOption, type Faction } from '../../types/faction';
 
 interface FactionsTableProps {
   factions: Faction[];
@@ -33,6 +33,7 @@ export function FactionsTable({ factions, onEdit, onDelete }: FactionsTableProps
             <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
             <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
             <TableCell sx={{ fontWeight: 700 }}>Goals</TableCell>
+            <TableCell sx={{ fontWeight: 700 }}>Influence</TableCell>
             <TableCell sx={{ fontWeight: 700 }} align="right">
               Actions
             </TableCell>
@@ -71,6 +72,9 @@ export function FactionsTable({ factions, onEdit, onDelete }: FactionsTableProps
                     faction.goals.map((goal) => <Chip key={goal} label={goal} size="small" variant="outlined" />)
                   )}
                 </Stack>
+              </TableCell>
+              <TableCell>
+                <Chip label={getFactionInfluenceOption(faction.influence).label} size="small" variant="outlined" />
               </TableCell>
               <TableCell align="right">
                 <Tooltip title="Edit faction">

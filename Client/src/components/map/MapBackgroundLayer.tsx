@@ -11,10 +11,17 @@ interface MapBackgroundLayerProps {
   flippedHorizontal?: boolean;
   flippedVertical?: boolean;
   rotation?: number;
+  /** Bump to force the frozen fit to recompute against the current stageWidth/stageHeight
+   * and rotation even though `src` hasn't changed - used by "Reset View" to truly re-fit
+   * to the live viewport (including a rotation change) without affecting ordinary
+   * container resizes or single Rotate clicks, which must keep the frozen scale to avoid
+   * placed tokens drifting relative to the background. */
+  fitResetEpoch?: number;
 }
 
 interface BackgroundFit {
   src: string;
+  epoch: number;
   scale: number;
   x: number;
   y: number;
@@ -28,6 +35,7 @@ export function MapBackgroundLayer({
   flippedHorizontal,
   flippedVertical,
   rotation,
+  fitResetEpoch = 0,
 }: MapBackgroundLayerProps) {
   const [image] = useImage(src);
   // Tokens/grid/shapes live in raw stage-pixel space and never move on their own, so the
@@ -36,17 +44,29 @@ export function MapBackgroundLayer({
   // to the new size while tokens stay put, making them appear to drift off their squares.
   const fitRef = useRef<BackgroundFit | null>(null);
 
-  if (image && stageWidth > 0 && stageHeight > 0 && fitRef.current?.src !== src) {
-    const scale = Math.min(stageWidth / image.width, stageHeight / image.height);
+  if (
+    image &&
+    stageWidth > 0 &&
+    stageHeight > 0 &&
+    (fitRef.current?.src !== src || fitRef.current?.epoch !== fitResetEpoch)
+  ) {
+    // The pre-rotation image is always centered on `flipPivot` (see the Group below), so
+    // rotating it in place keeps it centered - only the scale needs to account for the
+    // on-screen bounding box swapping width/height at 90/270.
+    const rotated = rotation === 90 || rotation === 270;
+    const effW = rotated ? image.height : image.width;
+    const effH = rotated ? image.width : image.height;
+    const scale = Math.min(stageWidth / effW, stageHeight / effH);
     fitRef.current = {
       src,
+      epoch: fitResetEpoch,
       scale,
       x: (stageWidth - image.width * scale) / 2,
       y: (stageHeight - image.height * scale) / 2,
     };
   }
 
-  const fit = fitRef.current?.src === src ? fitRef.current : null;
+  const fit = fitRef.current?.src === src && fitRef.current?.epoch === fitResetEpoch ? fitRef.current : null;
   if (!image || !fit) {
     return <Layer />;
   }

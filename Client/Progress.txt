@@ -1,14 +1,87 @@
 WorldWatcher - Feature Progress
 =========================================
-Last updated: 2026-08-14
+Last updated: 2026-08-16
 
-Covers three rounds of work: the map UX overhaul (toolbar/sidebar/
-fullscreen), the large follow-up round (drawing tools, grid/flip, DM
-content hub, encounters, creatures, initiative tracking), and this round
-(bug fixes + a second large feature batch: rotate, undo/redo, per-token
-sizing, dice roller, richer initiative tracking, creature/spell/item
-catalog split, advanced table search). Check marks = working and verified
-in-browser (Playwright smoke tests, no console errors).
+Covers three earlier rounds (see below, unchanged) plus this round: a large
+batch across Campaigns, Factions, DM Panel/NPCs, Map bug fixes, and an NPC
+randomizer. Check marks in the three earlier sections mean "verified
+in-browser" (Playwright smoke tests). This round's checkmarks mean
+"typechecks cleanly (tsc + vite build) and confirmed live against the
+running backend via curl (migrations applied, endpoints return the new
+fields)" - there is no browser-automation tool in this environment, so
+nothing below was click-tested in an actual browser session; that's still
+worth doing before calling this round done.
+
+ROUND 4 (2026-08-16): CAMPAIGNS, FACTIONS, DM PANEL/NPCs, MAP FIXES, NPC RANDOMIZER
+-------------------------------------------
+[x] Campaigns page: card corner radius reduced (was accidentally 56px via
+    the global theme multiplier); hover tooltip shows name/ruleset/
+    description (backend already had these fields, frontend just wasn't
+    reading them)
+[x] Factions: relations (Faction A <-> Faction B) now editable directly
+    from the faction form dialog (edit mode only - a brand-new faction has
+    no id yet to attach a relation to) and therefore from the table view
+    too, not just the diplomacy graph; added a `strength`-tiering
+    `importance` field (primary/secondary) per relation and an `influence`
+    field per faction (petty/local/minor/regional/major) - both new DB
+    columns, migrated and backfilled for the existing 8-faction/11-relation
+    sample data in both seeded campaigns
+[x] Factions bug fix: the diplomacy graph's ring used to show every
+    faction regardless of whether it actually had a relation to the
+    center - now filtered to only related factions
+[x] Factions graph: node size scales by influence (local/minor/regional/
+    major -> 44/54/64/80px), petty factions never appear in the graph at
+    all; new influence filter chip group (graph view's search/filter bar)
+    hides tiers other than the center's; radial position now depends on
+    relation importance (primary = inner dashed ring - previously drawn
+    but unused, secondary = outer ring); edge stroke width now tiers by
+    importance (primary 3-5px, secondary 1-2px) with strength still
+    varying weight inside the tier; canvas bumped 560->680px with a wider
+    outer ring to fit the two-ring layout comfortably
+[x] Factions overlay: legend moved from an always-visible panel to a small
+    (i) icon opening a popover; detail panel's responsive breakpoint
+    dropped lg->md so it stays beside the graph at more screen widths; the
+    low-contrast "selected faction" comparison bar recolored
+    secondary->info (better contrast in both themes, no global theme
+    change); Add/Edit/Delete toolbar collapses behind a toggle button
+[x] DM Panel: NPCs split out of the old 4-way "Creatures" hub into their
+    own top-level tab; the hub (now Monsters/Spells/Magic Items only) is
+    renamed "Compendium". NPCs and Monsters still share one `creatures` DB
+    table (avoids duplicating the whole stat-block schema) via two new
+    columns: `base_creature_id` (which monster, if any, an NPC's stats
+    were autofilled from) and `is_custom_build`
+[x] NPC form: Custom/Creature toggle - Creature mode searches the monster
+    catalog, autofills the whole stat block (still editable after) and the
+    portrait (unless you've already uploaded your own this session);
+    Custom mode is the old manual-entry behavior. New free-text
+    Description field (separate from the existing narrative History field)
+[x] Map bug fix: sidebar Favorites star not updating until refresh - root
+    cause was TokenLibraryPanel's paginated-list merge only appending
+    unseen ids and silently dropping in-place updates (like a favorite
+    toggle) to anything already loaded from an earlier page
+[x] Map bug fix: opening the "Random Encounter" table dropdown inside
+    Manage Tokens -> Encounters closed the whole popover - classic MUI
+    nested-portal ClickAwayListener issue, fixed with disablePortal on
+    that dropdown's menu
+[x] Map: Manage Tokens now remembers which tab (This Floor/Favorites/
+    Encounters) you were last on, and which random-encounter table was
+    selected, across popover close/reopen and page reload (new
+    localStorage-only UI-state store - deliberately not a DB table, same
+    reasoning as the original random-encounter-tables prototype)
+[x] Map: Reset View now actually computes a fit-to-viewport scale (reading
+    the live, fullscreen-aware Stage size) and auto-picks whichever of the
+    4 rotations best fills the screen without stretching, persisting that
+    rotation like a manual Rotate click would - previously it just reset
+    zoom/pan to 1:1 regardless of screen size or aspect ratio
+[x] NPC randomizer: die icon next to "Add NPC" randomizes every unlocked
+    field on a fresh NPC; every randomizable field (name, relation,
+    importance, profession, motivations, pitfalls, Custom/Creature toggle)
+    has its own lock + dice pair - locking protects a field from both its
+    own dice and the "randomize all" button. Names come from 4 new
+    `random_*` reference tables seeded once from 5etools' names.json
+    (2,723 first/last names imported, everything else in that file
+    discarded) plus hand-authored profession/motivation/pitfall lists
+    (36/5/5 entries - flagged as a first draft worth a content-review pass)
 
 MAP UX (toolbar, sidebar, fullscreen)
 -------------------------------------------
@@ -55,7 +128,11 @@ DRAWING TOOLS, GRID, FLIP, ROTATE
 
 DM PAGE HUB
 -------------------------------------------
-[x] DM page tabs: Maps / Encounters / Creatures / Quests / Notes
+[x] DM page tabs (as of Round 4): Maps / Encounters / Compendium / NPCs /
+    Factions / Quests / Bastions / Notes - originally Maps / Encounters /
+    Creatures / Quests / Notes, with Creatures a 4-way Monsters/NPCs/
+    Spells/Items hub; Round 4 split NPCs into their own tab and renamed
+    the hub (now Monsters/Spells/Items only) to Compendium
 [x] Quests and Notes remain empty "coming soon" placeholders
 [x] Advanced search: every DM table (Maps, Encounters, Monsters, NPCs,
     Spells, Magic Items) has a search icon next to its "Add" button that
@@ -66,9 +143,10 @@ DM PAGE HUB
 
 CREATURES, SPELLS, MAGIC ITEMS
 -------------------------------------------
-[x] Creatures tab is now a 4-way hub: Monsters (vanilla stat blocks),
-    NPCs (named campaign people, including bosses), Spells, Magic Items -
-    each with its own table + add/edit dialog + search/filter
+[x] Originally a 4-way hub (Monsters/NPCs/Spells/Magic Items) under one
+    Creatures tab - Round 4 split NPCs out into their own top-level tab
+    (see above); Monsters/Spells/Magic Items still share the "Compendium"
+    hub, each with its own table + add/edit dialog + search/filter
 [x] Full stat-block data model per creature, plus relation, importance,
     profession, and a grid-relative default/current size
 [x] Read-only stat block viewer matching your example table; opens from
@@ -166,6 +244,20 @@ KNOWN SIMPLIFICATIONS / NOT DONE
     smoke tests during development
 [ ] Touch/mobile input hasn't been tested for any of the newer
     interactions (drag-and-drop, drawing tools, dice roller)
+[ ] Round 4 (Campaigns/Factions/NPCs/Map fixes/randomizer) was verified by
+    typecheck + production build + curling the running backend, NOT by
+    actually clicking through the app in a browser - no browser-automation
+    tool is available in this environment. Worth an in-browser pass before
+    trusting it fully, especially the Manage Tokens popover fix (E2), the
+    Reset View auto-rotation (E4), and the NPC creature-picker autofill.
+[ ] random_professions/random_motivations/random_pitfalls are a
+    hand-authored first draft (36/5/5 entries) seeded once from the
+    importer script, not reviewed for tone/setting fit - worth a look
+    before relying on the randomizer for real sessions
+[ ] NPC importance randomizer picks among all existing importance values
+    except 'monster' (boss/npc/side-character/recurring/important/
+    quest-giver/minion/summon) - not narrowed further; flag if that's not
+    what you had in mind for "NPC importance"
 
 WHAT'S NEXT (suggested order)
 --------------------------------

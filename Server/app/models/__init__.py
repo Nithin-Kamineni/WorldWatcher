@@ -15,7 +15,16 @@ from app.models.encounters import Encounter, EncounterCreature, EncounterTable, 
 from app.models.items import Item
 from app.models.maps import Map, MapFloor, MapShape, MapToken, TokenLibrary
 from app.models.raw_entity import RawEntity
-from app.models.reference import Asset, Condition, Effect, Source
+from app.models.reference import (
+    Asset,
+    Condition,
+    Effect,
+    RandomMotivation,
+    RandomName,
+    RandomPitfall,
+    RandomProfession,
+    Source,
+)
 from app.models.spells import Spell
 
 __all__ = [
@@ -23,6 +32,10 @@ __all__ = [
     "Asset",
     "Condition",
     "Effect",
+    "RandomName",
+    "RandomProfession",
+    "RandomMotivation",
+    "RandomPitfall",
     "Creature",
     "CreatureAction",
     "Spell",

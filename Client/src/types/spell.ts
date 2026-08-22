@@ -80,3 +80,10 @@ export function formatRangeShort(range: string): string {
   if (!range) return range;
   return /^self\s*\(/i.test(range.trim()) ? 'Self' : range;
 }
+
+/** "V, S, M (a bit of sponge)" -> "V, S, M" for the table; full text (with material
+ * description) still shows in the detail view. */
+export function formatComponentsShort(components: string): string {
+  if (!components) return components;
+  return components.replace(/\s*\([^)]*\)\s*/g, '').trim();
+}

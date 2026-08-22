@@ -16,14 +16,23 @@ export const RELATION_TYPE_META: Record<FactionRelationType, { label: string; co
 
 export const RELATION_TYPES: FactionRelationType[] = ['ally', 'trade', 'peace', 'neutral', 'war', 'enemy'];
 
+export type FactionRelationImportance = 'primary' | 'secondary';
+
+export const RELATION_IMPORTANCE_OPTIONS: { value: FactionRelationImportance; label: string }[] = [
+  { value: 'primary', label: 'Primary' },
+  { value: 'secondary', label: 'Secondary' },
+];
+
 export interface FactionRelation {
   id: string;
   campaignId: string;
   factionAId: string;
   factionBId: string;
   type: FactionRelationType;
-  /** 0-100, drives connector line thickness/visual weight in the graph. */
+  /** 0-100, varies connector line thickness/visual weight within its importance tier. */
   strength: number;
+  /** Primary = inner ring (closer to center) + thick edge; secondary = outer ring + thin edge. */
+  importance: FactionRelationImportance;
   treaties: string[];
   notes: string;
 }
