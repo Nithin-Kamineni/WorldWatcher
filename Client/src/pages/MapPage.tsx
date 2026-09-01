@@ -20,14 +20,21 @@ import { MapSidebar } from '../components/map/sidebar/MapSidebar';
 import { MapToolbar } from '../components/map/toolbar/MapToolbar';
 import { TokenManagerPopover, type TokenManagerTab } from '../components/map/toolbar/TokenManagerPopover';
 import { CreatureStatBlockDialog } from '../components/dm/CreatureStatBlockDialog';
+import { ShortcutQuickBar } from '../components/map/ShortcutQuickBar';
+import { MapNumberInputPopover } from '../components/map/MapNumberInputPopover';
+import { MapTextInputPopover } from '../components/map/MapTextInputPopover';
+import { ShortcutsSettingsDialog } from '../components/settings/ShortcutsSettingsDialog';
 import { useCampaignStore, getCampaignById, getMapsForCampaign } from '../store/useCampaignStore';
+import { useWorldStore, getWorldById } from '../store/useWorldStore';
+import { useNavMemoryStore } from '../store/useNavMemoryStore';
 import { useTokenLibraryStore } from '../store/useTokenLibraryStore';
 import { useTokenManagerUiStore } from '../store/useTokenManagerUiStore';
 import { useEncounterStore, getEncountersForCampaign } from '../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../store/useCreatureStore';
-import { apiMapShapeToAoEShape, apiMapTokenToPlacedToken } from '../api/adapters';
+import { useShortcutStore, getEffectiveCombo } from '../store/useShortcutStore';
+import { apiMapShapeToAoEShape, apiMapTokenToPlacedToken, applyApiFloorMetaPatch } from '../api/adapters';
 import { connectRoom, floorRoom } from '../api/ws';
-import type { ApiMapShape, ApiMapToken } from '../api/types';
+import type { ApiMapFloor, ApiMapShape, ApiMapToken } from '../api/types';
 import { getPrimaryFloor, type GridType, type MapFloor } from '../types/map';
 import {
   DEFAULT_TOKEN_HP,
@@ -44,10 +51,21 @@ import type { Encounter, EncounterCreatureEntry } from '../types/encounter';
 import type { MapToolMode } from '../types/tool';
 import type { StagePoint } from '../utils/tokenDrag';
 import { computeBestFitRotation, type MapRotation } from '../utils/mapFit';
+import { SHORTCUT_ACTIONS, comboFromKeyboardEvent, formatCombo } from '../types/shortcut';
 
 const ZOOM_STEP = 1.2;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 5;
+
+type QuickInputPopoverState =
+  | { kind: 'damage' | 'heal' | 'tempHp'; targetIds: string[] }
+  | { kind: 'tag'; targetIds: string[] }
+  | { kind: 'rename' | 'notes'; targetId: string; initialValue: string }
+  | null;
+
+/** Fixed, viewport-relative anchor for the hotkey-triggered quick-action popovers - there's no
+ * meaningful click point to anchor to when a popover is opened from a keyboard shortcut. */
+const QUICK_POPOVER_ANCHOR = () => ({ top: Math.round(window.innerHeight * 0.3), left: Math.round(window.innerWidth / 2) });
 
 export function MapPage() {
   const { campaignId, mapId } = useParams<{ campaignId: string; mapId: string }>();
@@ -68,6 +86,7 @@ export function MapPage() {
   const creaturesByCampaignId = useCreatureStore((state) => state.creaturesByCampaignId);
   const fetchCreaturesForCampaign = useCreatureStore((state) => state.fetchCreaturesForCampaign);
   const creatureBrowse = useCreatureStore((state) => state.creatureBrowse);
+  const creaturePickerBrowse = useCreatureStore((state) => state.creaturePickerBrowse);
 
   const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -84,14 +103,47 @@ export function MapPage() {
   const [noStatsWarning, setNoStatsWarning] = useState(false);
   const [undoStack, setUndoStack] = useState<MapFloor[]>([]);
   const [redoStack, setRedoStack] = useState<MapFloor[]>([]);
+  const [selectedTokenIds, setSelectedTokenIds] = useState<string[]>([]);
+  const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
+  const [savedToast, setSavedToast] = useState(false);
+  const [quickInputPopover, setQuickInputPopover] = useState<QuickInputPopoverState>(null);
+
+  const shortcutOverrides = useShortcutStore((state) => state.overrides);
 
   const stageRef = useRef<Konva.Stage>(null);
-  const keyHandlersRef = useRef<{ undo: () => void; redo: () => void }>({ undo: () => {}, redo: () => {} });
+  const keyHandlersRef = useRef<{ undo: () => void; redo: () => void; blocked: boolean; shortcuts: Record<string, () => void> }>(
+    { undo: () => {}, redo: () => {}, blocked: false, shortcuts: {} },
+  );
 
   const campaign = getCampaignById(campaigns, campaignId);
   const maps = getMapsForCampaign(mapsByCampaignId, campaignId);
   const map = maps.find((m) => m.id === mapId);
   const mapsLoaded = campaignId ? !!mapsLoadedByCampaignId[campaignId] : false;
+  const worlds = useWorldStore((state) => state.worlds);
+  const setLastVisitedMap = useNavMemoryStore((state) => state.setLastVisitedMap);
+  const setLastLocation = useNavMemoryStore((state) => state.setLastLocation);
+
+  useEffect(() => {
+    if (!campaign || !map) return;
+    setLastVisitedMap({
+      worldId: campaign.worldId,
+      campaignId: campaign.id,
+      mapId: map.id,
+      mapName: map.name,
+      campaignName: campaign.name,
+      visitedAt: Date.now(),
+    });
+    setLastLocation({
+      worldId: campaign.worldId,
+      worldName: getWorldById(worlds, campaign.worldId)?.name ?? campaign.name,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      path: `/w/${campaign.worldId}/c/${campaign.id}/maps/${map.id}`,
+      sectionLabel: 'Maps',
+      visitedAt: Date.now(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign?.id, map?.id]);
   const activeFloor = map
     ? (map.floors.find((f) => f.id === activeFloorId) ?? getPrimaryFloor(map) ?? map.floors[0])
     : undefined;
@@ -102,6 +154,14 @@ export function MapPage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // While a dialog/popover with its own text field is open (rename/tag/notes/bulk-apply
+      // popovers, the shortcuts settings dialog), none of MapPage's own keyboard handling
+      // should fire in the background - not just the new hotkeys, but also Escape/undo/redo,
+      // which would otherwise silently reset the active tool or rewrite map history behind
+      // an open dialog. MUI's focus trap doesn't reliably move document.activeElement into
+      // the dialog's input, so this flag - not just an activeElement check - is what covers it.
+      if (keyHandlersRef.current.blocked) return;
+
       if (e.key === 'Escape') {
         setActiveTool('select');
         return;
@@ -110,9 +170,22 @@ export function MapPage() {
       if (ctrlOrCmd && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         keyHandlersRef.current.undo();
-      } else if (ctrlOrCmd && e.key.toLowerCase() === 'y') {
+        return;
+      }
+      if (ctrlOrCmd && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         keyHandlersRef.current.redo();
+        return;
+      }
+      // Combat shortcuts (t/l/g/y/r/h/e/j/k/n/d and friends) - never fire while typing in any
+      // text input elsewhere on the page.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      const combo = comboFromKeyboardEvent(e);
+      const handler = keyHandlersRef.current.shortcuts[combo];
+      if (handler) {
+        e.preventDefault();
+        handler();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -175,6 +248,11 @@ export function MapPage() {
           }));
           break;
         }
+        case 'floor:updated': {
+          const data = message.data as ApiMapFloor;
+          applyRemoteFloorPatch(campaignId, mapId, floorId, (floor) => applyApiFloorMetaPatch(floor, data));
+          break;
+        }
         default:
           break;
       }
@@ -183,7 +261,7 @@ export function MapPage() {
   }, [campaignId, map?.id, activeFloor?.id, applyRemoteFloorPatch]);
 
   if (!campaignId) {
-    return <Navigate to="/campaigns" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   if (!campaignsLoaded || !mapsLoaded) {
@@ -197,7 +275,7 @@ export function MapPage() {
   }
 
   if (!campaign || !map) {
-    return <Navigate to={campaign ? `/campaigns/${campaign.id}/dm` : '/campaigns'} replace />;
+    return <Navigate to={campaign ? `/w/${campaign.worldId}/c/${campaign.id}/maps` : '/dashboard'} replace />;
   }
 
   const mutateActiveFloor = (updater: (floor: typeof activeFloor) => typeof activeFloor) => {
@@ -230,8 +308,6 @@ export function MapPage() {
     setUndoStack((stack) => [...stack.slice(-HISTORY_LIMIT + 1), activeFloor]);
     updateFloorInMap(campaignId, map.id, activeFloor.id, () => next);
   };
-
-  keyHandlersRef.current = { undo: handleUndo, redo: handleRedo };
 
   const resolvePlacementSize = (relativeSize: number): number =>
     Math.min(MAX_TOKEN_SIZE, Math.max(MIN_TOKEN_SIZE, relativeSize * DEFAULT_TOKEN_SIZE));
@@ -458,10 +534,74 @@ export function MapPage() {
     mutateActiveFloor((floor) => ({ ...floor!, initiative: { ...DEFAULT_INITIATIVE_STATE, entries: [] } }));
   };
 
+  const handlePreviousTurn = () => {
+    mutateActiveFloor((floor) => {
+      const sorted = [...floor!.initiative.entries].sort((a, b) => (b.roll ?? 0) - (a.roll ?? 0));
+      if (sorted.length === 0) return floor!;
+      const currentIndex = sorted.findIndex((e) => e.id === floor!.initiative.currentEntryId);
+      const wrapped = currentIndex <= 0;
+      const prevIndex = wrapped ? sorted.length - 1 : currentIndex - 1;
+      return {
+        ...floor!,
+        initiative: {
+          ...floor!.initiative,
+          currentEntryId: sorted[prevIndex]?.id ?? null,
+          round: wrapped ? Math.max(1, floor!.initiative.round - 1) : floor!.initiative.round,
+        },
+      };
+    });
+  };
+
+  /** Wipes every placed token off the floor and resets initiative to idle - Improved
+   * Initiative's "Clear Encounter". */
+  const handleClearEncounter = () => {
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      placedTokens: [],
+      initiative: { ...DEFAULT_INITIATIVE_STATE, entries: [] },
+    }));
+    setSelectedTokenIds([]);
+  };
+
+  /** Removes only the downed (hp.current <= 0) tokens and their initiative entries - Improved
+   * Initiative's "Clean Encounter". */
+  const handleCleanEncounter = () => {
+    const deadIds = (activeFloor?.placedTokens ?? []).filter((t) => !!t.hp && t.hp.current <= 0).map((t) => t.id);
+    handleDeleteFloorTokens(deadIds);
+  };
+
+  /** Restores every token linked to a "Player" creature to full HP - Improved Initiative's
+   * "Restore all Player Character HP". */
+  const handleRestoreAllPcHp = () => {
+    const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
+    const encounters = getEncountersForCampaign(encountersByCampaignId, campaignId);
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      placedTokens: floor!.placedTokens.map((t) => {
+        if (!t.hp) return t;
+        const creature = findLinkedCreature(t, creatures, encounters);
+        if (creature?.relation !== 'player') return t;
+        return { ...t, hp: { current: t.hp.max, max: t.hp.max } };
+      }),
+    }));
+  };
+
   const handleUpdateFloorToken = (
     tokenId: string,
     changes: Partial<
-      Pick<PlacedToken, 'name' | 'size' | 'outlineColor' | 'effects' | 'hp' | 'concentrating' | 'deathSaves' | 'notes'>
+      Pick<
+        PlacedToken,
+        | 'name'
+        | 'size'
+        | 'outlineColor'
+        | 'effects'
+        | 'hp'
+        | 'tempHp'
+        | 'concentrating'
+        | 'reactionSpent'
+        | 'deathSaves'
+        | 'notes'
+      >
     >,
   ) => {
     mutateActiveFloorWithHistory((floor) => ({
@@ -470,12 +610,25 @@ export function MapPage() {
     }));
   };
 
-  const handleDeleteFloorToken = (tokenId: string) => {
+  /** Deletes one or more placed tokens AND prunes their matching InitiativeEntry rows - the
+   * single-token delete path (right-click > delete) previously left orphaned entries behind,
+   * silently tolerated by InitiativeBar/InitiativePanel's own tokenById filtering but never
+   * actually cleaned up; "Remove from Encounter" hotkey makes that gap visible, so it's fixed
+   * here for both callers. */
+  const handleDeleteFloorTokens = (tokenIds: string[]) => {
+    if (tokenIds.length === 0) return;
     mutateActiveFloorWithHistory((floor) => ({
       ...floor!,
-      placedTokens: floor!.placedTokens.filter((t) => t.id !== tokenId),
+      placedTokens: floor!.placedTokens.filter((t) => !tokenIds.includes(t.id)),
+      initiative: {
+        ...floor!.initiative,
+        entries: floor!.initiative.entries.filter((e) => !tokenIds.includes(e.tokenId)),
+      },
     }));
+    setSelectedTokenIds((prev) => prev.filter((id) => !tokenIds.includes(id)));
   };
+
+  const handleDeleteFloorToken = (tokenId: string) => handleDeleteFloorTokens([tokenId]);
 
   const handleTokenContextMenu = (token: PlacedToken, clientX: number, clientY: number) => {
     setTokenManagerAnchor(null);
@@ -536,15 +689,155 @@ export function MapPage() {
     mutateActiveFloorWithHistory((floor) => ({ ...floor!, rotation: ((floor!.rotation ?? 0) + 90) % 360 }));
   };
 
-  const handleTokenStatsRequest = (token: PlacedToken) => {
+  /** Same linkage as findLinkedCreature, but also falls back through the paginated/global
+   * caches (creatureBrowse, creaturePickerBrowse) and, as a last resort, an on-demand fetch -
+   * a token dropped from the global/compendium catalog carries a valid creatureId that may
+   * only be resolvable there, not in creaturesByCampaignId (see handleDropFavoriteCreature). */
+  const handleTokenStatsRequest = async (token: PlacedToken) => {
     const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
     const encounters = getEncountersForCampaign(encountersByCampaignId, campaignId);
-    const creature = findLinkedCreature(token, creatures, encounters);
-    if (creature) {
-      setStatsCreature(creature);
-    } else {
-      setNoStatsWarning(true);
+    const cached =
+      findLinkedCreature(token, creatures, encounters) ??
+      (token.creatureId
+        ? (creatureBrowse?.items.find((c) => c.id === token.creatureId) ??
+          creaturePickerBrowse?.items.find((c) => c.id === token.creatureId) ??
+          useCreatureStore.getState().creaturesById[token.creatureId])
+        : undefined);
+    if (cached) {
+      setStatsCreature(cached);
+      return;
     }
+    if (token.creatureId) {
+      const fetched = await useCreatureStore.getState().fetchCreatureById(token.creatureId);
+      if (fetched) {
+        setStatsCreature(fetched);
+        return;
+      }
+    }
+    setNoStatsWarning(true);
+  };
+
+  // -----------------------------------------------------------------------
+  // Multi-select + combatant hotkey actions
+  // -----------------------------------------------------------------------
+
+  const handleTokenSelect = (token: PlacedToken, additive: boolean) => {
+    setSelectedTokenIds((prev) => {
+      if (additive) return prev.includes(token.id) ? prev.filter((id) => id !== token.id) : [...prev, token.id];
+      return [token.id];
+    });
+  };
+
+  const handleClearSelection = () => setSelectedTokenIds([]);
+
+  /** Combatant-hotkey target resolution: the current selection, falling back to whoever's
+   * turn it currently is (Improved Initiative's own default when nothing is selected). */
+  const getActionTargetIds = (): string[] => {
+    if (selectedTokenIds.length > 0) return selectedTokenIds;
+    const currentEntry = activeFloor?.initiative.entries.find((e) => e.id === activeFloor.initiative.currentEntryId);
+    return currentEntry ? [currentEntry.tokenId] : [];
+  };
+
+  /** Applies one numeric amount to every target at once, in a single history step so undo is
+   * atomic across the whole bulk edit. Damage depletes tempHp before hp.current, per 5e rules. */
+  const applyBulkHp = (targetIds: string[], kind: 'damage' | 'heal' | 'tempHp', amount: number) => {
+    if (targetIds.length === 0 || !(amount > 0)) return;
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      placedTokens: floor!.placedTokens.map((t) => {
+        if (!targetIds.includes(t.id)) return t;
+        if (kind === 'tempHp') return { ...t, tempHp: amount };
+        const hp = t.hp ?? { current: 0, max: 0 };
+        if (kind === 'heal') return { ...t, hp: { current: Math.min(hp.max, hp.current + amount), max: hp.max } };
+        const temp = t.tempHp ?? 0;
+        const remaining = Math.max(0, amount - temp);
+        return { ...t, tempHp: Math.max(0, temp - amount), hp: { current: hp.current - remaining, max: hp.max } };
+      }),
+    }));
+  };
+
+  const handleAddTag = (targetIds: string[], tag: string) => {
+    const trimmed = tag.trim();
+    if (!trimmed || targetIds.length === 0) return;
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      placedTokens: floor!.placedTokens.map((t) =>
+        targetIds.includes(t.id) && !t.effects.includes(trimmed) ? { ...t, effects: [...t.effects, trimmed] } : t,
+      ),
+    }));
+  };
+
+  const handleToggleSpentReaction = (targetIds: string[]) => {
+    if (targetIds.length === 0) return;
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      placedTokens: floor!.placedTokens.map((t) =>
+        targetIds.includes(t.id) ? { ...t, reactionSpent: !t.reactionSpent } : t,
+      ),
+    }));
+  };
+
+  const handleSelectRelative = (direction: 1 | -1) => {
+    const tokens = activeFloor?.placedTokens ?? [];
+    if (tokens.length === 0) return;
+    const currentId = selectedTokenIds[0];
+    const currentIndex = currentId ? tokens.findIndex((t) => t.id === currentId) : -1;
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + direction + tokens.length) % tokens.length;
+    setSelectedTokenIds([tokens[nextIndex].id]);
+  };
+
+  const handleDuplicateCombatants = (targetIds: string[]) => {
+    if (targetIds.length === 0) return;
+    const newIds: string[] = [];
+    mutateActiveFloorWithHistory((floor) => {
+      let next = floor!;
+      for (const id of targetIds) {
+        const original = next.placedTokens.find((t) => t.id === id);
+        if (!original) continue;
+        const clone: PlacedToken = { ...original, id: crypto.randomUUID(), x: original.x + 24, y: original.y + 24 };
+        newIds.push(clone.id);
+        next = addTokenAndMaybeRollInitiative(next, clone);
+      }
+      return next;
+    });
+    if (newIds.length > 0) setSelectedTokenIds(newIds);
+  };
+
+  // Hotkey entry points for the small quick-input popovers (damage/heal/tempHp/tag/rename/notes)
+  const handleApplyDamageHotkey = () => {
+    const ids = getActionTargetIds();
+    if (ids.length > 0) setQuickInputPopover({ kind: 'damage', targetIds: ids });
+  };
+  const handleApplyHealingHotkey = () => {
+    const ids = getActionTargetIds();
+    if (ids.length > 0) setQuickInputPopover({ kind: 'heal', targetIds: ids });
+  };
+  const handleApplyTempHpHotkey = () => {
+    const ids = getActionTargetIds();
+    if (ids.length > 0) setQuickInputPopover({ kind: 'tempHp', targetIds: ids });
+  };
+  const handleAddTagHotkey = () => {
+    const ids = getActionTargetIds();
+    if (ids.length > 0) setQuickInputPopover({ kind: 'tag', targetIds: ids });
+  };
+  const handleRenameHotkey = () => {
+    if (selectedTokenIds.length !== 1) return;
+    const token = activeFloor?.placedTokens.find((t) => t.id === selectedTokenIds[0]);
+    if (token) setQuickInputPopover({ kind: 'rename', targetId: token.id, initialValue: token.name });
+  };
+  const handleNotesHotkey = () => {
+    if (selectedTokenIds.length !== 1) return;
+    const token = activeFloor?.placedTokens.find((t) => t.id === selectedTokenIds[0]);
+    if (token) setQuickInputPopover({ kind: 'notes', targetId: token.id, initialValue: token.notes ?? '' });
+  };
+  const handleQuickEditHotkey = () => {
+    const ids = getActionTargetIds();
+    if (ids.length !== 1) return;
+    setTokenManagerAnchor(null);
+    setTokenManagerPosition(QUICK_POPOVER_ANCHOR());
+    setTokenManagerFocusId(ids[0]);
+    setTokenManagerTab('floor');
+    setTokenManagerOpen(true);
   };
 
   const zoomBy = (factor: number) => {
@@ -598,8 +891,54 @@ export function MapPage() {
       ...token,
       relationTint: creature ? getCreatureRelationOption(creature.relation).tint : undefined,
       isCurrentTurn: activeFloor?.initiative.status === 'active' && currentEntry?.tokenId === token.id,
+      ac: creature?.ac,
     };
   });
+
+  const actionTargetIds = getActionTargetIds();
+
+  const actionHandlers: Record<string, () => void> = {
+    startEncounter: handleStartEncounter,
+    rerollInitiative: handleRollInitiative,
+    endEncounter: handleEndEncounter,
+    clearEncounter: handleClearEncounter,
+    cleanEncounter: handleCleanEncounter,
+    restoreAllPcHp: handleRestoreAllPcHp,
+    toggleFullScreen: () => setIsFullscreen((f) => !f),
+    nextTurn: handleNextTurn,
+    previousTurn: handlePreviousTurn,
+    saveEncounter: () => setSavedToast(true),
+    openSettings: () => setShortcutsDialogOpen(true),
+    applyDamage: handleApplyDamageHotkey,
+    applyHealing: handleApplyHealingHotkey,
+    applyTempHp: handleApplyTempHpHotkey,
+    addTag: handleAddTagHotkey,
+    updatePersistentNotes: handleNotesHotkey,
+    removeFromEncounter: () => handleDeleteFloorTokens(getActionTargetIds()),
+    rename: handleRenameHotkey,
+    toggleSpentReaction: () => handleToggleSpentReaction(getActionTargetIds()),
+    quickEditCombatant: handleQuickEditHotkey,
+    selectNext: () => handleSelectRelative(1),
+    selectPrevious: () => handleSelectRelative(-1),
+    duplicateCombatant: () => handleDuplicateCombatants(getActionTargetIds()),
+  };
+
+  const dispatchShortcutAction = (actionId: string) => actionHandlers[actionId]?.();
+
+  const shortcutComboMap: Record<string, () => void> = {};
+  for (const action of SHORTCUT_ACTIONS) {
+    if (!action.wired) continue;
+    const handler = actionHandlers[action.id];
+    if (!handler) continue;
+    shortcutComboMap[getEffectiveCombo(shortcutOverrides, action.id)] = handler;
+  }
+
+  keyHandlersRef.current = {
+    undo: handleUndo,
+    redo: handleRedo,
+    blocked: tokenManagerOpen || shortcutsDialogOpen || !!quickInputPopover,
+    shortcuts: shortcutComboMap,
+  };
 
   return (
     <AppShell fullHeight disableGutters hideHeader={isFullscreen}>
@@ -607,9 +946,9 @@ export function MapPage() {
         <Box sx={{ px: { xs: 2, sm: 3 }, pt: 3 }}>
           <Breadcrumbs
             items={[
-              { label: 'Campaigns', to: '/campaigns' },
-              { label: campaign.name, to: `/campaigns/${campaign.id}` },
-              { label: 'Dungeon Master', to: `/campaigns/${campaign.id}/dm` },
+              { label: 'Dashboard', to: '/dashboard' },
+              { label: campaign.name, to: `/w/${campaign.worldId}/c/${campaign.id}/home` },
+              { label: 'Maps', to: `/w/${campaign.worldId}/c/${campaign.id}/maps` },
               { label: map.name },
             ]}
           />
@@ -629,6 +968,9 @@ export function MapPage() {
               onTokenMove={handleTokenMove}
               onTokenContextMenu={handleTokenContextMenu}
               onTokenStatsRequest={handleTokenStatsRequest}
+              onTokenSelect={handleTokenSelect}
+              selectedTokenIds={selectedTokenIds}
+              onClearSelection={handleClearSelection}
               gridEnabled={map.gridEnabled}
               gridSize={map.gridSize}
               gridColor={map.gridColor}
@@ -666,6 +1008,15 @@ export function MapPage() {
                 initiative={activeFloor.initiative}
                 onAdvanceTurn={handleNextTurn}
                 onTokenStatsRequest={handleTokenStatsRequest}
+              />
+            </Box>
+          )}
+          {activeFloor && (
+            <Box sx={{ position: 'absolute', top: 16, right: 16, pointerEvents: 'none' }}>
+              <ShortcutQuickBar
+                overrides={shortcutOverrides}
+                hasTarget={actionTargetIds.length > 0}
+                onAction={dispatchShortcutAction}
               />
             </Box>
           )}
@@ -719,7 +1070,7 @@ export function MapPage() {
           floors={map.floors}
           activeFloorId={activeFloor?.id ?? ''}
           onSelectFloor={setActiveFloorId}
-          placedTokens={activeFloor?.placedTokens ?? []}
+          placedTokens={mapTokens}
           initiative={activeFloor?.initiative ?? DEFAULT_INITIATIVE_STATE}
           onRollInitiative={handleRollInitiative}
           onCancelRoll={handleCancelRoll}
@@ -729,10 +1080,15 @@ export function MapPage() {
           onNextTurn={handleNextTurn}
           onEndEncounter={handleEndEncounter}
           onUpdateToken={handleUpdateFloorToken}
+          selectedTokenIds={selectedTokenIds}
+          onTokenSelect={handleTokenSelect}
+          shortcutOverrides={shortcutOverrides}
         />
       </Stack>
 
-      <Tooltip title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen map'}>
+      <Tooltip
+        title={`${isFullscreen ? 'Exit fullscreen' : 'Fullscreen map'} (${formatCombo(getEffectiveCombo(shortcutOverrides, 'toggleFullScreen'))})`}
+      >
         <Fab
           size="medium"
           onClick={() => setIsFullscreen((f) => !f)}
@@ -767,6 +1123,76 @@ export function MapPage() {
           No stats available for this token.
         </Alert>
       </Snackbar>
+
+      <Snackbar open={savedToast} autoHideDuration={2000} onClose={() => setSavedToast(false)}>
+        <Alert severity="success" onClose={() => setSavedToast(false)} sx={{ width: '100%' }}>
+          Encounter saved.
+        </Alert>
+      </Snackbar>
+
+      {quickInputPopover?.kind === 'damage' && (
+        <MapNumberInputPopover
+          open
+          anchorPosition={QUICK_POPOVER_ANCHOR()}
+          title="Apply Damage"
+          targetCount={quickInputPopover.targetIds.length}
+          onSubmit={(amount) => applyBulkHp(quickInputPopover.targetIds, 'damage', amount)}
+          onClose={() => setQuickInputPopover(null)}
+        />
+      )}
+      {quickInputPopover?.kind === 'heal' && (
+        <MapNumberInputPopover
+          open
+          anchorPosition={QUICK_POPOVER_ANCHOR()}
+          title="Apply Healing"
+          targetCount={quickInputPopover.targetIds.length}
+          onSubmit={(amount) => applyBulkHp(quickInputPopover.targetIds, 'heal', amount)}
+          onClose={() => setQuickInputPopover(null)}
+        />
+      )}
+      {quickInputPopover?.kind === 'tempHp' && (
+        <MapNumberInputPopover
+          open
+          anchorPosition={QUICK_POPOVER_ANCHOR()}
+          title="Apply Temporary HP"
+          targetCount={quickInputPopover.targetIds.length}
+          onSubmit={(amount) => applyBulkHp(quickInputPopover.targetIds, 'tempHp', amount)}
+          onClose={() => setQuickInputPopover(null)}
+        />
+      )}
+      {quickInputPopover?.kind === 'tag' && (
+        <MapTextInputPopover
+          open
+          anchorPosition={QUICK_POPOVER_ANCHOR()}
+          title={`Add Tag${quickInputPopover.targetIds.length > 1 ? ` (${quickInputPopover.targetIds.length} combatants)` : ''}`}
+          initialValue=""
+          onSubmit={(value) => handleAddTag(quickInputPopover.targetIds, value)}
+          onClose={() => setQuickInputPopover(null)}
+        />
+      )}
+      {quickInputPopover?.kind === 'rename' && (
+        <MapTextInputPopover
+          open
+          anchorPosition={QUICK_POPOVER_ANCHOR()}
+          title="Rename"
+          initialValue={quickInputPopover.initialValue}
+          onSubmit={(value) => handleUpdateFloorToken(quickInputPopover.targetId, { name: value })}
+          onClose={() => setQuickInputPopover(null)}
+        />
+      )}
+      {quickInputPopover?.kind === 'notes' && (
+        <MapTextInputPopover
+          open
+          anchorPosition={QUICK_POPOVER_ANCHOR()}
+          title="Update Persistent Notes"
+          initialValue={quickInputPopover.initialValue}
+          multiline
+          onSubmit={(value) => handleUpdateFloorToken(quickInputPopover.targetId, { notes: value })}
+          onClose={() => setQuickInputPopover(null)}
+        />
+      )}
+
+      <ShortcutsSettingsDialog open={shortcutsDialogOpen} onClose={() => setShortcutsDialogOpen(false)} />
     </AppShell>
   );
 }

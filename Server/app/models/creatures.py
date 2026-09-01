@@ -53,6 +53,11 @@ class Creature(Base):
     motivations: Mapped[Optional[str]] = mapped_column(Text)
     pitfalls: Mapped[Optional[str]] = mapped_column(Text)
     history: Mapped[Optional[str]] = mapped_column(Text)
+    # NPC-only, newline-joined itemized lists (same convention as motivations/pitfalls/traits
+    # above) - see random_appearances/random_secrets/random_relationships reference banks.
+    appearance: Mapped[Optional[str]] = mapped_column(Text)
+    secrets: Mapped[Optional[str]] = mapped_column(Text)
+    relationships: Mapped[Optional[str]] = mapped_column(Text)
     portrait_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"))
     token_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"))
     # NPC-only: which monster (if any) this NPC's stats were autofilled from, and whether the

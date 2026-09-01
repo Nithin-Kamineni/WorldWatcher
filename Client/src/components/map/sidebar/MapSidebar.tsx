@@ -15,6 +15,7 @@ import { InitiativePanel } from './InitiativePanel';
 import type { MapFloor } from '../../../types/map';
 import type { InitiativeState } from '../../../types/initiative';
 import type { PlacedToken } from '../../../types/token';
+import type { ShortcutOverride } from '../../../store/useShortcutStore';
 
 type SidebarSection = 'tokens' | 'floors' | 'initiative';
 
@@ -36,6 +37,9 @@ interface MapSidebarProps {
     tokenId: string,
     changes: Partial<Pick<PlacedToken, 'hp' | 'concentrating' | 'deathSaves' | 'notes' | 'effects'>>,
   ) => void;
+  selectedTokenIds: string[];
+  onTokenSelect: (token: PlacedToken, additive: boolean) => void;
+  shortcutOverrides: Record<string, ShortcutOverride>;
 }
 
 const RAIL_WIDTH = 56;
@@ -56,6 +60,9 @@ export function MapSidebar({
   onNextTurn,
   onEndEncounter,
   onUpdateToken,
+  selectedTokenIds,
+  onTokenSelect,
+  shortcutOverrides,
 }: MapSidebarProps) {
   const [collapsed, setCollapsed] = useState(true);
   const [section, setSection] = useState<SidebarSection>('tokens');
@@ -98,6 +105,9 @@ export function MapSidebar({
               onNextTurn={onNextTurn}
               onEndEncounter={onEndEncounter}
               onUpdateToken={onUpdateToken}
+              selectedTokenIds={selectedTokenIds}
+              onTokenSelect={onTokenSelect}
+              shortcutOverrides={shortcutOverrides}
             />
           )}
         </Paper>

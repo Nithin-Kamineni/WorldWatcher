@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -22,29 +22,45 @@ import CasinoIcon from '@mui/icons-material/Casino';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { EncountersTable } from './EncountersTable';
 import { EncounterFormDialog } from './EncounterFormDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { RandomEncounterTableFormDialog } from './RandomEncounterTableFormDialog';
 import { FilterBar } from './FilterBar';
 import { FilterChipGroup } from './FilterChipGroup';
+import { SituationalTablesView } from './SituationalTablesView';
 import { useEncounterStore, getEncountersForCampaign } from '../../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatureStore';
 import {
   useRandomEncounterTableStore,
   getRandomEncounterTablesForCampaign,
 } from '../../store/useRandomEncounterTableStore';
+import { useSituationalTableStore } from '../../store/useSituationalTableStore';
 import type { Encounter } from '../../types/encounter';
 import type { RandomEncounterTable } from '../../types/randomEncounterTable';
 
+export type EncounterView = 'menu' | 'management' | 'random_tables' | 'situational_tables';
+
 interface EncountersSectionProps {
   campaignId: string;
+  /** Optional controlled view - lets a page-level owner (e.g. EncountersPage, via the
+   * `?view=` query param) drive which sub-view is shown. Falls back to internal state
+   * when omitted. */
+  view?: EncounterView;
+  onViewChange?: (view: EncounterView) => void;
+  /** Deep-link support (e.g. from the Play page's Items window "open in new tab") - opens this
+   * encounter's edit dialog once, as soon as it's loaded. */
+  openEncounterId?: string;
 }
 
-type EncounterView = 'menu' | 'management' | 'random_tables';
-
-export function EncountersSection({ campaignId }: EncountersSectionProps) {
-  const [view, setView] = useState<EncounterView>('menu');
+export function EncountersSection({ campaignId, view: controlledView, onViewChange, openEncounterId }: EncountersSectionProps) {
+  const [internalView, setInternalView] = useState<EncounterView>('menu');
+  const view = controlledView ?? internalView;
+  const setView = (next: EncounterView) => {
+    if (onViewChange) onViewChange(next);
+    else setInternalView(next);
+  };
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEncounter, setEditingEncounter] = useState<Encounter | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<Encounter | null>(null);
@@ -72,6 +88,9 @@ export function EncountersSection({ campaignId }: EncountersSectionProps) {
   const updateRandomTable = (table: RandomEncounterTable) => updateRandomTableAction(campaignId, table);
   const deleteRandomTable = (tableId: string) => deleteRandomTableAction(campaignId, tableId);
 
+  const situationalTables = useSituationalTableStore((s) => s.tables);
+  const fetchSituationalTables = useSituationalTableStore((s) => s.fetchTables);
+
   const encounters = getEncountersForCampaign(encountersByCampaignId, campaignId);
   const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
 
@@ -79,7 +98,25 @@ export function EncountersSection({ campaignId }: EncountersSectionProps) {
     fetchCreaturesForCampaign(campaignId);
     fetchEncountersForCampaign(campaignId, allCampaigns ? 'all' : 'own_or_global');
     fetchTablesForCampaign(campaignId);
-  }, [campaignId, allCampaigns, fetchCreaturesForCampaign, fetchEncountersForCampaign, fetchTablesForCampaign]);
+    fetchSituationalTables();
+  }, [
+    campaignId,
+    allCampaigns,
+    fetchCreaturesForCampaign,
+    fetchEncountersForCampaign,
+    fetchTablesForCampaign,
+    fetchSituationalTables,
+  ]);
+
+  const deepLinkedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openEncounterId || deepLinkedRef.current === openEncounterId) return;
+    const target = encounters.find((e) => e.id === openEncounterId);
+    if (!target) return;
+    deepLinkedRef.current = openEncounterId;
+    setEditingEncounter(target);
+    setDialogOpen(true);
+  }, [openEncounterId, encounters]);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -146,6 +183,18 @@ export function EncountersSection({ campaignId }: EncountersSectionProps) {
               <Typography variant="h6">Encounter Management</Typography>
               <Typography variant="body2" color="text.secondary">
                 {encounters.length} saved encounter{encounters.length === 1 ? '' : 's'}
+              </Typography>
+            </Stack>
+          </Card>
+        </Paper>
+
+        <Paper elevation={2} sx={{ borderRadius: 4, width: 260 }}>
+          <Card onClick={() => setView('situational_tables')} sx={{ p: 3, borderRadius: 4 }}>
+            <Stack spacing={1.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
+              <TravelExploreIcon sx={{ fontSize: 40 }} color="primary" />
+              <Typography variant="h6">Roleplay & Exploration</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {situationalTables.length} table{situationalTables.length === 1 ? '' : 's'}
               </Typography>
             </Stack>
           </Card>
@@ -269,6 +318,23 @@ export function EncountersSection({ campaignId }: EncountersSectionProps) {
             setDeleteRandomTableTarget(null);
           }}
         />
+      </Box>
+    );
+  }
+
+  if (view === 'situational_tables') {
+    return (
+      <Box>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 3 }}>
+          <IconButton size="small" onClick={() => setView('menu')}>
+            <ArrowBackIcon fontSize="small" />
+          </IconButton>
+          <Typography variant="h5" component="h2">
+            Roleplay & Exploration
+          </Typography>
+        </Stack>
+
+        <SituationalTablesView />
       </Box>
     );
   }

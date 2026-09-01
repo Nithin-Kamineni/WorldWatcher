@@ -24,6 +24,8 @@ interface CampaignStoreState {
   activeMapId: string | null;
 
   fetchCampaigns: () => Promise<void>;
+  addCampaign: (worldId: string, name: string, description?: string) => Promise<Campaign>;
+  updateCampaign: (id: string, patch: { name?: string; description?: string }) => Promise<void>;
   fetchMapsForCampaign: (campaignId: string) => Promise<void>;
   addMapToCampaign: (campaignId: string, map: MapData) => void;
   updateMapInCampaign: (campaignId: string, map: MapData) => void;
@@ -95,6 +97,19 @@ export const useCampaignStore = create<CampaignStoreState>((set, get) => ({
     } finally {
       set({ campaignsLoading: false });
     }
+  },
+
+  addCampaign: async (worldId, name, description) => {
+    const apiCampaign = await campaignsApi.createCampaign({ world_id: worldId, name, description: description ?? null });
+    const campaign = apiCampaignToCampaign(apiCampaign);
+    set((state) => ({ campaigns: [...state.campaigns, campaign] }));
+    return campaign;
+  },
+
+  updateCampaign: async (id, patch) => {
+    const apiCampaign = await campaignsApi.updateCampaign(id, patch);
+    const campaign = apiCampaignToCampaign(apiCampaign);
+    set((state) => ({ campaigns: state.campaigns.map((c) => (c.id === id ? campaign : c)) }));
   },
 
   fetchMapsForCampaign: async (campaignId) => {

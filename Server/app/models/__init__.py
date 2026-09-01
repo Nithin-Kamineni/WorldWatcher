@@ -1,4 +1,5 @@
 """Import every model so they register on Base.metadata for Alembic autogenerate."""
+from app.models.article import Article, ArticleFolder
 from app.models.bastions import Bastion, BastionFacility, BastionFacilityInstance
 from app.models.campaign import (
     Campaign,
@@ -14,20 +15,41 @@ from app.models.creatures import Creature, CreatureAction
 from app.models.encounters import Encounter, EncounterCreature, EncounterTable, EncounterTableCreature
 from app.models.items import Item
 from app.models.maps import Map, MapFloor, MapShape, MapToken, TokenLibrary
+from app.models.note import Note, NoteFolder
 from app.models.raw_entity import RawEntity
 from app.models.reference import (
     Asset,
     Condition,
     Effect,
+    RandomAppearance,
+    RandomDungeonQuirk,
+    RandomDungeonStateOfRuin,
     RandomMotivation,
     RandomName,
+    RandomPersonality,
     RandomPitfall,
     RandomProfession,
+    RandomRelationship,
+    RandomSecret,
+    RandomSettlementCalamity,
+    RandomSettlementClaimToFame,
+    RandomSettlementDefiningTrait,
+    RandomSettlementEconomicSource,
+    RandomSettlementLocalLeader,
+    RandomSettlementRumorHook,
+    RandomShopType,
+    RandomTavernNamePart,
     Source,
 )
+from app.models.session_chat import SessionChat
+from app.models.situational_table import SituationalTable
 from app.models.spells import Spell
+from app.models.world import World
 
 __all__ = [
+    "World",
+    "Article",
+    "ArticleFolder",
     "Source",
     "Asset",
     "Condition",
@@ -36,6 +58,20 @@ __all__ = [
     "RandomProfession",
     "RandomMotivation",
     "RandomPitfall",
+    "RandomAppearance",
+    "RandomSecret",
+    "RandomPersonality",
+    "RandomRelationship",
+    "RandomDungeonStateOfRuin",
+    "RandomDungeonQuirk",
+    "RandomShopType",
+    "RandomTavernNamePart",
+    "RandomSettlementDefiningTrait",
+    "RandomSettlementClaimToFame",
+    "RandomSettlementCalamity",
+    "RandomSettlementLocalLeader",
+    "RandomSettlementEconomicSource",
+    "RandomSettlementRumorHook",
     "Creature",
     "CreatureAction",
     "Spell",
@@ -62,4 +98,8 @@ __all__ = [
     "BastionFacility",
     "Bastion",
     "BastionFacilityInstance",
+    "Note",
+    "NoteFolder",
+    "SessionChat",
+    "SituationalTable",
 ]

@@ -19,9 +19,12 @@ async def list_campaigns(
     page: PaginationDep,
     q: Optional[str] = None,
     sort: Optional[str] = None,
+    world_id: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
 ):
     base = select(Campaign)
+    if world_id is not None:
+        base = base.where(Campaign.world_id == world_id)
     base = apply_search(base, Campaign, ["name"], q)
     sorted_stmt = apply_sort(base, Campaign, sort, "name")
     items, meta = await paginate(db, base, sorted_stmt, page)

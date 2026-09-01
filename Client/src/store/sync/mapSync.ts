@@ -127,12 +127,18 @@ function tokenFieldsEqual(a: PlacedToken, b: PlacedToken): boolean {
     a.imageSrc === b.imageSrc &&
     JSON.stringify(a.effects) === JSON.stringify(b.effects) &&
     JSON.stringify(a.hp) === JSON.stringify(b.hp) &&
+    a.tempHp === b.tempHp &&
     a.concentrating === b.concentrating &&
+    a.reactionSpent === b.reactionSpent &&
     JSON.stringify(a.deathSaves) === JSON.stringify(b.deathSaves) &&
     a.notes === b.notes &&
     a.encounterEntryId === b.encounterEntryId &&
     a.creatureId === b.creatureId
   );
+}
+
+function tokenExtrasRawData(token: PlacedToken): { tempHp: number | null; reactionSpent: boolean } {
+  return { tempHp: token.tempHp ?? null, reactionSpent: token.reactionSpent ?? false };
 }
 
 async function syncTokens(floorId: string, oldTokens: PlacedToken[], newTokens: PlacedToken[]): Promise<void> {
@@ -161,6 +167,7 @@ async function syncTokens(floorId: string, oldTokens: PlacedToken[], newTokens: 
         death_save_successes: token.deathSaves?.successes ?? 0,
         death_save_failures: token.deathSaves?.failures ?? 0,
         notes: token.notes ?? null,
+        raw_data: tokenExtrasRawData(token),
       });
     } else if (!tokenFieldsEqual(old, token)) {
       const imageChanged = old.imageSrc !== token.imageSrc;
@@ -179,6 +186,7 @@ async function syncTokens(floorId: string, oldTokens: PlacedToken[], newTokens: 
         death_save_successes: token.deathSaves?.successes ?? 0,
         death_save_failures: token.deathSaves?.failures ?? 0,
         notes: token.notes ?? null,
+        raw_data: tokenExtrasRawData(token),
         ...(imageChanged && assetId ? { image_asset_id: assetId } : {}),
       });
     }

@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS assets (
   asset_type     TEXT          NOT NULL
     CHECK (asset_type IN ('creature_portrait','creature_token','item_image','map','npc_portrait',
                            'faction_image','location_image','spell_image','character_portrait',
-                           'character_token','bastion_facility_image','other')),
+                           'character_token','bastion_facility_image','article_cover_image','other')),
   mime_type      TEXT          NULL,
   width          INTEGER       NULL,
   height         INTEGER       NULL,
@@ -77,10 +77,29 @@ CREATE INDEX IF NOT EXISTS assets_asset_type_idx ON assets (asset_type);
 CREATE INDEX IF NOT EXISTS assets_storage_path_idx ON assets (storage_path);
 
 -- ============================================================
+-- 2b. worlds
+-- ============================================================
+-- The setting - reusable across one or more Campaigns (play-throughs). Added
+-- for the World -> Campaign scope split (Prompt Images/WorldWatcher UI
+-- redisgn.md section 2); not part of the original 23-table design doc.
+CREATE TABLE IF NOT EXISTS worlds (
+  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  name           TEXT          NOT NULL,
+  description    TEXT          NULL,
+  image_asset_id UUID          NULL REFERENCES assets (id),
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_worlds_updated_at ON worlds;
+CREATE TRIGGER trg_worlds_updated_at BEFORE UPDATE ON worlds
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
 -- 3. campaigns
 -- ============================================================
 CREATE TABLE IF NOT EXISTS campaigns (
   id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  world_id       UUID          NOT NULL REFERENCES worlds (id),
   name           TEXT          NOT NULL,
   description    TEXT          NULL,
   image_asset_id UUID          NULL REFERENCES assets (id),
@@ -88,8 +107,121 @@ CREATE TABLE IF NOT EXISTS campaigns (
   created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS campaigns_world_id_idx ON campaigns (world_id);
 DROP TRIGGER IF EXISTS trg_campaigns_updated_at ON campaigns;
 CREATE TRIGGER trg_campaigns_updated_at BEFORE UPDATE ON campaigns
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- 3b. article_folders / articles
+-- ============================================================
+-- World Anvil-style wiki entries - promoted from a frontend-only localStorage
+-- prototype (useArticleStore). One generic `articles` table backs every
+-- ArticleCategory from types/article.ts's ARTICLE_TEMPLATES; per-category
+-- template fields live in field_values (JSONB) instead of one column per
+-- field, so new categories/fields don't need a migration. linked_entity_type/
+-- linked_entity_id back an in-progress article<->NPC/Creature/Spell/Item
+-- bridging feature - loose reference, no FK, since the target table varies.
+CREATE TABLE IF NOT EXISTS article_folders (
+  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  world_id       UUID          NOT NULL REFERENCES worlds (id) ON DELETE CASCADE,
+  parent_id      UUID          NULL REFERENCES article_folders (id) ON DELETE CASCADE,
+  name           TEXT          NOT NULL,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS article_folders_world_id_idx ON article_folders (world_id);
+CREATE INDEX IF NOT EXISTS article_folders_parent_id_idx ON article_folders (parent_id);
+DROP TRIGGER IF EXISTS trg_article_folders_updated_at ON article_folders;
+CREATE TRIGGER trg_article_folders_updated_at BEFORE UPDATE ON article_folders
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS articles (
+  id                  UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  world_id            UUID          NOT NULL REFERENCES worlds (id) ON DELETE CASCADE,
+  folder_id           UUID          NULL REFERENCES article_folders (id) ON DELETE SET NULL,
+  category            TEXT          NOT NULL,
+  name                TEXT          NOT NULL,
+  cover_image_asset_id UUID         NULL REFERENCES assets (id),
+  tags                JSONB         NOT NULL DEFAULT '[]'::jsonb,
+  visibility          TEXT          NOT NULL DEFAULT 'gm',
+  field_values        JSONB         NOT NULL DEFAULT '{}'::jsonb,
+  body                TEXT          NOT NULL DEFAULT '',
+  linked_entity_type  TEXT          NULL,
+  linked_entity_id    UUID          NULL,
+  created_at          TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS articles_world_id_idx ON articles (world_id);
+CREATE INDEX IF NOT EXISTS articles_folder_id_idx ON articles (folder_id);
+DROP TRIGGER IF EXISTS trg_articles_updated_at ON articles;
+CREATE TRIGGER trg_articles_updated_at BEFORE UPDATE ON articles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- 3c. note_folders / notes
+-- ============================================================
+-- Campaign-scoped sibling of article_folders/articles - backs the Notes rail
+-- section's "Folders" toggle (session-prep sheets, narrative/arc-planning
+-- entries, and freeform notes organized into a file-explorer-style tree).
+-- Two note_folders rows per campaign (Sessions/Narratives) are seeded lazily
+-- by the frontend on first visit, not by this schema - is_default/
+-- default_kind mark those two as protected from rename/delete (also
+-- enforced server-side, see app/api/routers/notes.py).
+CREATE TABLE IF NOT EXISTS note_folders (
+  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  campaign_id    UUID          NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
+  parent_id      UUID          NULL REFERENCES note_folders (id) ON DELETE CASCADE,
+  name           TEXT          NOT NULL,
+  is_default     BOOLEAN       NOT NULL DEFAULT false,
+  default_kind   TEXT          NULL,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS note_folders_campaign_id_idx ON note_folders (campaign_id);
+CREATE INDEX IF NOT EXISTS note_folders_parent_id_idx ON note_folders (parent_id);
+DROP TRIGGER IF EXISTS trg_note_folders_updated_at ON note_folders;
+CREATE TRIGGER trg_note_folders_updated_at BEFORE UPDATE ON note_folders
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS notes (
+  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  campaign_id    UUID          NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
+  folder_id      UUID          NULL REFERENCES note_folders (id) ON DELETE SET NULL,
+  name           TEXT          NOT NULL,
+  kind           TEXT          NULL,
+  body           TEXT          NOT NULL DEFAULT '',
+  tags           JSONB         NOT NULL DEFAULT '[]'::jsonb,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notes_campaign_id_idx ON notes (campaign_id);
+CREATE INDEX IF NOT EXISTS notes_folder_id_idx ON notes (folder_id);
+DROP TRIGGER IF EXISTS trg_notes_updated_at ON notes;
+CREATE TRIGGER trg_notes_updated_at BEFORE UPDATE ON notes
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- 3d. session_chats
+-- ============================================================
+-- Campaign-scoped, DM-only chat/scratch log for the Play page session runner
+-- - a running log of quick notes the DM types while running a live session,
+-- optionally tied to the session-prep Note it's paired with. Not player-
+-- facing chat. messages is JSONB (array of {id, text, createdAt}), replaced
+-- whole on write - same precedent as notes.tags above.
+CREATE TABLE IF NOT EXISTS session_chats (
+  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  campaign_id    UUID          NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
+  note_id        UUID          NULL REFERENCES notes (id) ON DELETE SET NULL,
+  name           TEXT          NOT NULL,
+  messages       JSONB         NOT NULL DEFAULT '[]'::jsonb,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS session_chats_campaign_id_idx ON session_chats (campaign_id);
+CREATE INDEX IF NOT EXISTS session_chats_note_id_idx ON session_chats (note_id);
+DROP TRIGGER IF EXISTS trg_session_chats_updated_at ON session_chats;
+CREATE TRIGGER trg_session_chats_updated_at BEFORE UPDATE ON session_chats
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ============================================================
@@ -161,6 +293,11 @@ CREATE TABLE IF NOT EXISTS creatures (
   motivations               TEXT        NULL,
   pitfalls                  TEXT        NULL,
   history                   TEXT        NULL,
+  -- NPC-only, newline-joined itemized lists (same convention as motivations/pitfalls/traits
+  -- above) - see random_appearances/random_secrets/random_relationships reference banks.
+  appearance                TEXT        NULL,
+  secrets                   TEXT        NULL,
+  relationships             TEXT        NULL,
   portrait_asset_id         UUID        NULL REFERENCES assets (id),
   token_asset_id            UUID        NULL REFERENCES assets (id),
   -- NPC-only: which monster (if any) this NPC's stats were autofilled from, and whether the
@@ -922,6 +1059,129 @@ CREATE TABLE IF NOT EXISTS random_pitfalls (
   text       TEXT        NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- NPC "Personality" itemized field reuses creatures.traits (no bank table needed beyond
+-- this one); appearance/secrets/relationships below back the matching creatures columns.
+CREATE TABLE IF NOT EXISTS random_appearances (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_secrets (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_personalities (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_relationships (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
+-- Places randomizer reference banks (World Manager Places tab: Countries/Settlements/
+-- Buildings/Dungeons) - same flat text-list shape as the NPC banks above, no uniqueness
+-- constraint, seeded once via Database/Maintainance/scripts/seed_places_random_banks.py.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS random_dungeon_states_of_ruin (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_dungeon_quirks (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_shop_types (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_tavern_name_parts (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  part_type  TEXT        NOT NULL CHECK (part_type IN ('first','second')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS random_tavern_name_parts_part_type_idx ON random_tavern_name_parts (part_type);
+
+CREATE TABLE IF NOT EXISTS random_settlement_defining_traits (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_settlement_claims_to_fame (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_settlement_calamities (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_settlement_local_leaders (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_settlement_economic_sources (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS random_settlement_rumors_hooks (
+  id         UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  text       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
+-- 29. situational_tables
+-- ============================================================
+-- Curated, hand-authored non-combat roleplay/exploration random tables for
+-- the Encounters section's "Roleplay & Exploration" tab (e.g. a themed
+-- "Darkwood Forest" table with linked encounter/behavior/complication
+-- columns, each independently rolled and combined into a scene prompt).
+-- Read-only reference content seeded by
+-- Database/Maintainance/scripts/seed_situational_tables.py, same precedent
+-- as the flat random_* bank tables above - no write endpoints, no FK to
+-- anything. `columns` is JSONB (array of {key,label,dieSize,entries:
+-- [{roll,text}]}) rather than normalized join tables since this is
+-- hand-authored content that only needs to render, not be queried
+-- relationally.
+CREATE TABLE IF NOT EXISTS situational_tables (
+  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  name           TEXT          NOT NULL,
+  theme          TEXT          NOT NULL,
+  tags           JSONB         NOT NULL DEFAULT '[]'::jsonb,
+  description    TEXT          NOT NULL DEFAULT '',
+  source         TEXT          NOT NULL DEFAULT '',
+  columns        JSONB         NOT NULL,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS situational_tables_theme_idx ON situational_tables (theme);
+DROP TRIGGER IF EXISTS trg_situational_tables_updated_at ON situational_tables;
+CREATE TRIGGER trg_situational_tables_updated_at BEFORE UPDATE ON situational_tables
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ============================================================
 -- Deferred FKs (mutual references resolved after all tables exist)

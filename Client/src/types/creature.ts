@@ -152,6 +152,12 @@ export interface Creature {
   history?: string;
   /** npc-only: freeform appearance/summary blurb, distinct from the narrative `history` field */
   description?: string;
+  /** npc-only: itemized appearance features, newline-joined (same convention as motivations/pitfalls) */
+  appearance?: string;
+  /** npc-only: itemized secrets, newline-joined */
+  secrets?: string;
+  /** npc-only: itemized relationship dynamics, newline-joined */
+  relationships?: string;
   /** npc-only: which monster (if any) this NPC's stats were last autofilled from */
   baseCreatureId?: string;
   /** npc-only: 'custom' form mode (manual class/level/etc) vs 'creature' mode (picked from

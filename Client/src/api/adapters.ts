@@ -6,6 +6,8 @@
 import { assetFileUrl } from './client';
 import { uploadAsset } from './resources/assets';
 import type {
+  ApiArticle,
+  ApiArticleFolder,
   ApiBastion,
   ApiBastionDetail,
   ApiBastionFacility,
@@ -22,13 +24,21 @@ import type {
   ApiMapFloor,
   ApiMapShape,
   ApiMapToken,
+  ApiNote,
+  ApiNoteFolder,
   ApiQuest,
   ApiRandomEncounterTable,
+  ApiSessionChat,
   ApiSpell,
   ApiTokenLibraryEntry,
+  ApiWorld,
 } from './types';
+import type { Article, ArticleCategory, ArticleFolder, ArticleVisibility } from '../types/article';
+import type { Note, NoteFolder, NoteKind } from '../types/note';
+import type { SessionChat } from '../types/sessionChat';
 import type { Bastion, BastionFacility, BastionFacilityInstance, BastionFacilityInstanceStatus } from '../types/bastion';
 import type { Campaign } from '../types/campaign';
+import type { World } from '../types/world';
 import type { AbilityScores, Creature, CreatureCategory } from '../types/creature';
 import type {
   Encounter,
@@ -155,12 +165,187 @@ export async function resolveImageAsset(
 export function apiCampaignToCampaign(c: ApiCampaign): Campaign {
   return {
     id: c.id,
+    worldId: c.world_id,
     name: c.name,
     imageSrc: assetFileUrl(c.image_asset_id),
     description: c.description ?? '',
     ruleset: c.ruleset ?? '',
     createdAt: toEpochMs(c.created_at),
     updatedAt: toEpochMs(c.updated_at),
+  };
+}
+
+// ---------------------------------------------------------------------
+// World
+// ---------------------------------------------------------------------
+
+export function apiWorldToWorld(w: ApiWorld): World {
+  return {
+    id: w.id,
+    name: w.name,
+    imageSrc: assetFileUrl(w.image_asset_id),
+    description: w.description ?? '',
+    createdAt: toEpochMs(w.created_at),
+    updatedAt: toEpochMs(w.updated_at),
+  };
+}
+
+// ---------------------------------------------------------------------
+// Articles / article folders
+// ---------------------------------------------------------------------
+
+export function apiArticleFolderToArticleFolder(f: ApiArticleFolder): ArticleFolder {
+  return {
+    id: f.id,
+    worldId: f.world_id,
+    parentId: f.parent_id,
+    name: f.name,
+  };
+}
+
+export function articleFolderToApiPayload(folder: ArticleFolder): Record<string, unknown> {
+  return {
+    id: folder.id,
+    world_id: folder.worldId,
+    parent_id: folder.parentId,
+    name: folder.name,
+  };
+}
+
+function fieldValuesFromJson(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string') out[key] = v;
+  }
+  return out;
+}
+
+export function apiArticleToArticle(a: ApiArticle): Article {
+  return {
+    id: a.id,
+    worldId: a.world_id,
+    folderId: a.folder_id,
+    category: a.category as ArticleCategory,
+    name: a.name,
+    coverImageSrc: assetFileUrl(a.cover_image_asset_id),
+    tags: toStringArray(a.tags),
+    visibility: a.visibility as ArticleVisibility,
+    fieldValues: fieldValuesFromJson(a.field_values),
+    body: a.body,
+    linkedEntityType: (a.linked_entity_type as Article['linkedEntityType']) ?? null,
+    linkedEntityId: a.linked_entity_id,
+    createdAt: toEpochMs(a.created_at),
+    updatedAt: toEpochMs(a.updated_at),
+  };
+}
+
+/** The rich text editor inserts images as local blob: preview URLs (TipTapArticleEditor's
+ * toolbar, same as the cover image picker) - swap each one for its real uploaded asset URL
+ * before the article body is persisted, since a blob: URL only lives as long as the page. */
+async function resolveInlineBodyImages(body: string): Promise<string> {
+  const blobUrls = Array.from(new Set(Array.from(body.matchAll(/<img[^>]+src="(blob:[^"]+)"/g), (m) => m[1])));
+  if (blobUrls.length === 0) return body;
+  let resolved = body;
+  for (const blobUrl of blobUrls) {
+    const { url } = await resolveImageAsset(blobUrl, 'article_body_image');
+    resolved = resolved.split(`"${blobUrl}"`).join(`"${url}"`);
+  }
+  return resolved;
+}
+
+export async function articleToApiPayload(article: Article): Promise<Record<string, unknown>> {
+  const { assetId } = await resolveImageAsset(article.coverImageSrc, 'article_cover_image');
+  const body = await resolveInlineBodyImages(article.body);
+  return {
+    id: article.id,
+    world_id: article.worldId,
+    folder_id: article.folderId,
+    category: article.category,
+    name: article.name,
+    cover_image_asset_id: assetId,
+    tags: article.tags,
+    visibility: article.visibility,
+    field_values: article.fieldValues,
+    body,
+    linked_entity_type: article.linkedEntityType,
+    linked_entity_id: article.linkedEntityId,
+  };
+}
+
+// ---------------------------------------------------------------------
+// Notes / note folders
+// ---------------------------------------------------------------------
+
+export function apiNoteFolderToNoteFolder(f: ApiNoteFolder): NoteFolder {
+  return {
+    id: f.id,
+    campaignId: f.campaign_id,
+    parentId: f.parent_id,
+    name: f.name,
+    isDefault: f.is_default,
+    defaultKind: f.default_kind,
+    createdAt: toEpochMs(f.created_at),
+    updatedAt: toEpochMs(f.updated_at),
+  };
+}
+
+export function noteFolderToApiPayload(folder: NoteFolder): Record<string, unknown> {
+  return {
+    id: folder.id,
+    campaign_id: folder.campaignId,
+    parent_id: folder.parentId,
+    name: folder.name,
+    is_default: folder.isDefault,
+    default_kind: folder.defaultKind,
+  };
+}
+
+export function apiNoteToNote(n: ApiNote): Note {
+  return {
+    id: n.id,
+    campaignId: n.campaign_id,
+    folderId: n.folder_id,
+    name: n.name,
+    kind: (n.kind as NoteKind | null) ?? null,
+    body: n.body,
+    tags: toStringArray(n.tags),
+    createdAt: toEpochMs(n.created_at),
+    updatedAt: toEpochMs(n.updated_at),
+  };
+}
+
+export function noteToApiPayload(note: Note): Record<string, unknown> {
+  return {
+    id: note.id,
+    campaign_id: note.campaignId,
+    folder_id: note.folderId,
+    name: note.name,
+    kind: note.kind,
+    body: note.body,
+    tags: note.tags,
+  };
+}
+
+export function apiSessionChatToSessionChat(c: ApiSessionChat): SessionChat {
+  return {
+    id: c.id,
+    campaignId: c.campaign_id,
+    noteId: c.note_id,
+    name: c.name,
+    messages: c.messages.map((m) => ({ id: m.id, text: m.text, createdAt: m.createdAt })),
+    createdAt: toEpochMs(c.created_at),
+    updatedAt: toEpochMs(c.updated_at),
+  };
+}
+
+export function sessionChatToApiPayload(chat: SessionChat): Record<string, unknown> {
+  return {
+    id: chat.id,
+    campaign_id: chat.campaignId,
+    note_id: chat.noteId,
+    name: chat.name,
+    messages: chat.messages,
   };
 }
 
@@ -207,6 +392,9 @@ export function apiCreatureToCreature(c: ApiCreature | ApiCreatureDetail): Creat
     pitfalls: c.pitfalls ?? undefined,
     history: c.history ?? undefined,
     description: c.description ?? undefined,
+    appearance: c.appearance ?? undefined,
+    secrets: c.secrets ?? undefined,
+    relationships: c.relationships ?? undefined,
     baseCreatureId: c.base_creature_id ?? undefined,
     isCustomBuild: c.is_custom_build ?? true,
     defaultSize: c.default_size,
@@ -260,6 +448,9 @@ export async function creatureToApiPayload(
     pitfalls: isNpc ? (creature.pitfalls ?? null) : null,
     history: isNpc ? (creature.history ?? null) : null,
     description: isNpc ? (creature.description ?? null) : null,
+    appearance: isNpc ? (creature.appearance ?? null) : null,
+    secrets: isNpc ? (creature.secrets ?? null) : null,
+    relationships: isNpc ? (creature.relationships ?? null) : null,
     base_creature_id: isNpc ? (creature.baseCreatureId ?? null) : null,
     is_custom_build: isNpc ? creature.isCustomBuild : true,
     token_asset_id: assetId,
@@ -380,6 +571,18 @@ export async function tokenDefinitionToApiPayload(token: TokenDefinition): Promi
 // Map floor / tokens / shapes
 // ---------------------------------------------------------------------
 
+/** MapToken.raw_data has no other use yet - same JSONB-overflow-column convention as
+ * floor.raw_data (initiative) and quest.raw_data, used here so tempHp/reactionSpent don't
+ * need their own migration/columns. */
+function tokenExtrasFromRawData(rawData: unknown): { tempHp?: number; reactionSpent?: boolean } {
+  if (!rawData || typeof rawData !== 'object') return {};
+  const o = rawData as Record<string, unknown>;
+  return {
+    tempHp: typeof o.tempHp === 'number' ? o.tempHp : undefined,
+    reactionSpent: typeof o.reactionSpent === 'boolean' ? o.reactionSpent : undefined,
+  };
+}
+
 export function apiMapTokenToPlacedToken(t: ApiMapToken): PlacedToken {
   return {
     id: t.id,
@@ -403,6 +606,7 @@ export function apiMapTokenToPlacedToken(t: ApiMapToken): PlacedToken {
         ? { successes: t.death_save_successes, failures: t.death_save_failures }
         : undefined,
     notes: t.notes ?? undefined,
+    ...tokenExtrasFromRawData(t.raw_data),
   };
 }
 
@@ -495,6 +699,21 @@ export function assembleMapFloor(floor: ApiMapFloor, tokens: ApiMapToken[], shap
     lockedEncounterId: floor.locked_encounter_id,
     resolvedEncounterRoster: resolvedRosterFromRawData(floor.raw_data),
     initiative: initiativeFromRawData(floor.raw_data),
+  };
+}
+
+/** Merges a WS-pushed `floor:updated` payload (flip/rotation/locked-encounter/initiative) into
+ * local floor state, leaving placedTokens/shapes untouched - those broadcast separately via
+ * their own token/shape messages. See MapPage's floorRoom WS handler. */
+export function applyApiFloorMetaPatch(floor: MapFloor, data: ApiMapFloor): MapFloor {
+  return {
+    ...floor,
+    flippedHorizontal: data.flipped_horizontal,
+    flippedVertical: data.flipped_vertical,
+    rotation: data.rotation,
+    lockedEncounterId: data.locked_encounter_id,
+    resolvedEncounterRoster: resolvedRosterFromRawData(data.raw_data),
+    initiative: initiativeFromRawData(data.raw_data),
   };
 }
 

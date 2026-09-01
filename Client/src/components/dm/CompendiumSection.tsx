@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -27,9 +28,9 @@ import { MagicItemFormDialog } from './MagicItemFormDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { FilterBar } from './FilterBar';
 import { FilterChipGroup } from './FilterChipGroup';
-import { useCreatureStore } from '../../store/useCreatureStore';
-import { useSpellStore } from '../../store/useSpellStore';
-import { useMagicItemStore } from '../../store/useMagicItemStore';
+import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatureStore';
+import { useSpellStore, getSpellsForCampaign } from '../../store/useSpellStore';
+import { useMagicItemStore, getMagicItemsForCampaign } from '../../store/useMagicItemStore';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { CREATURE_ALIGNMENT_OPTIONS, CREATURE_TYPE_OPTIONS, type Creature } from '../../types/creature';
 import TextField from '@mui/material/TextField';
@@ -38,6 +39,17 @@ import { MAGIC_ITEM_RARITY_OPTIONS, type MagicItem } from '../../types/magicItem
 
 interface CompendiumSectionProps {
   campaignId: string;
+  /** World this CompendiumSection is rendered under, if any - threaded into the
+   * Creature/Spell/MagicItem FormDialogs so they can offer the "also create a world
+   * article" checkbox (issue 4c/4g). Omit when this section is rendered without a world
+   * in scope. */
+  worldId?: string;
+  /** Deep-link support (e.g. from the Play page's Items window "open in new tab") - opens the
+   * matching creature/spell/item's detail as soon as it's found, independent of whatever page/
+   * filter the browse table is currently on. */
+  openCreatureId?: string;
+  openSpellId?: string;
+  openItemId?: string;
 }
 
 /** Reference/catalog material - monster stat blocks, spells, and magic items. NPCs (people
@@ -127,7 +139,8 @@ function toggleInArray(arr: string[], value: string): string[] {
   return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
 }
 
-export function CompendiumSection({ campaignId }: CompendiumSectionProps) {
+export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpellId, openItemId }: CompendiumSectionProps) {
+  const navigate = useNavigate();
   const [view, setView] = useState<CompendiumView>('menu');
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -267,6 +280,49 @@ export function CompendiumSection({ campaignId }: CompendiumSectionProps) {
       requiresAttunement,
     });
   }, [view, campaignId, scope, page, pageSize, debouncedSearch, rarityFilter, attunementFilter, fetchMagicItemBrowse]);
+
+  const creaturesByCampaignId = useCreatureStore((s) => s.creaturesByCampaignId);
+  const fetchCreaturesForCampaign = useCreatureStore((s) => s.fetchCreaturesForCampaign);
+  const spellsByCampaignId = useSpellStore((s) => s.spellsByCampaignId);
+  const fetchSpellsForCampaign = useSpellStore((s) => s.fetchSpellsForCampaign);
+  const magicItemsByCampaignId = useMagicItemStore((s) => s.magicItemsByCampaignId);
+  const fetchMagicItemsForCampaign = useMagicItemStore((s) => s.fetchMagicItemsForCampaign);
+
+  useEffect(() => {
+    if (openCreatureId) fetchCreaturesForCampaign(campaignId);
+    if (openSpellId) fetchSpellsForCampaign(campaignId);
+    if (openItemId) fetchMagicItemsForCampaign(campaignId);
+  }, [campaignId, openCreatureId, openSpellId, openItemId, fetchCreaturesForCampaign, fetchSpellsForCampaign, fetchMagicItemsForCampaign]);
+
+  const deepLinkedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (openCreatureId && deepLinkedRef.current !== `creature:${openCreatureId}`) {
+      const target = getCreaturesForCampaign(creaturesByCampaignId, campaignId).find((c) => c.id === openCreatureId);
+      if (target) {
+        deepLinkedRef.current = `creature:${openCreatureId}`;
+        setView('monsters');
+        setViewingCreature(target);
+      }
+    }
+    if (openSpellId && deepLinkedRef.current !== `spell:${openSpellId}`) {
+      const target = getSpellsForCampaign(spellsByCampaignId, campaignId).find((s) => s.id === openSpellId);
+      if (target) {
+        deepLinkedRef.current = `spell:${openSpellId}`;
+        setView('spells');
+        setEditingSpell(target);
+        setSpellDialogOpen(true);
+      }
+    }
+    if (openItemId && deepLinkedRef.current !== `item:${openItemId}`) {
+      const target = getMagicItemsForCampaign(magicItemsByCampaignId, campaignId).find((i) => i.id === openItemId);
+      if (target) {
+        deepLinkedRef.current = `item:${openItemId}`;
+        setView('items');
+        setEditingItem(target);
+        setItemDialogOpen(true);
+      }
+    }
+  }, [openCreatureId, openSpellId, openItemId, campaignId, creaturesByCampaignId, spellsByCampaignId, magicItemsByCampaignId]);
 
   const goToView = (next: CompendiumView) => {
     setView(next);
@@ -438,11 +494,13 @@ export function CompendiumSection({ campaignId }: CompendiumSectionProps) {
           open={creatureDialogOpen}
           onClose={() => setCreatureDialogOpen(false)}
           initialCreature={editingCreature}
-          onSubmit={(creature) => {
+          worldId={worldId}
+          onSubmit={(creature, articleOutcome) => {
             if (editingCreature) updateCreatureInCampaign(campaignId, creature);
             else addCreatureToCampaign(campaignId, creature);
             setCreatureDialogOpen(false);
             setEditingCreature(undefined);
+            if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
           }}
         />
         <CreatureStatBlockDialog open={!!viewingCreature} creature={viewingCreature} onClose={() => setViewingCreature(null)} />
@@ -547,11 +605,13 @@ export function CompendiumSection({ campaignId }: CompendiumSectionProps) {
           open={spellDialogOpen}
           onClose={() => setSpellDialogOpen(false)}
           initialSpell={editingSpell}
-          onSubmit={(spell) => {
+          worldId={worldId}
+          onSubmit={(spell, articleOutcome) => {
             if (editingSpell) updateSpellInCampaign(campaignId, spell);
             else addSpellToCampaign(campaignId, spell);
             setSpellDialogOpen(false);
             setEditingSpell(undefined);
+            if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
           }}
         />
         <ConfirmDeleteDialog
@@ -647,11 +707,13 @@ export function CompendiumSection({ campaignId }: CompendiumSectionProps) {
         open={itemDialogOpen}
         onClose={() => setItemDialogOpen(false)}
         initialItem={editingItem}
-        onSubmit={(item) => {
+        worldId={worldId}
+        onSubmit={(item, articleOutcome) => {
           if (editingItem) updateMagicItemInCampaign(campaignId, item);
           else addMagicItemToCampaign(campaignId, item);
           setItemDialogOpen(false);
           setEditingItem(undefined);
+          if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
         }}
       />
       <ConfirmDeleteDialog

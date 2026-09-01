@@ -10,6 +10,8 @@ interface MapObjectsLayerProps {
   onTokenMove: (id: string, x: number, y: number) => void;
   onTokenContextMenu: (token: PlacedToken, clientX: number, clientY: number) => void;
   onTokenStatsRequest: (token: PlacedToken) => void;
+  onTokenSelect: (token: PlacedToken, additive: boolean) => void;
+  selectedTokenIds: string[];
   flipPivot: StagePoint;
   flippedHorizontal?: boolean;
   flippedVertical?: boolean;
@@ -18,16 +20,20 @@ interface MapObjectsLayerProps {
 
 function PlacedTokenNode({
   token,
+  isSelected,
   onTokenMove,
   onTokenContextMenu,
   onTokenStatsRequest,
+  onTokenSelect,
   flippedHorizontal,
   flippedVertical,
 }: {
   token: PlacedToken;
+  isSelected: boolean;
   onTokenMove: MapObjectsLayerProps['onTokenMove'];
   onTokenContextMenu: MapObjectsLayerProps['onTokenContextMenu'];
   onTokenStatsRequest: MapObjectsLayerProps['onTokenStatsRequest'];
+  onTokenSelect: MapObjectsLayerProps['onTokenSelect'];
   flippedHorizontal?: boolean;
   flippedVertical?: boolean;
 }) {
@@ -42,6 +48,10 @@ function PlacedTokenNode({
     onTokenContextMenu(token, e.evt.clientX, e.evt.clientY);
   };
 
+  const handleClick = (e: KonvaEventObject<MouseEvent>) => {
+    onTokenSelect(token, e.evt.ctrlKey || e.evt.metaKey);
+  };
+
   return (
     <Group
       x={token.x}
@@ -49,6 +59,8 @@ function PlacedTokenNode({
       draggable
       onDragEnd={(e) => onTokenMove(token.id, e.target.x(), e.target.y())}
       onContextMenu={handleContextMenu}
+      onClick={handleClick}
+      onTap={handleClick}
       onDblClick={() => onTokenStatsRequest(token)}
       onDblTap={() => onTokenStatsRequest(token)}
     >
@@ -91,6 +103,18 @@ function PlacedTokenNode({
         {isCurrentTurn && (
           <Circle radius={radius + 4} stroke="#ffd700" strokeWidth={3} opacity={0.9} listening={false} />
         )}
+        {/* multi-select ring - dashed cyan, sits outside both the outline and the golden
+            current-turn ring so a selected-and-acting token still shows both clearly */}
+        {isSelected && (
+          <Circle
+            radius={radius + (isCurrentTurn ? 9 : 4)}
+            stroke="#29b6f6"
+            strokeWidth={2.5}
+            dash={[6, 4]}
+            opacity={0.95}
+            listening={false}
+          />
+        )}
         <Text
           text={token.name}
           y={radius + 4}
@@ -126,6 +150,28 @@ function PlacedTokenNode({
             <Circle radius={8} fill="#1e88e5" stroke="#ffffff" strokeWidth={1} />
           </Group>
         )}
+        {!!token.reactionSpent && (
+          <Group x={-radius * 0.7} y={radius * 0.7} listening={false}>
+            <Circle radius={8} fill="#757575" stroke="#ffffff" strokeWidth={1} />
+          </Group>
+        )}
+        {!!token.tempHp && token.tempHp > 0 && (
+          <Group x={-radius * 0.7} y={-radius * 0.7} listening={false}>
+            <Circle radius={9} fill="#26a69a" stroke="#ffffff" strokeWidth={1} />
+            <Text
+              text={String(token.tempHp)}
+              width={18}
+              height={18}
+              offsetX={9}
+              offsetY={9}
+              align="center"
+              verticalAlign="middle"
+              fontSize={10}
+              fontStyle="bold"
+              fill="#ffffff"
+            />
+          </Group>
+        )}
       </Group>
     </Group>
   );
@@ -136,6 +182,8 @@ export function MapObjectsLayer({
   onTokenMove,
   onTokenContextMenu,
   onTokenStatsRequest,
+  onTokenSelect,
+  selectedTokenIds,
   flipPivot,
   flippedHorizontal,
   flippedVertical,
@@ -156,9 +204,11 @@ export function MapObjectsLayer({
           <PlacedTokenNode
             key={token.id}
             token={token}
+            isSelected={selectedTokenIds.includes(token.id)}
             onTokenMove={onTokenMove}
             onTokenContextMenu={onTokenContextMenu}
             onTokenStatsRequest={onTokenStatsRequest}
+            onTokenSelect={onTokenSelect}
             flippedHorizontal={flippedHorizontal}
             flippedVertical={flippedVertical}
           />

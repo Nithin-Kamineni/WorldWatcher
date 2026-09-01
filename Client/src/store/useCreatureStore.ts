@@ -54,6 +54,13 @@ interface CreatureStoreState {
   creaturePickerBrowse: CreatureBrowseResult | null;
   creaturePickerBrowseLoading: boolean;
   fetchCreaturePickerBrowse: (params: CreatureBrowseParams) => Promise<void>;
+
+  /** On-demand single-creature cache, keyed by id - last-resort fallback for map token stat
+   * lookups when a token's linked creature isn't in creaturesByCampaignId/creatureBrowse/
+   * creaturePickerBrowse (e.g. dropped from the global catalog in a session where the browse
+   * panel was never opened, or its cache is stale). */
+  creaturesById: Record<string, Creature>;
+  fetchCreatureById: (id: string) => Promise<Creature | undefined>;
 }
 
 // Module-level (not store state) so setting it doesn't trigger a re-render - it only guards
@@ -189,6 +196,22 @@ export const useCreatureStore = create<CreatureStoreState>((set, get) => ({
       if (requestId !== pickerBrowseRequestId) return;
       console.error('Failed to load creature picker page', err);
       set({ creaturePickerBrowseLoading: false });
+    }
+  },
+
+  creaturesById: {},
+
+  fetchCreatureById: async (id) => {
+    const cached = get().creaturesById[id];
+    if (cached) return cached;
+    try {
+      const apiCreature = await creaturesApi.getCreature(id);
+      const creature = apiCreatureToCreature(apiCreature);
+      set((state) => ({ creaturesById: { ...state.creaturesById, [id]: creature } }));
+      return creature;
+    } catch (err) {
+      console.error(`Failed to load creature ${id}`, err);
+      return undefined;
     }
   },
 }));

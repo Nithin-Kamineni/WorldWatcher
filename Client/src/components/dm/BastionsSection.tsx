@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -25,11 +26,15 @@ import { BASTION_FACILITY_TYPE_OPTIONS, type Bastion } from '../../types/bastion
 
 interface BastionsSectionProps {
   campaignId: string;
+  /** World this BastionsSection is rendered under, if any - threaded into BastionFormDialog
+   * so it can offer the "also create a world article" checkbox (issue 4c/4g). */
+  worldId?: string;
 }
 
 type BastionsView = 'menu' | 'catalog' | 'tracker';
 
-export function BastionsSection({ campaignId }: BastionsSectionProps) {
+export function BastionsSection({ campaignId, worldId }: BastionsSectionProps) {
+  const navigate = useNavigate();
   const [view, setView] = useState<BastionsView>('menu');
 
   const facilityBrowse = useBastionFacilityStore((s) => s.facilityBrowse);
@@ -201,11 +206,13 @@ export function BastionsSection({ campaignId }: BastionsSectionProps) {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         initialBastion={editingBastion}
-        onSubmit={(bastion) => {
+        worldId={worldId}
+        onSubmit={(bastion, articleOutcome) => {
           if (editingBastion) updateBastionInCampaign(campaignId, bastion);
           else addBastionToCampaign(campaignId, bastion);
           setDialogOpen(false);
           setEditingBastion(undefined);
+          if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
         }}
       />
 

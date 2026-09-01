@@ -310,8 +310,9 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter }: 
                 onClick={() => setSelectedId(null)}
                 sx={{
                   position: 'absolute',
-                  left: CENTER - CENTER_NODE_SIZE / 2,
-                  top: CENTER - CENTER_NODE_SIZE / 2,
+                  left: '50%',
+                  top: '50%',
+                  transform: 'translate(-50%, -50%)',
                   width: CENTER_NODE_SIZE,
                   cursor: 'pointer',
                   textAlign: 'center',
@@ -358,14 +359,14 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter }: 
                   }}
                   sx={{
                     position: 'absolute',
-                    left: pos.x - nodeSize / 2,
-                    top: pos.y - nodeSize / 2,
+                    left: `${(pos.x / CANVAS_SIZE) * 100}%`,
+                    top: `${(pos.y / CANVAS_SIZE) * 100}%`,
                     width: nodeSize,
                     cursor: 'pointer',
                     textAlign: 'center',
                     opacity: dimmed ? 0.35 : 1,
                     transition: 'opacity 160ms ease, transform 160ms ease',
-                    transform: isSelected ? 'scale(1.08)' : 'scale(1)',
+                    transform: isSelected ? 'translate(-50%, -50%) scale(1.08)' : 'translate(-50%, -50%)',
                   }}
                 >
                   <TokenThumbnail

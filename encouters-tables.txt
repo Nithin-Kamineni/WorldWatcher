@@ -1,0 +1,22 @@
+Currently in the encounters page there are random encounters, encounter managment, roleply and exploration
+But all of theme seem to be stuctured poorely. Like 'encounter managment' and 'random encounters' are currently doing the same thing more or less.
+I want to currently store the encounters and random tables seperatly. Currently the encounters have random tables and those random tables are having multiple encounters in them. (Which can be rolled).
+
+I want to have a page where I can new encounters (not random tables). Just a single encounter. There I will store detailed information regarding the encounter.
+    1. The encounters will be either social, exploration, combat. 
+    2. Social encounter will be:
+        a. Name, NPCs involved. 
+    3. Exploration encounter will be:
+        a. Name, ....
+    4. Combat encounter will be: 
+        a. Name, Challenge rating, Creatures involved (Both NPCs and monsters), desription, theme (tags), location, ....
+
+The random rolls table will then have tables with these encounters (from the encounters table).
+    1. Random rolls will be having sitation name of when the table can be rolled.
+    2. Description, die roll (multiple die rolls, either 1d8 or 2d4, 1d12 or 2d6), Image
+    3. Encounter items
+        a. Each encounter item will be having min, max (based on die output will chose what encounter). 
+
+I want to know a good way to structure these things for keeping the current random tables and maintaining new random tables.
+
+I want to add new random tables based on new themes

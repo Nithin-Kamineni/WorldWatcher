@@ -13,13 +13,19 @@ import Chip from '@mui/material/Chip';
 import MenuItem from '@mui/material/MenuItem';
 import { QUEST_DIFFICULTY_PRESETS, QUEST_STATUS_OPTIONS, type Quest, type QuestStatus } from '../../types/quest';
 import type { Faction } from '../../types/faction';
+import { useArticleStore } from '../../store/useArticleStore';
+import { buildLinkedArticle, type ArticleLinkOutcome } from '../../types/article';
+import { LinkArticleFields } from '../world/LinkArticleFields';
 
 interface QuestFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (quest: Quest) => void;
+  onSubmit: (quest: Quest, articleOutcome?: ArticleLinkOutcome) => void;
   initialQuest?: Quest;
   factions: Faction[];
+  /** World this Quest's article (if any) belongs to - omit when there's no world in scope,
+   * which hides the "also create a world article" checkbox entirely (issue 4c/4g). */
+  worldId?: string;
 }
 
 function emptyState() {
@@ -50,13 +56,17 @@ function stateFromQuest(quest: Quest) {
   };
 }
 
-export function QuestFormDialog({ open, onClose, onSubmit, initialQuest, factions }: QuestFormDialogProps) {
+export function QuestFormDialog({ open, onClose, onSubmit, initialQuest, factions, worldId }: QuestFormDialogProps) {
   const isEditMode = !!initialQuest;
   const [state, setState] = useState(emptyState());
+  const [createArticle, setCreateArticle] = useState(false);
+  const [createArticleNow, setCreateArticleNow] = useState(true);
 
   useEffect(() => {
     if (!open) return;
     setState(initialQuest ? stateFromQuest(initialQuest) : emptyState());
+    setCreateArticle(false);
+    setCreateArticleNow(true);
   }, [open, initialQuest]);
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
@@ -83,7 +93,14 @@ export function QuestFormDialog({ open, onClose, onSubmit, initialQuest, faction
       createdAt: initialQuest?.createdAt ?? now,
       updatedAt: now,
     };
-    onSubmit(quest);
+
+    let articleOutcome: ArticleLinkOutcome = null;
+    if (!isEditMode && worldId && createArticle) {
+      const article = buildLinkedArticle(worldId, 'quest', quest.id, quest.name);
+      useArticleStore.getState().addArticle(article);
+      if (createArticleNow) articleOutcome = { createdArticleId: article.id };
+    }
+    onSubmit(quest, articleOutcome);
   };
 
   return (
@@ -180,6 +197,18 @@ export function QuestFormDialog({ open, onClose, onSubmit, initialQuest, faction
           <Typography variant="caption" color="text.secondary">
             Sub-quests are added and ticked off from the quest row itself - expand it after saving.
           </Typography>
+
+          {!isEditMode && worldId && (
+            <>
+              <Divider />
+              <LinkArticleFields
+                checked={createArticle}
+                onCheckedChange={setCreateArticle}
+                createNow={createArticleNow}
+                onCreateNowChange={setCreateArticleNow}
+              />
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

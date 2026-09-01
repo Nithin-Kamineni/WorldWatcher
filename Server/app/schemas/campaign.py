@@ -12,6 +12,7 @@ QuestStatus = Literal["not_started", "active", "completed", "failed", "abandoned
 class CampaignRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    world_id: uuid.UUID
     name: str
     description: Optional[str] = None
     image_asset_id: Optional[uuid.UUID] = None
@@ -21,6 +22,7 @@ class CampaignRead(BaseModel):
 
 
 class CampaignCreate(BaseModel):
+    world_id: uuid.UUID
     name: str
     description: Optional[str] = None
     image_asset_id: Optional[uuid.UUID] = None
@@ -28,6 +30,7 @@ class CampaignCreate(BaseModel):
 
 
 class CampaignUpdate(BaseModel):
+    world_id: Optional[uuid.UUID] = None
     name: Optional[str] = None
     description: Optional[str] = None
     image_asset_id: Optional[uuid.UUID] = None

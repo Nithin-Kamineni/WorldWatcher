@@ -14,6 +14,12 @@ SIZE_MAP = {
     "F": "Fine", "D": "Diminutive", "T": "Tiny", "S": "Small", "M": "Medium",
     "L": "Large", "H": "Huge", "G": "Gargantuan", "C": "Colossal", "V": "Varies",
 }
+# D&D 5e size category -> grid-relative token scale (1.0 = one full grid cell), matching
+# `SIZE_CATEGORY_SCALE` in Client/src/types/token.ts - keep the two in sync.
+SIZE_SCALE_MAP = {
+    "Fine": 0.25, "Diminutive": 0.25, "Tiny": 0.5, "Small": 1, "Medium": 1,
+    "Large": 2, "Huge": 3, "Gargantuan": 4, "Colossal": 4, "Varies": 1,
+}
 ALIGN_MAP = {
     "L": "Lawful", "N": "Neutral", "C": "Chaotic", "G": "Good", "E": "Evil",
     "U": "Unaligned", "A": "Any Alignment",
@@ -69,6 +75,15 @@ def parse_size(size_field):
     codes = size_field if isinstance(size_field, list) else [size_field]
     words = [SIZE_MAP.get(c, c) for c in codes if isinstance(c, str)]
     return "/".join(words) if words else None
+
+
+def size_scale(parsed_size):
+    """Grid-relative token scale for a `parse_size()` result. Multi-size stat blocks
+    (e.g. "Small/Medium" shapechangers) use the first listed category."""
+    if not parsed_size:
+        return 1
+    first = parsed_size.split("/")[0]
+    return SIZE_SCALE_MAP.get(first, 1)
 
 
 def parse_type(type_field):
@@ -291,6 +306,8 @@ def project_creature(cur, resolved: dict, source_cache: dict):
     slug = slugify(name)
 
     creature_type, creature_subtype = parse_type(resolved.get("type"))
+    size = parse_size(resolved.get("size"))
+    scale = size_scale(size)
     hp = resolved.get("hp") or {}
     cr_display, cr_numeric = parse_cr(resolved.get("cr"))
     passive = resolved.get("passive")
@@ -308,7 +325,7 @@ def project_creature(cur, resolved: dict, source_cache: dict):
         "edition": None,
         "creature_type": creature_type,
         "creature_subtype": creature_subtype,
-        "size": parse_size(resolved.get("size")),
+        "size": size,
         "alignment": format_alignment(resolved.get("alignment")),
         "challenge_rating": cr_numeric,
         "challenge_rating_display": cr_display,
@@ -338,8 +355,8 @@ def project_creature(cur, resolved: dict, source_cache: dict):
         "history": None,
         "portrait_asset_id": None,
         "token_asset_id": None,
-        "default_size": 1,
-        "current_size": 1,
+        "default_size": scale,
+        "current_size": scale,
         "raw_data": json.dumps(resolved),
     }
 

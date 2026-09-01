@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models import Map, MapFloor
 from app.schemas.common import Page, PageMeta
 from app.schemas.maps import MapCreate, MapFloorCreate, MapFloorRead, MapFloorUpdate, MapRead, MapUpdate
+from app.ws.manager import manager
 
 router = APIRouter(prefix="/maps", tags=["maps"])
 floors_router = APIRouter(prefix="/map-floors", tags=["maps"])
@@ -102,6 +103,11 @@ async def update_map_floor(floor_id: uuid.UUID, payload: MapFloorUpdate, db: Asy
         setattr(obj, key, value)
     await db.commit()
     await db.refresh(obj)
+    result = MapFloorRead.model_validate(obj)
+    # Broadcasts initiative/flip/rotation/locked-encounter changes - the piece of combat state
+    # every "run the encounter" hotkey touches - to other clients watching this floor. Token
+    # field edits (HP, tags, notes) already broadcast via map_tokens.py's update_map_token.
+    await manager.broadcast(f"floor-{floor_id}", {"type": "floor:updated", "data": result.model_dump(mode="json")})
     return obj
 
 

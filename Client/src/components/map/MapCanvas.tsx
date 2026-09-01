@@ -27,6 +27,9 @@ interface MapCanvasProps {
   onTokenMove: (id: string, x: number, y: number) => void;
   onTokenContextMenu: (token: PlacedToken, clientX: number, clientY: number) => void;
   onTokenStatsRequest: (token: PlacedToken) => void;
+  onTokenSelect: (token: PlacedToken, additive: boolean) => void;
+  selectedTokenIds: string[];
+  onClearSelection: () => void;
   gridEnabled: boolean;
   gridSize: number;
   gridColor: string;
@@ -155,6 +158,9 @@ export function MapCanvas({
   onTokenMove,
   onTokenContextMenu,
   onTokenStatsRequest,
+  onTokenSelect,
+  selectedTokenIds,
+  onClearSelection,
   gridEnabled,
   gridSize,
   gridColor,
@@ -352,6 +358,13 @@ export function MapCanvas({
     onTokenContextMenu(token, clientX, clientY);
   };
 
+  // Clicking empty canvas (the stage itself, not a token/shape) clears the multi-select -
+  // only fires when the event target IS the stage, so token clicks (handled in
+  // MapObjectsLayer) never bubble into clearing the selection they just set.
+  const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (e.target === e.target.getStage()) onClearSelection();
+  };
+
   const cursor = activeTool === 'select' ? 'default' : 'crosshair';
 
   return (
@@ -382,6 +395,8 @@ export function MapCanvas({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onClick={handleStageClick}
+        onTap={handleStageClick}
       >
         <MapBackgroundLayer
           src={backgroundImageSrc}
@@ -398,6 +413,8 @@ export function MapCanvas({
           onTokenMove={onTokenMove}
           onTokenContextMenu={handleTokenContextMenu}
           onTokenStatsRequest={onTokenStatsRequest}
+          onTokenSelect={onTokenSelect}
+          selectedTokenIds={selectedTokenIds}
           flipPivot={flipPivot}
           flippedHorizontal={flippedHorizontal}
           flippedVertical={flippedVertical}

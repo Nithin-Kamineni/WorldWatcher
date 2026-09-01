@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -23,9 +24,13 @@ import { FACTION_INFLUENCE_OPTIONS, type Faction, type FactionInfluence } from '
 
 interface FactionsSectionProps {
   campaignId: string;
+  /** World this FactionsSection is rendered under, if any - threaded into FactionFormDialog
+   * so it can offer the "also create a world article" checkbox (issue 4c/4g). */
+  worldId?: string;
 }
 
-export function FactionsSection({ campaignId }: FactionsSectionProps) {
+export function FactionsSection({ campaignId, worldId }: FactionsSectionProps) {
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFaction, setEditingFaction] = useState<Faction | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<Faction | null>(null);
@@ -183,11 +188,13 @@ export function FactionsSection({ campaignId }: FactionsSectionProps) {
             onAddRelation={addRelation}
             onUpdateRelation={updateRelation}
             onDeleteRelation={deleteRelation}
-            onSubmit={(faction) => {
+            worldId={worldId}
+            onSubmit={(faction, articleOutcome) => {
               if (editingFaction) updateFactionInCampaign(campaignId, faction);
               else addFactionToCampaign(campaignId, faction);
               setDialogOpen(false);
               setEditingFaction(undefined);
+              if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
             }}
           />
 

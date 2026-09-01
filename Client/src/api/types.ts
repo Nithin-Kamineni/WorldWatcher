@@ -57,6 +57,101 @@ export interface ApiRandomPitfall {
   text: string;
 }
 
+export interface ApiRandomAppearance {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomSecret {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomPersonality {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomRelationship {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomDungeonStateOfRuin {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomDungeonQuirk {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomShopType {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomTavernNamePart {
+  id: string;
+  text: string;
+  part_type: 'first' | 'second';
+}
+
+export interface ApiRandomSettlementDefiningTrait {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomSettlementClaimToFame {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomSettlementCalamity {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomSettlementLocalLeader {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomSettlementEconomicSource {
+  id: string;
+  text: string;
+}
+
+export interface ApiRandomSettlementRumorHook {
+  id: string;
+  text: string;
+}
+
+export interface ApiSituationalTableEntry {
+  roll: number;
+  text: string;
+}
+
+export interface ApiSituationalTableColumn {
+  key: string;
+  label: string;
+  dieSize: number;
+  entries: ApiSituationalTableEntry[];
+}
+
+export interface ApiSituationalTable {
+  id: string;
+  name: string;
+  theme: string;
+  tags: string[];
+  description: string;
+  source: string;
+  columns: ApiSituationalTableColumn[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ApiCondition {
   id: string;
   source_id: string | null;
@@ -138,6 +233,9 @@ export interface ApiCreature {
   motivations: string | null;
   pitfalls: string | null;
   history: string | null;
+  appearance: string | null;
+  secrets: string | null;
+  relationships: string | null;
   portrait_asset_id: string | null;
   token_asset_id: string | null;
   base_creature_id: string | null;
@@ -205,8 +303,83 @@ export interface ApiItem {
   updated_at: string;
 }
 
+export interface ApiWorld {
+  id: string;
+  name: string;
+  description: string | null;
+  image_asset_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiArticleFolder {
+  id: string;
+  world_id: string;
+  parent_id: string | null;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiArticle {
+  id: string;
+  world_id: string;
+  folder_id: string | null;
+  category: string;
+  name: string;
+  cover_image_asset_id: string | null;
+  tags: unknown;
+  visibility: 'gm' | 'player' | 'published';
+  field_values: unknown;
+  body: string;
+  linked_entity_type: string | null;
+  linked_entity_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiNoteFolder {
+  id: string;
+  campaign_id: string;
+  parent_id: string | null;
+  name: string;
+  is_default: boolean;
+  default_kind: 'session' | 'narrative' | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiNote {
+  id: string;
+  campaign_id: string;
+  folder_id: string | null;
+  name: string;
+  kind: 'session_prep' | 'narrative' | null;
+  body: string;
+  tags: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiChatMessage {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
+export interface ApiSessionChat {
+  id: string;
+  campaign_id: string;
+  note_id: string | null;
+  name: string;
+  messages: ApiChatMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ApiCampaign {
   id: string;
+  world_id: string;
   name: string;
   description: string | null;
   image_asset_id: string | null;

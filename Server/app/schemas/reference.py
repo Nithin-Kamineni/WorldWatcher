@@ -172,3 +172,91 @@ class RandomPitfallRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     text: str
+
+
+class RandomAppearanceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomSecretRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomPersonalityRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomRelationshipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+TavernNamePartType = Literal["first", "second"]
+
+
+class RandomDungeonStateOfRuinRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomDungeonQuirkRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomShopTypeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomTavernNamePartRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+    part_type: TavernNamePartType
+
+
+class RandomSettlementDefiningTraitRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomSettlementClaimToFameRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomSettlementCalamityRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomSettlementLocalLeaderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomSettlementEconomicSourceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str
+
+
+class RandomSettlementRumorHookRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    text: str

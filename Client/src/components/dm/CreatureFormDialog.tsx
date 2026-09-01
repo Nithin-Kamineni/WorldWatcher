@@ -12,14 +12,20 @@ import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import { isAllowedImageFile } from '../../utils/fileValidation';
+import { useArticleStore } from '../../store/useArticleStore';
+import { buildLinkedArticle, type ArticleLinkOutcome } from '../../types/article';
+import { LinkArticleFields } from '../world/LinkArticleFields';
 import { type AbilityScores, type Creature } from '../../types/creature';
-import { DEFAULT_RELATIVE_SIZE, MAX_RELATIVE_SIZE, MIN_RELATIVE_SIZE } from '../../types/token';
+import { DEFAULT_RELATIVE_SIZE, MAX_RELATIVE_SIZE, MIN_RELATIVE_SIZE, sizeCategoryToScale } from '../../types/token';
 
 interface CreatureFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (creature: Creature) => void;
+  onSubmit: (creature: Creature, articleOutcome?: ArticleLinkOutcome) => void;
   initialCreature?: Creature;
+  /** World this monster's article (if any) belongs to - omit to hide the "also create a
+   * world article" checkbox entirely (issue 4c/4g). */
+  worldId?: string;
 }
 
 const emptyAbilities: AbilityScores = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
@@ -73,14 +79,18 @@ function stateFromCreature(creature: Creature) {
 /** Monsters only - NPCs now have their own NpcFormDialog (they moved to a separate DM Panel
  * tab and gained a Custom/Creature toggle + description that don't belong on a plain
  * monster stat-block form). */
-export function CreatureFormDialog({ open, onClose, onSubmit, initialCreature }: CreatureFormDialogProps) {
+export function CreatureFormDialog({ open, onClose, onSubmit, initialCreature, worldId }: CreatureFormDialogProps) {
   const isEditMode = !!initialCreature;
   const [state, setState] = useState(emptyState());
+  const [createArticle, setCreateArticle] = useState(false);
+  const [createArticleNow, setCreateArticleNow] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setState(initialCreature ? stateFromCreature(initialCreature) : emptyState());
+    setCreateArticle(false);
+    setCreateArticleNow(true);
   }, [open, initialCreature]);
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
@@ -132,7 +142,14 @@ export function CreatureFormDialog({ open, onClose, onSubmit, initialCreature }:
       createdAt: initialCreature?.createdAt ?? now,
       updatedAt: now,
     };
-    onSubmit(creature);
+
+    let articleOutcome: ArticleLinkOutcome = null;
+    if (!isEditMode && worldId && createArticle) {
+      const article = buildLinkedArticle(worldId, 'creature', creature.id, creature.name);
+      useArticleStore.getState().addArticle(article);
+      if (createArticleNow) articleOutcome = { createdArticleId: article.id };
+    }
+    onSubmit(creature, articleOutcome);
   };
 
   return (
@@ -167,7 +184,16 @@ export function CreatureFormDialog({ open, onClose, onSubmit, initialCreature }:
           </Typography>
           <Grid container spacing={2}>
             <Grid size={4}>
-              <TextField label="Size" value={state.size} onChange={(e) => set('size', e.target.value)} fullWidth size="small" />
+              <TextField
+                label="Size"
+                value={state.size}
+                onChange={(e) => {
+                  const size = e.target.value;
+                  setState((prev) => ({ ...prev, size, defaultSize: sizeCategoryToScale(size) }));
+                }}
+                fullWidth
+                size="small"
+              />
             </Grid>
             <Grid size={8}>
               <TextField label="Type" value={state.type} onChange={(e) => set('type', e.target.value)} fullWidth size="small" />
@@ -278,6 +304,17 @@ export function CreatureFormDialog({ open, onClose, onSubmit, initialCreature }:
             maxRows={4}
           />
 
+          {!isEditMode && worldId && (
+            <>
+              <Divider />
+              <LinkArticleFields
+                checked={createArticle}
+                onCheckedChange={setCreateArticle}
+                createNow={createArticleNow}
+                onCreateNowChange={setCreateArticleNow}
+              />
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

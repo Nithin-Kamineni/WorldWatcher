@@ -115,6 +115,9 @@ class CreatureRead(BaseModel):
     motivations: Optional[str] = None
     pitfalls: Optional[str] = None
     history: Optional[str] = None
+    appearance: Optional[str] = None
+    secrets: Optional[str] = None
+    relationships: Optional[str] = None
     portrait_asset_id: Optional[uuid.UUID] = None
     token_asset_id: Optional[uuid.UUID] = None
     base_creature_id: Optional[uuid.UUID] = None
@@ -169,6 +172,9 @@ class CreatureCreate(BaseModel):
     motivations: Optional[str] = None
     pitfalls: Optional[str] = None
     history: Optional[str] = None
+    appearance: Optional[str] = None
+    secrets: Optional[str] = None
+    relationships: Optional[str] = None
     portrait_asset_id: Optional[uuid.UUID] = None
     token_asset_id: Optional[uuid.UUID] = None
     base_creature_id: Optional[uuid.UUID] = None
@@ -216,6 +222,9 @@ class CreatureUpdate(BaseModel):
     motivations: Optional[str] = None
     pitfalls: Optional[str] = None
     history: Optional[str] = None
+    appearance: Optional[str] = None
+    secrets: Optional[str] = None
+    relationships: Optional[str] = None
     portrait_asset_id: Optional[uuid.UUID] = None
     token_asset_id: Optional[uuid.UUID] = None
     base_creature_id: Optional[uuid.UUID] = None

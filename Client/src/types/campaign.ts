@@ -1,5 +1,6 @@
 export interface Campaign {
   id: string;
+  worldId: string;
   name: string;
   imageSrc: string;
   description: string;

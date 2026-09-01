@@ -6,13 +6,20 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
+import Divider from '@mui/material/Divider';
 import type { Bastion } from '../../types/bastion';
+import { useArticleStore } from '../../store/useArticleStore';
+import { buildLinkedArticle, type ArticleLinkOutcome } from '../../types/article';
+import { LinkArticleFields } from '../world/LinkArticleFields';
 
 interface BastionFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (bastion: Bastion) => void;
+  onSubmit: (bastion: Bastion, articleOutcome?: ArticleLinkOutcome) => void;
   initialBastion?: Bastion;
+  /** World this Bastion's article (if any) belongs to - omit when there's no world in scope,
+   * which hides the "also create a world article" checkbox entirely (issue 4c/4g). */
+  worldId?: string;
 }
 
 function emptyState() {
@@ -23,13 +30,17 @@ function stateFromBastion(bastion: Bastion) {
   return { name: bastion.name, ownerName: bastion.ownerName, notes: bastion.notes, treasury: bastion.treasury };
 }
 
-export function BastionFormDialog({ open, onClose, onSubmit, initialBastion }: BastionFormDialogProps) {
+export function BastionFormDialog({ open, onClose, onSubmit, initialBastion, worldId }: BastionFormDialogProps) {
   const isEditMode = !!initialBastion;
   const [state, setState] = useState(emptyState());
+  const [createArticle, setCreateArticle] = useState(false);
+  const [createArticleNow, setCreateArticleNow] = useState(true);
 
   useEffect(() => {
     if (!open) return;
     setState(initialBastion ? stateFromBastion(initialBastion) : emptyState());
+    setCreateArticle(false);
+    setCreateArticleNow(true);
   }, [open, initialBastion]);
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
@@ -52,7 +63,14 @@ export function BastionFormDialog({ open, onClose, onSubmit, initialBastion }: B
       createdAt: initialBastion?.createdAt ?? now,
       updatedAt: now,
     };
-    onSubmit(bastion);
+
+    let articleOutcome: ArticleLinkOutcome = null;
+    if (!isEditMode && worldId && createArticle) {
+      const article = buildLinkedArticle(worldId, 'bastion', bastion.id, bastion.name);
+      useArticleStore.getState().addArticle(article);
+      if (createArticleNow) articleOutcome = { createdArticleId: article.id };
+    }
+    onSubmit(bastion, articleOutcome);
   };
 
   return (
@@ -92,6 +110,18 @@ export function BastionFormDialog({ open, onClose, onSubmit, initialBastion }: B
             fullWidth
             placeholder="Anything else the DM should remember about this bastion…"
           />
+
+          {!isEditMode && worldId && (
+            <>
+              <Divider />
+              <LinkArticleFields
+                checked={createArticle}
+                onCheckedChange={setCreateArticle}
+                createNow={createArticleNow}
+                onCreateNowChange={setCreateArticleNow}
+              />
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

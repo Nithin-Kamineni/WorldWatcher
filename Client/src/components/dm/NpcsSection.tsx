@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -19,11 +20,20 @@ import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { FilterBar } from './FilterBar';
 import { FilterChipGroup } from './FilterChipGroup';
 import { useCreatureStore } from '../../store/useCreatureStore';
+import { useArticleStore } from '../../store/useArticleStore';
+import { useNpcCardReturnStore } from '../../store/useNpcCardReturnStore';
+import { buildLinkedArticle } from '../../types/article';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { CREATURE_IMPORTANCE_OPTIONS, CREATURE_RELATION_OPTIONS, type Creature } from '../../types/creature';
 
+const RETURN_STATE_MAX_AGE_MS = 15 * 60 * 1000;
+
 interface NpcsSectionProps {
   campaignId: string;
+  /** World this NpcsSection is rendered under, if any - threaded into NpcFormDialog so it
+   * can offer the "also create a world article" checkbox (issue 4c/4g). Omit when this
+   * section is rendered without a world in scope. */
+  worldId?: string;
 }
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -34,7 +44,8 @@ function toggleInArray(arr: string[], value: string): string[] {
   return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
 }
 
-export function NpcsSection({ campaignId }: NpcsSectionProps) {
+export function NpcsSection({ campaignId, worldId }: NpcsSectionProps) {
+  const navigate = useNavigate();
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
@@ -49,6 +60,7 @@ export function NpcsSection({ campaignId }: NpcsSectionProps) {
   const [deleteTarget, setDeleteTarget] = useState<Creature | null>(null);
   const [relationFilter, setRelationFilter] = useState<string[]>([]);
   const [importanceFilter, setImportanceFilter] = useState<string[]>([]);
+  const [pendingReopenId, setPendingReopenId] = useState<string | null>(null);
 
   const creatureBrowse = useCreatureStore((s) => s.creatureBrowse);
   const creatureBrowseLoading = useCreatureStore((s) => s.creatureBrowseLoading);
@@ -83,7 +95,39 @@ export function NpcsSection({ campaignId }: NpcsSectionProps) {
     setPage(0);
   };
 
-  const items = creatureBrowse?.items ?? [];
+  /** Restore the NPC card + filters the user was on before jumping to its article (see
+   * CreatureStatBlockDialog's "view/add article" button) - a one-shot consume on mount, so a
+   * normal (non-"back") visit to this folder never re-triggers it. */
+  useEffect(() => {
+    const pending = useNpcCardReturnStore.getState().pending;
+    if (
+      !pending ||
+      pending.worldId !== worldId ||
+      pending.campaignId !== campaignId ||
+      Date.now() - pending.setAt > RETURN_STATE_MAX_AGE_MS
+    ) {
+      return;
+    }
+    useNpcCardReturnStore.getState().clearPending();
+    setSearch(pending.search);
+    setRelationFilter(pending.relationFilter);
+    setImportanceFilter(pending.importanceFilter);
+    setAllCampaigns(pending.allCampaigns);
+    setPendingReopenId(pending.creatureId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const items = useMemo(() => creatureBrowse?.items ?? [], [creatureBrowse]);
+
+  useEffect(() => {
+    if (!pendingReopenId) return;
+    const found = items.find((c) => c.id === pendingReopenId);
+    if (found) {
+      setViewingCreature(found);
+      setPendingReopenId(null);
+    }
+  }, [pendingReopenId, items]);
+
   const total = creatureBrowse?.total ?? 0;
   const hasActiveFilters = relationFilter.length > 0 || importanceFilter.length > 0;
   const isFiltered = !!debouncedSearch || hasActiveFilters;
@@ -192,14 +236,51 @@ export function NpcsSection({ campaignId }: NpcsSectionProps) {
         onClose={() => setDialogOpen(false)}
         initialCreature={editingCreature}
         campaignId={campaignId}
-        onSubmit={(creature) => {
+        worldId={worldId}
+        onSubmit={(creature, articleOutcome) => {
           if (editingCreature) updateCreatureInCampaign(campaignId, creature);
           else addCreatureToCampaign(campaignId, creature);
           setDialogOpen(false);
           setEditingCreature(undefined);
+          if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
         }}
       />
-      <CreatureStatBlockDialog open={!!viewingCreature} creature={viewingCreature} onClose={() => setViewingCreature(null)} />
+      <CreatureStatBlockDialog
+        open={!!viewingCreature}
+        creature={viewingCreature}
+        worldId={worldId}
+        onClose={() => setViewingCreature(null)}
+        onViewArticle={(creature, articleId) => {
+          if (!worldId) return;
+          useNpcCardReturnStore.getState().setPending({
+            worldId,
+            campaignId,
+            creatureId: creature.id,
+            search,
+            relationFilter,
+            importanceFilter,
+            allCampaigns,
+            setAt: Date.now(),
+          });
+          navigate(`/w/${worldId}/manager/entry/${articleId}?from=npcs&fromLabel=${encodeURIComponent('NPCs')}`);
+        }}
+        onAddArticle={(creature) => {
+          if (!worldId) return;
+          const article = buildLinkedArticle(worldId, 'npc', creature.id, creature.name);
+          useArticleStore.getState().addArticle(article);
+          useNpcCardReturnStore.getState().setPending({
+            worldId,
+            campaignId,
+            creatureId: creature.id,
+            search,
+            relationFilter,
+            importanceFilter,
+            allCampaigns,
+            setAt: Date.now(),
+          });
+          navigate(`/w/${worldId}/manager/entry/${article.id}?from=npcs&fromLabel=${encodeURIComponent('NPCs')}`);
+        }}
+      />
       <ConfirmDeleteDialog
         open={!!deleteTarget}
         itemName={deleteTarget?.name ?? ''}

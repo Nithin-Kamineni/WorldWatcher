@@ -8,15 +8,22 @@ import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Grid from '@mui/material/Grid';
 import Avatar from '@mui/material/Avatar';
+import Divider from '@mui/material/Divider';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import { isAllowedImageFile } from '../../utils/fileValidation';
+import { useArticleStore } from '../../store/useArticleStore';
+import { buildLinkedArticle, type ArticleLinkOutcome } from '../../types/article';
+import { LinkArticleFields } from '../world/LinkArticleFields';
 import type { Spell } from '../../types/spell';
 
 interface SpellFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (spell: Spell) => void;
+  onSubmit: (spell: Spell, articleOutcome?: ArticleLinkOutcome) => void;
   initialSpell?: Spell;
+  /** World this spell's article (if any) belongs to - omit to hide the "also create a world
+   * article" checkbox entirely (issue 4c/4g). */
+  worldId?: string;
 }
 
 function emptyState() {
@@ -49,14 +56,18 @@ function stateFromSpell(spell: Spell) {
   };
 }
 
-export function SpellFormDialog({ open, onClose, onSubmit, initialSpell }: SpellFormDialogProps) {
+export function SpellFormDialog({ open, onClose, onSubmit, initialSpell, worldId }: SpellFormDialogProps) {
   const isEditMode = !!initialSpell;
   const [state, setState] = useState(emptyState());
+  const [createArticle, setCreateArticle] = useState(false);
+  const [createArticleNow, setCreateArticleNow] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setState(initialSpell ? stateFromSpell(initialSpell) : emptyState());
+    setCreateArticle(false);
+    setCreateArticleNow(true);
   }, [open, initialSpell]);
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
@@ -90,7 +101,14 @@ export function SpellFormDialog({ open, onClose, onSubmit, initialSpell }: Spell
       createdAt: initialSpell?.createdAt ?? now,
       updatedAt: now,
     };
-    onSubmit(spell);
+
+    let articleOutcome: ArticleLinkOutcome = null;
+    if (!isEditMode && worldId && createArticle) {
+      const article = buildLinkedArticle(worldId, 'spell', spell.id, spell.name);
+      useArticleStore.getState().addArticle(article);
+      if (createArticleNow) articleOutcome = { createdArticleId: article.id };
+    }
+    onSubmit(spell, articleOutcome);
   };
 
   return (
@@ -152,6 +170,18 @@ export function SpellFormDialog({ open, onClose, onSubmit, initialSpell }: Spell
             multiline
             minRows={3}
           />
+
+          {!isEditMode && worldId && (
+            <>
+              <Divider />
+              <LinkArticleFields
+                checked={createArticle}
+                onCheckedChange={setCreateArticle}
+                createNow={createArticleNow}
+                onCreateNowChange={setCreateArticleNow}
+              />
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

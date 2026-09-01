@@ -13,15 +13,22 @@ import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Avatar from '@mui/material/Avatar';
+import Divider from '@mui/material/Divider';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import { isAllowedImageFile } from '../../utils/fileValidation';
+import { useArticleStore } from '../../store/useArticleStore';
+import { buildLinkedArticle, type ArticleLinkOutcome } from '../../types/article';
+import { LinkArticleFields } from '../world/LinkArticleFields';
 import { MAGIC_ITEM_RARITY_OPTIONS, type MagicItem, type MagicItemRarity } from '../../types/magicItem';
 
 interface MagicItemFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (item: MagicItem) => void;
+  onSubmit: (item: MagicItem, articleOutcome?: ArticleLinkOutcome) => void;
   initialItem?: MagicItem;
+  /** World this item's article (if any) belongs to - omit to hide the "also create a world
+   * article" checkbox entirely (issue 4c/4g). */
+  worldId?: string;
 }
 
 function emptyState() {
@@ -48,14 +55,18 @@ function stateFromItem(item: MagicItem) {
   };
 }
 
-export function MagicItemFormDialog({ open, onClose, onSubmit, initialItem }: MagicItemFormDialogProps) {
+export function MagicItemFormDialog({ open, onClose, onSubmit, initialItem, worldId }: MagicItemFormDialogProps) {
   const isEditMode = !!initialItem;
   const [state, setState] = useState(emptyState());
+  const [createArticle, setCreateArticle] = useState(false);
+  const [createArticleNow, setCreateArticleNow] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setState(initialItem ? stateFromItem(initialItem) : emptyState());
+    setCreateArticle(false);
+    setCreateArticleNow(true);
   }, [open, initialItem]);
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
@@ -86,7 +97,14 @@ export function MagicItemFormDialog({ open, onClose, onSubmit, initialItem }: Ma
       createdAt: initialItem?.createdAt ?? now,
       updatedAt: now,
     };
-    onSubmit(item);
+
+    let articleOutcome: ArticleLinkOutcome = null;
+    if (!isEditMode && worldId && createArticle) {
+      const article = buildLinkedArticle(worldId, 'item', item.id, item.name);
+      useArticleStore.getState().addArticle(article);
+      if (createArticleNow) articleOutcome = { createdArticleId: article.id };
+    }
+    onSubmit(item, articleOutcome);
   };
 
   return (
@@ -146,6 +164,18 @@ export function MagicItemFormDialog({ open, onClose, onSubmit, initialItem }: Ma
             multiline
             minRows={3}
           />
+
+          {!isEditMode && worldId && (
+            <>
+              <Divider />
+              <LinkArticleFields
+                checked={createArticle}
+                onCheckedChange={setCreateArticle}
+                createNow={createArticleNow}
+                onCreateNowChange={setCreateArticleNow}
+              />
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

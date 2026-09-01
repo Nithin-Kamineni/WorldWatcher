@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.api.routers import (
+    articles,
     assets,
     bastions,
     campaigns,
@@ -16,25 +17,35 @@ from app.api.routers import (
     locations,
     map_tokens,
     maps,
+    notes,
     quests,
     random_bank,
     random_encounter_tables,
     raw_entities,
     search,
+    session_chats,
+    situational_tables,
     sources,
     spells,
     token_library,
+    worlds,
 )
 
 api_router = APIRouter(prefix="/api")
 
+api_router.include_router(worlds.router)
 api_router.include_router(campaigns.router)
+api_router.include_router(articles.router)
+api_router.include_router(articles.folders_router)
 api_router.include_router(characters.router)
 api_router.include_router(locations.router)
 api_router.include_router(factions.router)
 api_router.include_router(quests.router)
 api_router.include_router(bastions.facilities_router)
 api_router.include_router(bastions.router)
+api_router.include_router(notes.router)
+api_router.include_router(notes.folders_router)
+api_router.include_router(session_chats.router)
 
 api_router.include_router(creatures.router)
 api_router.include_router(spells.router)
@@ -55,6 +66,7 @@ api_router.include_router(token_library.router)
 api_router.include_router(encounters.router)
 api_router.include_router(combats.router)
 api_router.include_router(random_encounter_tables.router)
+api_router.include_router(situational_tables.router)
 
 api_router.include_router(assets.router)
 api_router.include_router(raw_entities.router)

@@ -17,6 +17,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import FavoriteIcon from '@mui/icons-material/Favorite';
+import ShieldIcon from '@mui/icons-material/Shield';
 import NotesIcon from '@mui/icons-material/Notes';
 import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
@@ -24,6 +25,8 @@ import type { InitiativeState } from '../../../types/initiative';
 import type { PlacedToken } from '../../../types/token';
 import { TokenThumbnail } from '../TokenThumbnail';
 import { TokenEffectsEditor } from '../toolbar/TokenEffectsEditor';
+import { formatCombo } from '../../../types/shortcut';
+import { getEffectiveCombo, type ShortcutOverride } from '../../../store/useShortcutStore';
 
 type TokenCombatChanges = Partial<Pick<PlacedToken, 'hp' | 'concentrating' | 'deathSaves' | 'notes' | 'effects'>>;
 
@@ -38,6 +41,13 @@ interface InitiativePanelProps {
   onNextTurn: () => void;
   onEndEncounter: () => void;
   onUpdateToken: (tokenId: string, changes: TokenCombatChanges) => void;
+  selectedTokenIds: string[];
+  onTokenSelect: (token: PlacedToken, additive: boolean) => void;
+  shortcutOverrides: Record<string, ShortcutOverride>;
+}
+
+function comboLabel(overrides: Record<string, ShortcutOverride>, actionId: string): string {
+  return formatCombo(getEffectiveCombo(overrides, actionId));
 }
 
 export function InitiativePanel({
@@ -51,6 +61,9 @@ export function InitiativePanel({
   onNextTurn,
   onEndEncounter,
   onUpdateToken,
+  selectedTokenIds,
+  onTokenSelect,
+  shortcutOverrides,
 }: InitiativePanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const sortedEntries = [...initiative.entries].sort((a, b) => b.roll - a.roll);
@@ -70,15 +83,19 @@ export function InitiativePanel({
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Roll initiative for every token currently on this floor (d20 + DEX for creatures that have it).
           </Typography>
-          <Button
-            variant="contained"
-            fullWidth
-            startIcon={<CasinoIcon />}
-            onClick={onRollInitiative}
-            disabled={placedTokens.length === 0}
-          >
-            Roll Initiative
-          </Button>
+          <Tooltip title={`Roll Initiative (${comboLabel(shortcutOverrides, 'rerollInitiative')})`} placement="top">
+            <span>
+              <Button
+                variant="contained"
+                fullWidth
+                startIcon={<CasinoIcon />}
+                onClick={onRollInitiative}
+                disabled={placedTokens.length === 0}
+              >
+                Roll Initiative
+              </Button>
+            </span>
+          </Tooltip>
         </Box>
       )}
 
@@ -96,106 +113,185 @@ export function InitiativePanel({
               const isCurrent = initiative.status === 'active' && entry.id === initiative.currentEntryId;
               const isExpanded = expandedId === entry.id;
               const isDown = !!token.hp && token.hp.current <= 0;
+              const isLocked = initiative.status === 'active' && !!entry.locked;
               const isUnlocked = initiative.status === 'active' && !entry.locked;
-              const rollEditable = initiative.status !== 'active' || !entry.locked;
+              const showInitiative = !isLocked; // rolling, or active-but-unlocked
+              const isSelected = selectedTokenIds.includes(token.id);
+
+              // Whole row: plain click toggles expand, ctrl/cmd+click toggles multi-select
+              // instead (same selectedTokenIds/onTokenSelect the map uses, so a selection made
+              // here or on the map shows up in both places).
+              const handleRowClick = (e: React.MouseEvent) => {
+                if (e.ctrlKey || e.metaKey) {
+                  onTokenSelect(token, true);
+                  return;
+                }
+                setExpandedId(isExpanded ? null : entry.id);
+              };
+
               return (
                 <Box
                   key={entry.id}
+                  onClick={handleRowClick}
                   sx={{
                     borderRadius: 2,
+                    cursor: 'pointer',
                     bgcolor: isCurrent ? 'action.selected' : 'action.hover',
-                    border: isCurrent ? '2px solid' : '2px solid transparent',
-                    borderColor: isCurrent ? 'primary.main' : 'transparent',
+                    border: '2px solid',
+                    borderColor: isSelected ? '#29b6f6' : isCurrent ? 'primary.main' : 'transparent',
                     boxShadow: isUnlocked ? '0 0 0 2px rgba(255,255,255,0.85), 0 0 10px 2px rgba(255,255,255,0.55)' : 'none',
-                    transition: 'box-shadow 0.2s',
+                    transition: 'box-shadow 0.2s, border-color 0.2s',
                   }}
                 >
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center', p: 1 }}>
-                    <TokenThumbnail src={token.imageSrc} name={token.name} size={32} border={`2px solid ${token.outlineColor}`} />
+                    <Box sx={{ position: 'relative', flexShrink: 0 }}>
+                      <TokenThumbnail src={token.imageSrc} name={token.name} size={32} border={`2px solid ${token.outlineColor}`} />
+                      {token.concentrating && (
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            bottom: -1,
+                            right: -1,
+                            width: 9,
+                            height: 9,
+                            borderRadius: '50%',
+                            bgcolor: '#1e88e5',
+                            border: '1.5px solid',
+                            borderColor: 'background.paper',
+                          }}
+                        />
+                      )}
+                      {token.effects.length > 0 && (
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            top: -1,
+                            right: -1,
+                            width: 9,
+                            height: 9,
+                            borderRadius: '50%',
+                            bgcolor: '#c0392b',
+                            border: '1.5px solid',
+                            borderColor: 'background.paper',
+                          }}
+                        />
+                      )}
+                    </Box>
                     <Typography variant="body2" sx={{ flexGrow: 1 }} noWrap>
                       {token.name}
                     </Typography>
-                    <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
-                      {rollEditable ? (
-                        <>
-                          <Typography variant="caption" color="text.secondary">
-                            d20
-                          </Typography>
-                          <TextField
-                            type="number"
-                            size="small"
-                            variant="standard"
-                            value={entry.baseRoll}
-                            onChange={(e) => onUpdateBaseRoll(entry.id, Number(e.target.value))}
-                            sx={{ width: 34 }}
-                            slotProps={{ htmlInput: { style: { textAlign: 'right' } } }}
-                          />
-                          <Typography variant="caption" color="text.secondary">
-                            {entry.modifier >= 0 ? `+${entry.modifier}` : entry.modifier} = {entry.roll}
-                          </Typography>
-                        </>
-                      ) : (
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                          {entry.roll}
+                    {showInitiative ? (
+                      // showInitiative already excludes the active-and-locked case, so the
+                      // roll is always editable here - rolling (pre-Start) or unlocked mid-combat.
+                      <Stack
+                        direction="row"
+                        spacing={0.25}
+                        sx={{ alignItems: 'center' }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Typography variant="caption" color="text.secondary">
+                          d20
                         </Typography>
-                      )}
-                    </Stack>
-                    {initiative.status === 'active' && (
-                      <Tooltip title={entry.locked ? 'Unlock to edit initiative' : 'Lock initiative'}>
-                        <IconButton size="small" onClick={() => onToggleEntryLock(entry.id)}>
-                          {entry.locked ? <LockIcon fontSize="small" /> : <LockOpenIcon fontSize="small" color="warning" />}
-                        </IconButton>
-                      </Tooltip>
+                        <TextField
+                          type="number"
+                          size="small"
+                          variant="standard"
+                          value={entry.baseRoll}
+                          onChange={(e) => onUpdateBaseRoll(entry.id, Number(e.target.value))}
+                          sx={{ width: 34 }}
+                          slotProps={{ htmlInput: { style: { textAlign: 'right' } } }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          {entry.modifier >= 0 ? `+${entry.modifier}` : entry.modifier} = {entry.roll}
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                        <Tooltip title="Armor Class">
+                          <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+                            <ShieldIcon sx={{ fontSize: 15, color: 'text.secondary' }} />
+                            <Typography variant="caption">{token.ac ?? '—'}</Typography>
+                          </Stack>
+                        </Tooltip>
+                        <Tooltip title={`Hit Points - Apply Damage (${comboLabel(shortcutOverrides, 'applyDamage')}) / Apply Healing (${comboLabel(shortcutOverrides, 'applyHealing')})`}>
+                          <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+                            <FavoriteIcon sx={{ fontSize: 15, color: 'error.main' }} />
+                            <Typography variant="caption">
+                              {token.hp ? `${token.hp.current}/${token.hp.max}` : '—'}
+                            </Typography>
+                          </Stack>
+                        </Tooltip>
+                      </Stack>
                     )}
-                    {initiative.status === 'active' && (
-                      <IconButton size="small" onClick={() => setExpandedId(isExpanded ? null : entry.id)}>
-                        {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-                      </IconButton>
-                    )}
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedId(isExpanded ? null : entry.id);
+                      }}
+                    >
+                      {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                    </IconButton>
                   </Stack>
 
                   {initiative.status === 'active' && (
                     <Collapse in={isExpanded}>
-                      <Stack spacing={1} sx={{ px: 1.5, pb: 1.5 }}>
+                      <Stack spacing={1} sx={{ px: 1.5, pb: 1.5 }} onClick={(e) => e.stopPropagation()}>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <FavoriteIcon fontSize="small" color="error" />
-                          <TextField
-                            type="number"
-                            size="small"
-                            variant="standard"
-                            label="HP"
-                            value={token.hp?.current ?? 0}
-                            onChange={(e) =>
-                              onUpdateToken(token.id, { hp: { current: Number(e.target.value), max: token.hp?.max ?? 0 } })
-                            }
-                            sx={{ width: 56 }}
-                          />
-                          <Typography variant="body2" color="text.secondary">
-                            /
+                          <Tooltip title={entry.locked ? 'Unlock to edit initiative' : 'Lock initiative'}>
+                            <IconButton size="small" onClick={() => onToggleEntryLock(entry.id)}>
+                              {entry.locked ? <LockIcon fontSize="small" /> : <LockOpenIcon fontSize="small" color="warning" />}
+                            </IconButton>
+                          </Tooltip>
+                          <Typography variant="caption" color="text.secondary">
+                            Initiative {entry.roll} {entry.locked ? '(locked)' : '(unlocked)'}
                           </Typography>
-                          <TextField
-                            type="number"
-                            size="small"
-                            variant="standard"
-                            label="Max"
-                            value={token.hp?.max ?? 0}
-                            onChange={(e) =>
-                              onUpdateToken(token.id, { hp: { current: token.hp?.current ?? 0, max: Number(e.target.value) } })
-                            }
-                            sx={{ width: 56 }}
-                          />
-                          <FormControlLabel
-                            sx={{ ml: 1 }}
-                            control={
-                              <Checkbox
-                                size="small"
-                                checked={!!token.concentrating}
-                                onChange={(e) => onUpdateToken(token.id, { concentrating: e.target.checked })}
-                              />
-                            }
-                            label={<Typography variant="caption">Conc.</Typography>}
-                          />
                         </Stack>
+
+                        <Tooltip
+                          title={`Apply Damage (${comboLabel(shortcutOverrides, 'applyDamage')}) / Apply Healing (${comboLabel(shortcutOverrides, 'applyHealing')}) / Apply Temporary HP (${comboLabel(shortcutOverrides, 'applyTempHp')}) - select this combatant on the map to use the shortcut, or edit directly here`}
+                          placement="top"
+                        >
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            <FavoriteIcon fontSize="small" color="error" />
+                            <TextField
+                              type="number"
+                              size="small"
+                              variant="standard"
+                              label="HP"
+                              value={token.hp?.current ?? 0}
+                              onChange={(e) =>
+                                onUpdateToken(token.id, { hp: { current: Number(e.target.value), max: token.hp?.max ?? 0 } })
+                              }
+                              sx={{ width: 56 }}
+                            />
+                            <Typography variant="body2" color="text.secondary">
+                              /
+                            </Typography>
+                            <TextField
+                              type="number"
+                              size="small"
+                              variant="standard"
+                              label="Max"
+                              value={token.hp?.max ?? 0}
+                              onChange={(e) =>
+                                onUpdateToken(token.id, { hp: { current: token.hp?.current ?? 0, max: Number(e.target.value) } })
+                              }
+                              sx={{ width: 56 }}
+                            />
+                            <FormControlLabel
+                              sx={{ ml: 1 }}
+                              control={
+                                <Checkbox
+                                  size="small"
+                                  checked={!!token.concentrating}
+                                  onChange={(e) => onUpdateToken(token.id, { concentrating: e.target.checked })}
+                                />
+                              }
+                              label={<Typography variant="caption">Conc.</Typography>}
+                            />
+                          </Stack>
+                        </Tooltip>
 
                         {isDown && (
                           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -238,9 +334,11 @@ export function InitiativePanel({
                         )}
 
                         <Box>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                            Effects
-                          </Typography>
+                          <Tooltip title={`Add Tag (${comboLabel(shortcutOverrides, 'addTag')})`} placement="top-start">
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'inline-block', mb: 0.5 }}>
+                              Effects
+                            </Typography>
+                          </Tooltip>
                           <TokenEffectsEditor
                             effects={token.effects}
                             onChange={(effects) => onUpdateToken(token.id, { effects })}
@@ -249,16 +347,18 @@ export function InitiativePanel({
 
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
                           <NotesIcon fontSize="small" sx={{ mt: 1, color: 'text.secondary' }} />
-                          <TextField
-                            size="small"
-                            variant="outlined"
-                            placeholder="Spell slots, abilities, anything else to track…"
-                            multiline
-                            minRows={2}
-                            fullWidth
-                            value={token.notes ?? ''}
-                            onChange={(e) => onUpdateToken(token.id, { notes: e.target.value })}
-                          />
+                          <Tooltip title={`Update Persistent Notes (${comboLabel(shortcutOverrides, 'updatePersistentNotes')})`} placement="top-start">
+                            <TextField
+                              size="small"
+                              variant="outlined"
+                              placeholder="Spell slots, abilities, anything else to track…"
+                              multiline
+                              minRows={2}
+                              fullWidth
+                              value={token.notes ?? ''}
+                              onChange={(e) => onUpdateToken(token.id, { notes: e.target.value })}
+                            />
+                          </Tooltip>
                         </Stack>
                       </Stack>
                     </Collapse>
@@ -272,21 +372,27 @@ export function InitiativePanel({
           <Stack spacing={1} sx={{ p: 1.5 }}>
             {initiative.status === 'rolling' ? (
               <>
-                <Button variant="contained" startIcon={<PlayArrowIcon />} onClick={onStartEncounter}>
-                  Start Encounter
-                </Button>
+                <Tooltip title={`Start Encounter (${comboLabel(shortcutOverrides, 'startEncounter')})`}>
+                  <Button variant="contained" startIcon={<PlayArrowIcon />} onClick={onStartEncounter}>
+                    Start Encounter
+                  </Button>
+                </Tooltip>
                 <Button variant="outlined" color="inherit" onClick={onCancelRoll}>
                   Cancel
                 </Button>
               </>
             ) : (
               <>
-                <Button variant="contained" startIcon={<SkipNextIcon />} onClick={onNextTurn}>
-                  Next Turn
-                </Button>
-                <Button variant="outlined" color="error" startIcon={<StopCircleIcon />} onClick={onEndEncounter}>
-                  End Encounter
-                </Button>
+                <Tooltip title={`Next Turn (${comboLabel(shortcutOverrides, 'nextTurn')})`}>
+                  <Button variant="contained" startIcon={<SkipNextIcon />} onClick={onNextTurn}>
+                    Next Turn
+                  </Button>
+                </Tooltip>
+                <Tooltip title={`End Encounter (${comboLabel(shortcutOverrides, 'endEncounter')})`}>
+                  <Button variant="outlined" color="error" startIcon={<StopCircleIcon />} onClick={onEndEncounter}>
+                    End Encounter
+                  </Button>
+                </Tooltip>
               </>
             )}
           </Stack>

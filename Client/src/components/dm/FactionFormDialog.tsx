@@ -22,11 +22,14 @@ import { isAllowedImageFile } from '../../utils/fileValidation';
 import { FACTION_INFLUENCE_OPTIONS, FACTION_TYPE_PRESETS, type Faction, type FactionInfluence } from '../../types/faction';
 import { FactionRelationsField } from './FactionRelationsField';
 import type { FactionRelation } from '../../types/factionRelation';
+import { useArticleStore } from '../../store/useArticleStore';
+import { buildLinkedArticle, type ArticleLinkOutcome } from '../../types/article';
+import { LinkArticleFields } from '../world/LinkArticleFields';
 
 interface FactionFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (faction: Faction) => void;
+  onSubmit: (faction: Faction, articleOutcome?: ArticleLinkOutcome) => void;
   initialFaction?: Faction;
   /** Only needed to power the Relations subsection - omitted, that subsection is hidden. */
   campaignId?: string;
@@ -35,6 +38,9 @@ interface FactionFormDialogProps {
   onAddRelation?: (relation: FactionRelation) => void;
   onUpdateRelation?: (relation: FactionRelation) => void;
   onDeleteRelation?: (campaignId: string, relationId: string) => void;
+  /** World this Faction's article (if any) belongs to - omit when there's no world in scope,
+   * which hides the "also create a world article" checkbox entirely (issue 4c/4g). */
+  worldId?: string;
 }
 
 function emptyState() {
@@ -133,16 +139,21 @@ export function FactionFormDialog({
   onAddRelation,
   onUpdateRelation,
   onDeleteRelation,
+  worldId,
 }: FactionFormDialogProps) {
   const isEditMode = !!initialFaction;
   const [state, setState] = useState(emptyState());
   const [moreOpen, setMoreOpen] = useState(false);
+  const [createArticle, setCreateArticle] = useState(false);
+  const [createArticleNow, setCreateArticleNow] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setState(initialFaction ? stateFromFaction(initialFaction) : emptyState());
     setMoreOpen(false);
+    setCreateArticle(false);
+    setCreateArticleNow(true);
   }, [open, initialFaction]);
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
@@ -185,7 +196,14 @@ export function FactionFormDialog({
       createdAt: initialFaction?.createdAt ?? now,
       updatedAt: now,
     };
-    onSubmit(faction);
+
+    let articleOutcome: ArticleLinkOutcome = null;
+    if (!isEditMode && worldId && createArticle) {
+      const article = buildLinkedArticle(worldId, 'faction', faction.id, faction.name);
+      useArticleStore.getState().addArticle(article);
+      if (createArticleNow) articleOutcome = { createdArticleId: article.id };
+    }
+    onSubmit(faction, articleOutcome);
   };
 
   return (
@@ -354,6 +372,18 @@ export function FactionFormDialog({
             fullWidth
             placeholder="Anything else the DM should remember about this faction…"
           />
+
+          {!isEditMode && worldId && (
+            <>
+              <Divider />
+              <LinkArticleFields
+                checked={createArticle}
+                onCheckedChange={setCreateArticle}
+                createNow={createArticleNow}
+                onCreateNowChange={setCreateArticleNow}
+              />
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

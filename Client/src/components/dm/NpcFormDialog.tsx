@@ -21,17 +21,27 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ToggleButton from '@mui/material/ToggleButton';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import CasinoIcon from '@mui/icons-material/Casino';
+import { useNavigate } from 'react-router-dom';
+import ArticleIcon from '@mui/icons-material/Description';
 import { isAllowedImageFile } from '../../utils/fileValidation';
 import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatureStore';
+import { useArticleStore, getArticleForLinkedEntity } from '../../store/useArticleStore';
+import { buildLinkedArticle, type ArticleLinkOutcome } from '../../types/article';
+import { LinkArticleFields } from '../world/LinkArticleFields';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import {
   useRandomizerBankStore,
+  randomAppearance,
   randomFullName,
   randomMotivation,
+  randomPersonality,
   randomPitfall,
   randomProfession,
+  randomRelationship,
+  randomSecret,
 } from '../../store/useRandomizerBankStore';
 import { FieldRandomizer } from './FieldRandomizer';
+import { ItemListField } from './ItemListField';
 import { SPELL_CLASS_OPTIONS } from '../../types/spell';
 import {
   CREATURE_IMPORTANCE_OPTIONS,
@@ -41,16 +51,39 @@ import {
   type CreatureImportance,
   type CreatureRelation,
 } from '../../types/creature';
-import { DEFAULT_RELATIVE_SIZE, MAX_RELATIVE_SIZE, MIN_RELATIVE_SIZE } from '../../types/token';
+import { DEFAULT_RELATIVE_SIZE, MAX_RELATIVE_SIZE, MIN_RELATIVE_SIZE, sizeCategoryToScale } from '../../types/token';
 
-type RandomizableField = 'name' | 'relation' | 'importance' | 'profession' | 'motivations' | 'pitfalls' | 'buildMode';
+type RandomizableField =
+  | 'name'
+  | 'relation'
+  | 'importance'
+  | 'profession'
+  | 'motivations'
+  | 'pitfalls'
+  | 'buildMode'
+  | 'personality'
+  | 'appearance'
+  | 'secrets'
+  | 'relationships';
+
+/** Parses one of the itemized newline-joined text fields (traits/appearance/secrets/
+ * relationships) into a list for ItemListField; the inverse of Array.join('\n'). */
+function parseItems(text: string): string[] {
+  return text
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 interface NpcFormDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (creature: Creature) => void;
+  onSubmit: (creature: Creature, articleOutcome?: ArticleLinkOutcome) => void;
   initialCreature?: Creature;
   campaignId: string;
+  /** World this NPC's article (if any) belongs to - omit when there's no world in scope,
+   * which hides the "also create a world article" checkbox entirely (issue 4c/4g). */
+  worldId?: string;
 }
 
 const emptyAbilities: AbilityScores = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
@@ -85,6 +118,9 @@ function emptyState() {
     motivations: '',
     pitfalls: '',
     history: '',
+    appearance: '',
+    secrets: '',
+    relationships: '',
     defaultSize: DEFAULT_RELATIVE_SIZE,
   };
 }
@@ -119,6 +155,9 @@ function stateFromCreature(creature: Creature): ReturnType<typeof emptyState> {
     motivations: creature.motivations ?? '',
     pitfalls: creature.pitfalls ?? '',
     history: creature.history ?? '',
+    appearance: creature.appearance ?? '',
+    secrets: creature.secrets ?? '',
+    relationships: creature.relationships ?? '',
     defaultSize: creature.defaultSize,
   };
 }
@@ -130,6 +169,7 @@ function applyBaseCreature(prev: ReturnType<typeof emptyState>, base: Creature):
   return {
     ...prev,
     size: base.size,
+    defaultSize: base.defaultSize,
     type: base.type,
     alignment: base.alignment,
     ac: base.ac,
@@ -154,9 +194,15 @@ export function NpcFormDialog({
   onSubmit,
   initialCreature,
   campaignId,
+  worldId,
 }: NpcFormDialogProps) {
+  const navigate = useNavigate();
   const isEditMode = !!initialCreature;
   const [state, setState] = useState(emptyState());
+  const [createArticle, setCreateArticle] = useState(false);
+  const [createArticleNow, setCreateArticleNow] = useState(true);
+  const articles = useArticleStore((s) => s.articles);
+  const linkedArticle = getArticleForLinkedEntity(articles, worldId, 'npc', initialCreature?.id);
   const [imageManuallySet, setImageManuallySet] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [locked, setLocked] = useState<Set<RandomizableField>>(new Set());
@@ -185,6 +231,8 @@ export function NpcFormDialog({
     setImageManuallySet(false);
     setCreatureSearch('');
     setLocked(new Set());
+    setCreateArticle(false);
+    setCreateArticleNow(true);
     fetchBanks();
     if (initialCreature?.baseCreatureId) {
       fetchCreaturesForCampaign(campaignId);
@@ -218,6 +266,11 @@ export function NpcFormDialog({
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));
   };
+
+  const personalityItems = useMemo(() => parseItems(state.traits), [state.traits]);
+  const appearanceItems = useMemo(() => parseItems(state.appearance), [state.appearance]);
+  const secretsItems = useMemo(() => parseItems(state.secrets), [state.secrets]);
+  const relationshipItems = useMemo(() => parseItems(state.relationships), [state.relationships]);
 
   const setAbility = (key: keyof AbilityScores, value: number) => {
     setState((prev) => ({ ...prev, abilities: { ...prev.abilities, [key]: value } }));
@@ -262,6 +315,33 @@ export function NpcFormDialog({
     const pitfall = randomPitfall(bank);
     if (pitfall) set('pitfalls', pitfall);
   };
+  /** Appends one random pick to an itemized field, retrying a few times to skip an exact
+   * duplicate of what's already there - the "randomize all" counterpart to ItemListField's
+   * own dice button. */
+  const appendRandomItem = (currentItems: string[], pick: () => string): string[] => {
+    let value = '';
+    for (let i = 0; i < 5; i++) {
+      value = pick();
+      if (value && !currentItems.includes(value)) break;
+    }
+    return value ? [...currentItems, value] : currentItems;
+  };
+  const randomizePersonality = () => {
+    if (locked.has('personality')) return;
+    set('traits', appendRandomItem(parseItems(state.traits), () => randomPersonality(bank)).join('\n'));
+  };
+  const randomizeAppearance = () => {
+    if (locked.has('appearance')) return;
+    set('appearance', appendRandomItem(parseItems(state.appearance), () => randomAppearance(bank)).join('\n'));
+  };
+  const randomizeSecrets = () => {
+    if (locked.has('secrets')) return;
+    set('secrets', appendRandomItem(parseItems(state.secrets), () => randomSecret(bank)).join('\n'));
+  };
+  const randomizeRelationships = () => {
+    if (locked.has('relationships')) return;
+    set('relationships', appendRandomItem(parseItems(state.relationships), () => randomRelationship(bank)).join('\n'));
+  };
   /** Coin-flips Custom vs Creature; Creature picks a random monster and copies its stats
    * as-is, Custom randomizes level + class on top of whatever's already there. */
   const randomizeBuildMode = async () => {
@@ -296,6 +376,10 @@ export function NpcFormDialog({
     randomizeMotivations();
     randomizePitfalls();
     randomizeBuildMode();
+    randomizePersonality();
+    randomizeAppearance();
+    randomizeSecrets();
+    randomizeRelationships();
   };
 
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -342,13 +426,23 @@ export function NpcFormDialog({
       motivations: state.motivations.trim() || undefined,
       pitfalls: state.pitfalls.trim() || undefined,
       history: state.history.trim() || undefined,
+      appearance: state.appearance.trim() || undefined,
+      secrets: state.secrets.trim() || undefined,
+      relationships: state.relationships.trim() || undefined,
       defaultSize: state.defaultSize,
       currentSize: initialCreature?.currentSize ?? state.defaultSize,
       isFavorite: initialCreature?.isFavorite ?? false,
       createdAt: initialCreature?.createdAt ?? now,
       updatedAt: now,
     };
-    onSubmit(creature);
+
+    let articleOutcome: ArticleLinkOutcome = null;
+    if (worldId && createArticle && !linkedArticle) {
+      const article = buildLinkedArticle(worldId, 'npc', creature.id, creature.name);
+      useArticleStore.getState().addArticle(article);
+      if (createArticleNow) articleOutcome = { createdArticleId: article.id };
+    }
+    onSubmit(creature, articleOutcome);
   };
 
   return (
@@ -431,7 +525,7 @@ export function NpcFormDialog({
             multiline
             minRows={2}
             maxRows={4}
-            placeholder="Appearance, mannerisms, first impression…"
+            placeholder="Mannerisms, first impression, quirks of speech…"
           />
 
           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
@@ -525,7 +619,10 @@ export function NpcFormDialog({
               <TextField
                 label="Size"
                 value={state.size}
-                onChange={(e) => set('size', e.target.value)}
+                onChange={(e) => {
+                  const size = e.target.value;
+                  setState((prev) => ({ ...prev, size, defaultSize: sizeCategoryToScale(size) }));
+                }}
                 fullWidth
                 size="small"
                 disabled={!state.isCustomBuild}
@@ -652,6 +749,24 @@ export function NpcFormDialog({
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
             Roleplay
           </Typography>
+          <ItemListField
+            label="Personality"
+            items={personalityItems}
+            onChange={(items) => set('traits', items.join('\n'))}
+            onPickRandom={() => randomPersonality(bank)}
+            locked={locked.has('personality')}
+            onToggleLock={() => toggleLock('personality')}
+            placeholder="Add a personality quirk…"
+          />
+          <ItemListField
+            label="Appearance"
+            items={appearanceItems}
+            onChange={(items) => set('appearance', items.join('\n'))}
+            onPickRandom={() => randomAppearance(bank)}
+            locked={locked.has('appearance')}
+            onToggleLock={() => toggleLock('appearance')}
+            placeholder="Add an appearance feature…"
+          />
           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
             <TextField
               label="Motivations / Goals"
@@ -677,6 +792,24 @@ export function NpcFormDialog({
             />
             <FieldRandomizer locked={locked.has('pitfalls')} onToggleLock={() => toggleLock('pitfalls')} onRandomize={randomizePitfalls} />
           </Stack>
+          <ItemListField
+            label="Secrets"
+            items={secretsItems}
+            onChange={(items) => set('secrets', items.join('\n'))}
+            onPickRandom={() => randomSecret(bank)}
+            locked={locked.has('secrets')}
+            onToggleLock={() => toggleLock('secrets')}
+            placeholder="Add a secret…"
+          />
+          <ItemListField
+            label="Relationships"
+            items={relationshipItems}
+            onChange={(items) => set('relationships', items.join('\n'))}
+            onPickRandom={() => randomRelationship(bank)}
+            locked={locked.has('relationships')}
+            onToggleLock={() => toggleLock('relationships')}
+            placeholder="Add a relationship…"
+          />
           <TextField
             label="History"
             value={state.history}
@@ -724,15 +857,33 @@ export function NpcFormDialog({
             size="small"
             disabled={!state.isCustomBuild}
           />
-          <TextField
-            label="Traits / notes"
-            value={state.traits}
-            onChange={(e) => set('traits', e.target.value)}
-            fullWidth
-            multiline
-            minRows={2}
-            maxRows={4}
-          />
+
+          {worldId && (
+            <>
+              <Divider />
+              {linkedArticle ? (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ArticleIcon fontSize="small" />}
+                  onClick={() => {
+                    onClose();
+                    navigate(`/w/${worldId}/manager/entry/${linkedArticle.id}`);
+                  }}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Edit linked article
+                </Button>
+              ) : (
+                <LinkArticleFields
+                  checked={createArticle}
+                  onCheckedChange={setCreateArticle}
+                  createNow={createArticleNow}
+                  onCreateNowChange={setCreateArticleNow}
+                />
+              )}
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

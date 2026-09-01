@@ -1,13 +1,70 @@
-Understand how improved initiative works. Make the initiative in the application work with way fewer clicks
+I need some changes in the starting Play pannel.
+1. The initial choosing of sennsion and chat for notes can be done in one single page using a clean UI as I have in the first image. I need the UI clean and professional with as few clicks as possile to start the session.
+2. The default of session is the most recent session and default of chat is the most recent chat. (Give an option to not choose any chat too).
 
-Implement bulk initiative where I can add multiple creaturees actions at the same time. multiple creatures damage can be added the same time.
+I need some changes in the main Play pannel page. (This is the most important page in all of the application).
+1. The current breadcrums of Meridian: A World in Constant Dawn/Meridian: A World in Constant Dawn/Play can be removed as this is such small tracking.
+2. This page will have multiple layouts which is going to be heavily editable with multiple layouts.
+3. Multiple layout are going to be: 
+    1. single window page,
+    2,3. double window page (side by side, up and down), 
+    4,5. Thriple window (3 panel side by side with width evenly split, 1 panel half - another 2 panels taking remmaining half as up and down),
+    6. 4 quaters windows, one in each corner with even sized windows.
+4. The layout can be swiched to these different layouts on the navbar. (Only display top 2 layouts here and display the remaining in  more option which will be displayed as a popover.)
+5. The most used layouts will be the top 2 layouts.
+6. Running now and 'change session' button.
+    1. In the top the play page after choosing session and chat. We have Session — 2026-08-30. The game controller icon and the whole title of session and the text below on running now can be removed. The button of change session can be removed completly.
+    2. The going back will be handeled by a button on the navbar left of the layout which will allow to go from main play page to starting play panel (options selcting page).
+7. Also set a lock next to the layouts allowing use to lock in the layout we selected so we don't accidentally change the layout midgame.
+8. All windows here depending on the layout must be able to change the size of the window for specific dimentions.
+    1. In a side by side layout we must be able to change the width of 2 windows by draging the line left or right. Drging the line right will reduce the size of right window while increasing the size of left window.
+    2. In 3 panels with 1 half and 2 quaters the user must be able to either drag the middle line to increase or decrese the size of the windows of left and right, or the user will drag the vertical line between 2 quater windows so change their lengths.
+    3. All the other layout can also have these changes in the window size like this.
+    4. If there is a chat window then that window can be collapse vertically or horizontally depending on the layout by a single click. (This feature is only specific to DM notes chat feature as some DMs might not have need for note taking during some sessions). 
+    5. The change of the layout must be remembered and also must be reset with a reset layout option on the navbar or someplace near the layouts.
+9. The default layout is double window page (side by side).
 
-Add keyboard shortcuts and options to customise keyboard shortcuts for operating the map and other parts of the applcaition.
+10. Now in each of the windows of the layouts. Some layouts have only one or two windows, while some have 3 or 4 windows.
+    1. Any window can be changed to another things by simply pressing and icon on the header of the window (make this button elegant).
+    2. The windows should be looking posh like the images I have uploaded for you reference in the prompt.
+    3. The types of windows we will have in our application from least complicated to most complicated.
+        a. Session window: This will displlay the session notes. Also must be able to make any quick changes in this session noted by clicking some button in the header of this windows.
+        b. DM notes: This is the chat option for DMs to have quick notes. 
+            1. The chat window has options in header to switch to differet chats (make this look good).
+            2. Here if the intial choice of chat option is not picked (intitially in the starting page) this window will be sligtly blured out with option asking to choose a chat or create a new chat.
+            3. The chats must be saved in the folders section in the session folder and I must be able to see it (also edit it if needed).
+        c. Items Window: This window is not just a single window. This can have multiple sub-windows in here.
+            1. This window will have multiple subwindows opened during the game. The multiple subwindows must be able to be swiched like shifting through google chrome tab near the header. The subwindow can be closed by pressing the x mark on the tab of theat subwindow near the header.
+            2. The default sub-window that will be openened intially is the random tables sub window.
+            3. The default sub window would be the random tables sub-window. Here I want to choose the random tables based on themes. I will also introduce many random tables and random tables based on themes here in the future.
+               3a. So the features for searching the random table should look good and also scalable. The search options should have names search and also a filter icon which will open a popover of filters (dialog box). The filters must be well strucutres and be across vast amount of things. The filter options should themselfs have a search on waht option to filter if possible.
+               3b. Each random table on the window can be pinned. If it is pinned it will not be replaced and any new random table selected will be below the pinned tables.
+               3c. The options of what tables are pinned must be remembered throughout the game (Even if they accidententally logoff/close and log back in/open).
+               3d. The subwindow will have search option and filter on top ocupying only one row.
+               3e. Next, Each random table that is selected and added will be in its collapsed form when added. It will show some important information in the tagline of random table item.
+               3f. When Uncollapsed the random table will be displaying it options of random able. (This will make the sub window have less scrolling even if multiple random tables are pinned).
+            4. Next sub window is encounters which will display the encounters that are searched and selected in the similar way. Add a tagline with important information about the encounter like challenge ration and number of creatures.
+                4a. This will also have same mechanism of pining and colapsing of encounters like random tables.
+                4b. This will also uncollapse and show the encounter details in a dropdown kind of a thing to show crushial info about the encounter by showing creatures in the ecnounter if its combat. It shows other things it the encounter is social or exploration (Come up with something that looks good).
+                4c. Since this is small space to show the encounter you need to design a new UI for showing this encounter.
+            5. Next sub window is stats which will display stats of creatures, spells and magic items.
+                5a. This will have similar mechanism as search, pininng, collapsing and uncollapsing.
+                5b. In search we can specific wheather we are searching for a creature, spell or magic item with a simple toggle. The default is all.
+            6. Next subwindow is places and this will display important information of countires, settlements, building, dungeons in a similar manner like above. Since we have less space in here than article we need to comeup with an new design of UI to disply important and limited amount of information here required by the DM during session.
+            7. All these items should also have a option to open the item or aritcle in a new tab for all these windows.
+            8. The default windows will be session window, Items window (random table as default sub window), chat window from left to right.
 
-Generation (Random table):
-Roll/generate the economy and shops for a settlement.
-Rumor and hook generator
-Loot tables
-World weather and travel generator
+11. These are huge changes which could all not be done. So update your progress on what aspects are not done as per the requirment in this file C:\personal\Dungenons and Dragons books\WorldWatcher\issues2.txt
 
-Session prep templates - checklist
+Don't bouther about alll the things in the image. They are mainly for reference of UI. Don't implement any features that are not mentioned here but in UI. (Implement features if you think they make sense and I did not mention them).
+--------------------------------------------------------------------
+
+Loot tables:
+    Random Individual Treasure - Generates carried monetary treasure by CR
+    Chapter 4, p. 120
+
+    Random Treasure Hoard - Generates hoard value and magic-item quantities
+    Chapter 4, p. 121
+
+Need to copy paste the screenshots of tables and save it in a directory
+C:\personal\Dungenons and Dragons books\WorldWatcher\random-table-images

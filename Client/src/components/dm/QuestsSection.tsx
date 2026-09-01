@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -19,9 +20,13 @@ import { QUEST_STATUS_OPTIONS, type Quest } from '../../types/quest';
 
 interface QuestsSectionProps {
   campaignId: string;
+  /** World this QuestsSection is rendered under, if any - threaded into QuestFormDialog so
+   * it can offer the "also create a world article" checkbox (issue 4c/4g). */
+  worldId?: string;
 }
 
-export function QuestsSection({ campaignId }: QuestsSectionProps) {
+export function QuestsSection({ campaignId, worldId }: QuestsSectionProps) {
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingQuest, setEditingQuest] = useState<Quest | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<Quest | null>(null);
@@ -127,11 +132,13 @@ export function QuestsSection({ campaignId }: QuestsSectionProps) {
         onClose={() => setDialogOpen(false)}
         initialQuest={editingQuest}
         factions={factions}
-        onSubmit={(quest) => {
+        worldId={worldId}
+        onSubmit={(quest, articleOutcome) => {
           if (editingQuest) updateQuestInCampaign(campaignId, quest);
           else addQuestToCampaign(campaignId, quest);
           setDialogOpen(false);
           setEditingQuest(undefined);
+          if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
         }}
       />
 

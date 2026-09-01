@@ -76,7 +76,7 @@ async def upload_asset(
     valid_types = {
         "creature_portrait", "creature_token", "item_image", "map", "npc_portrait",
         "faction_image", "location_image", "spell_image", "character_portrait",
-        "character_token", "other",
+        "character_token", "world_image", "article_cover_image", "article_body_image", "other",
     }
     if asset_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid asset_type '{asset_type}'")
