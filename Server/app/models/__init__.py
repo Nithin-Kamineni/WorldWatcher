@@ -12,7 +12,16 @@ from app.models.campaign import (
 )
 from app.models.combat import Combat, Combatant
 from app.models.creatures import Creature, CreatureAction
-from app.models.encounters import Encounter, EncounterCreature, EncounterTable, EncounterTableCreature
+from app.models.encounters import (
+    Encounter,
+    EncounterCombatBlock,
+    EncounterCreature,
+    EncounterExplorationBlock,
+    EncounterNpc,
+    EncounterSocialBlock,
+    EncounterTable,
+    EncounterTableCreature,
+)
 from app.models.items import Item
 from app.models.maps import Map, MapFloor, MapShape, MapToken, TokenLibrary
 from app.models.note import Note, NoteFolder
@@ -40,6 +49,20 @@ from app.models.reference import (
     RandomShopType,
     RandomTavernNamePart,
     Source,
+)
+from app.models.random_tables import (
+    Category,
+    EncounterTag,
+    Generator,
+    GeneratorComponent,
+    GeneratorTag,
+    RandomTable,
+    RandomTableTag,
+    Tag,
+    TableColumn,
+    TableEntry,
+    TableEntryTag,
+    TableFormat,
 )
 from app.models.session_chat import SessionChat
 from app.models.situational_table import SituationalTable
@@ -92,6 +115,10 @@ __all__ = [
     "EncounterCreature",
     "EncounterTable",
     "EncounterTableCreature",
+    "EncounterCombatBlock",
+    "EncounterSocialBlock",
+    "EncounterExplorationBlock",
+    "EncounterNpc",
     "Combat",
     "Combatant",
     "RawEntity",
@@ -102,4 +129,16 @@ __all__ = [
     "NoteFolder",
     "SessionChat",
     "SituationalTable",
+    "Category",
+    "Tag",
+    "RandomTableTag",
+    "EncounterTag",
+    "GeneratorTag",
+    "TableFormat",
+    "RandomTable",
+    "TableColumn",
+    "TableEntry",
+    "TableEntryTag",
+    "Generator",
+    "GeneratorComponent",
 ]

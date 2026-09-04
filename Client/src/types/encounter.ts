@@ -1,3 +1,9 @@
+import { xpForCR } from '../utils/encounterCalculator';
+
+export type CombatRole =
+  | 'minion' | 'skirmisher' | 'brute' | 'soldier' | 'artillery' | 'controller' | 'lurker' | 'leader'
+  | 'solo_boss' | 'support_healer';
+
 export interface EncounterCreatureEntry {
   id: string;
   /** null = a one-off custom creature entered inline, not saved to the creature library */
@@ -5,8 +11,99 @@ export interface EncounterCreatureEntry {
   name: string;
   imageSrc: string;
   quantity: number;
+  /** Preserved imported count such as 2d4+1; quantity is the resolved/fixed fallback. */
+  quantityFormula?: string | null;
   /** grid-relative size multiplier, only used for custom (creatureId === null) entries - linked creatures use their own currentSize */
   size?: number;
+  role?: CombatRole | null;
+  notes?: string | null;
+  /** linked creature's challenge_rating_display (e.g. "1/8", "5") - null for custom entries or when unresolved. Used for encounter difficulty and picking the encounter's fallback image (highest-CR creature). */
+  cr?: string | null;
+}
+
+export type NpcAttitude = 'hostile' | 'unfriendly' | 'indifferent' | 'friendly' | 'helpful';
+export type NpcAgenda =
+  | 'wants_money' | 'wants_protection' | 'wants_information' | 'wants_revenge' | 'wants_recruit'
+  | 'wants_deceive' | 'wants_escape' | 'wants_status' | 'hiding_secret' | 'testing_party';
+
+export interface RpCues {
+  voice?: string;
+  mannerism?: string;
+  appearanceTag?: string;
+  catchphrase?: string;
+}
+
+export interface EncounterNpcEntry {
+  id: string;
+  npcId: string;
+  name: string;
+  imageSrc: string;
+  attitude: NpcAttitude | null;
+  agenda: NpcAgenda | null;
+  secret: string | null;
+  leverage: string | null;
+  rpCues: RpCues | null;
+  sortOrder: number;
+}
+
+export interface EncounterCombatBlock {
+  shape: string | null;
+  victoryCondition: string | null;
+  awareness: string | null;
+  startRange: string | null;
+  lighting: string | null;
+  terrainType: string | null;
+  terrainFeatures: string[];
+  morale: string | null;
+  reinforcements: { mode: string; trigger: string; round: number | null; tableId: string | null } | null;
+  dynamicEvents: { trigger: string; event: string }[];
+  difficultyBand: string | null;
+  computedXp: number | null;
+  hasLairOrLegendary: boolean;
+  aftermath: string[];
+  scalingNotes: string | null;
+  mapId: string | null;
+  transitionEncounterId: string | null;
+}
+
+export interface EncounterSocialBlock {
+  shape: string | null;
+  venue: string | null;
+  tone: string | null;
+  stakes: string | null;
+  playerLevers: string[];
+  keyChecks: { skill: string; dc: number; onSuccess: string; onFailure: string }[];
+  outcomeTiers: unknown;
+  socialClock: { successesNeeded: number; failuresAllowed: number } | null;
+  gatedInfo: { fact: string; revealWhen: string }[];
+  complications: string[];
+  escalation: string | null;
+  transitionEncounterId: string | null;
+}
+
+export interface EncounterTrapDetails { name: string; trigger: string; detectDc: number | null; disableDc: number | null; effect: string; damageFormula: string; damageType: string | null; conditionIds: string[]; }
+export interface EncounterHazardDetails { name: string; saveAbility: string | null; saveDc: number | null; effect: string; damageFormula: string; damageType: string | null; conditionIds: string[]; }
+export interface EncounterSkillChallengeDetails { goal: string; successesRequired: number; failuresAllowed: number; skills: string[]; }
+export interface EncounterPuzzleDetails { premise: string; solution: string; hints: string[]; }
+export interface EncounterNavigationDetails { skill: string | null; dc: number | null; success: string; failure: string; }
+
+export interface EncounterExplorationBlock {
+  shape: string | null;
+  environment: string | null;
+  terrainDifficulty: string | null;
+  obstacleType: string | null;
+  trap: EncounterTrapDetails | null;
+  hazard: EncounterHazardDetails | null;
+  skillChallenge: EncounterSkillChallengeDetails | null;
+  puzzle: EncounterPuzzleDetails | null;
+  sensoryClues: { sense: string; detail: string; perceiveDc: number | null }[];
+  pointsOfInterest: { name: string; hidden?: boolean; revealWhen?: string; rewardOrInfo?: string }[];
+  navigation: EncounterNavigationDetails | null;
+  resourceCost: string[];
+  verticality: boolean;
+  complications: string[];
+  transitionEncounterId: string | null;
+  wanderingTableId: string | null;
 }
 
 export const ENCOUNTER_TYPE_PRESETS = [
@@ -66,6 +163,8 @@ export interface RandomTableCreature {
   imageSrc: string;
   /** fixed count ("1", "3") or a dice formula ("3d8", "1d4") */
   quantityFormula: string;
+  /** creatures.challenge_rating_display joined server-side - null when creatureId didn't resolve */
+  cr: string | null;
 }
 
 /** One {min, max} roll range, backed by the encounter_tables table - the
@@ -81,11 +180,17 @@ export interface RandomTableRow {
   creatures: RandomTableCreature[];
 }
 
+export type EncounterPrimaryType = 'combat' | 'social' | 'exploration';
+export type EncounterStatus = 'draft' | 'ready' | 'used';
+export interface EncounterReward { kind: string; description: string; quantity: number; }
+
 export interface Encounter {
   id: string;
   name: string;
   description: string;
   challengeRating: string;
+  computedXp?: number | null;
+  difficulty?: string | null;
   theme: string;
   /** e.g. Tavern Fight, Forest Ambush, Puzzle, Heist, NPC Interaction / Negotiation */
   encounterType?: string;
@@ -107,15 +212,58 @@ export interface Encounter {
   creatures: EncounterCreatureEntry[];
   createdAt: number;
   updatedAt: number;
+
+  // --- shared "run layer" (Random Tables + Encounters overhaul) ---
+  primaryType: EncounterPrimaryType | null;
+  categoryId: string | null;
+  status: EncounterStatus;
+  /** player-facing boxed text - kept separate from `description`, which is DM prep/notes */
+  readAloud: string | null;
+  objective: string | null;
+  partyLevelMin: number | null;
+  partyLevelMax: number | null;
+  partySize: number | null;
+  scalingNotes: string | null;
+  locationId: string | null;
+  rewards: EncounterReward[];
+  tagIds: string[];
+  npcs: EncounterNpcEntry[];
+  combatBlock: EncounterCombatBlock | null;
+  socialBlock: EncounterSocialBlock | null;
+  explorationBlock: EncounterExplorationBlock | null;
 }
 
-/** No explicit encounter image (Encounter has no image field of its own) - fall back to the
- * first creature of the first table, per Bugs.txt #7. For a fixed roster, "first table" is
- * just `creatures`; for a random-table encounter, tables/creatures are already in roll order
- * (min ascending / sort_order) so [0] is correct without re-sorting here. */
-export function getEncounterFallbackImage(encounter: Encounter): string {
+export function encounterCreatureSummary(encounter: Encounter): string {
   if (encounter.resolutionType === 'random_table') {
-    return encounter.randomTables?.[0]?.creatures?.[0]?.imageSrc ?? '';
+    const normalized = (encounter.randomTables ?? []).flatMap((row) => row.creatures.map((creature) => `${creature.quantityFormula} ${creature.name}`));
+    const imported = (encounter.tables ?? []).flatMap((table) => table.table.flatMap((row) => row.creatures.map((creature) => `${creature.countDice ?? creature.countFixed ?? 1} ${creature.name}`)));
+    const formulas = normalized.length ? normalized : imported;
+    return formulas.length ? Array.from(new Set(formulas)).join(' + ') : 'Varies by roll';
   }
-  return encounter.creatures[0]?.imageSrc ?? '';
+  const formulas = encounter.creatures.map((creature) => `${creature.quantityFormula ?? creature.quantity} ${creature.name}`);
+  return formulas.length ? formulas.join(' + ') : '—';
+}
+
+/** No explicit encounter image (Encounter has no image field of its own) - use the image of
+ * the highest-CR creature involved in the encounter (across the whole fixed roster, or every
+ * random-table row's creatures), falling back to the first creature with any image when no CR
+ * data is available. CR is compared via its XP value (monotonic with CR) rather than parsing
+ * fraction strings directly. */
+export function getEncounterFallbackImage(encounter: Encounter): string {
+  const candidates: { imageSrc: string; cr?: string | null }[] =
+    encounter.resolutionType === 'random_table'
+      ? (encounter.randomTables ?? []).flatMap((row) => row.creatures)
+      : encounter.creatures;
+  const withImage = candidates.filter((c) => c.imageSrc);
+  if (withImage.length === 0) return '';
+  let best = withImage[0];
+  let bestXp = xpForCR(best.cr ?? '');
+  for (const candidate of withImage.slice(1)) {
+    const xp = xpForCR(candidate.cr ?? '');
+    if (xp > bestXp) {
+      best = candidate;
+      bestXp = xp;
+    }
+  }
+  return best.imageSrc;
 }

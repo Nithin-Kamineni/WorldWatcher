@@ -73,6 +73,8 @@ export const apiPost = <T>(path: string, body?: unknown, params?: QueryParams) =
 
 export const apiPatch = <T>(path: string, body: unknown) => request<T>('PATCH', path, { body });
 
+export const apiPut = <T>(path: string, body: unknown) => request<T>('PUT', path, { body });
+
 export const apiDelete = (path: string) => request<void>('DELETE', path);
 
 /** Multipart upload (used only for POST /assets/upload). */

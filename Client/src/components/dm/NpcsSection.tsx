@@ -13,8 +13,10 @@ import Switch from '@mui/material/Switch';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
 import BadgeIcon from '@mui/icons-material/Badge';
+import CasinoIcon from '@mui/icons-material/Casino';
 import { CreaturesTable } from './CreaturesTable';
-import { NpcFormDialog } from './NpcFormDialog';
+import { NpcFormDialog, type NpcRollPrefill } from './NpcFormDialog';
+import { QuickNpcRollDialog } from './npc/QuickNpcRollDialog';
 import { CreatureStatBlockDialog } from './CreatureStatBlockDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { FilterBar } from './FilterBar';
@@ -56,6 +58,8 @@ export function NpcsSection({ campaignId, worldId }: NpcsSectionProps) {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCreature, setEditingCreature] = useState<Creature | undefined>(undefined);
+  const [npcPrefill, setNpcPrefill] = useState<NpcRollPrefill | undefined>(undefined);
+  const [quickRollOpen, setQuickRollOpen] = useState(false);
   const [viewingCreature, setViewingCreature] = useState<Creature | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Creature | null>(null);
   const [relationFilter, setRelationFilter] = useState<string[]>([]);
@@ -151,11 +155,15 @@ export function NpcsSection({ campaignId, worldId }: NpcsSectionProps) {
               <SearchIcon />
             </IconButton>
           </Tooltip>
+          <Button variant="outlined" startIcon={<CasinoIcon />} onClick={() => setQuickRollOpen(true)}>
+            Quick NPC Roll
+          </Button>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => {
               setEditingCreature(undefined);
+              setNpcPrefill(undefined);
               setDialogOpen(true);
             }}
           >
@@ -213,6 +221,7 @@ export function NpcsSection({ campaignId, worldId }: NpcsSectionProps) {
               onView={(creature) => setViewingCreature(creature)}
               onEdit={(creature) => {
                 setEditingCreature(creature);
+                setNpcPrefill(undefined);
                 setDialogOpen(true);
               }}
               onDelete={(creature) => setDeleteTarget(creature)}
@@ -233,16 +242,38 @@ export function NpcsSection({ campaignId, worldId }: NpcsSectionProps) {
 
       <NpcFormDialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => {
+          setDialogOpen(false);
+          setNpcPrefill(undefined);
+        }}
         initialCreature={editingCreature}
         campaignId={campaignId}
         worldId={worldId}
+        prefill={npcPrefill}
         onSubmit={(creature, articleOutcome) => {
           if (editingCreature) updateCreatureInCampaign(campaignId, creature);
           else addCreatureToCampaign(campaignId, creature);
           setDialogOpen(false);
           setEditingCreature(undefined);
+          setNpcPrefill(undefined);
           if (worldId && articleOutcome) navigate(`/w/${worldId}/manager/entry/${articleOutcome.createdArticleId}`);
+        }}
+      />
+      <QuickNpcRollDialog
+        open={quickRollOpen}
+        onClose={() => setQuickRollOpen(false)}
+        campaignId={campaignId}
+        onAddToNew={(prefill) => {
+          setEditingCreature(undefined);
+          setNpcPrefill(prefill);
+          setQuickRollOpen(false);
+          setDialogOpen(true);
+        }}
+        onAddToExisting={(creature, prefill) => {
+          setEditingCreature(creature);
+          setNpcPrefill(prefill);
+          setQuickRollOpen(false);
+          setDialogOpen(true);
         }}
       />
       <CreatureStatBlockDialog

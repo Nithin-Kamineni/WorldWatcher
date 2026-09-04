@@ -31,6 +31,12 @@ interface MagicItemStoreState {
   magicItemBrowse: MagicItemBrowseResult | null;
   magicItemBrowseLoading: boolean;
   fetchMagicItemBrowse: (params: MagicItemBrowseParams) => Promise<void>;
+
+  /** Magic items resolved one at a time by id, independent of any list/browse query - lets a
+   * surface that only knows an id (an @-mention click, a pinned row) render it even when no
+   * loaded page happens to contain it. Mirrors useCreatureStore's creaturesById. */
+  magicItemsById: Record<string, MagicItem>;
+  fetchMagicItemById: (id: string) => Promise<MagicItem | undefined>;
 }
 
 let browseRequestId = 0;
@@ -127,6 +133,21 @@ export const useMagicItemStore = create<MagicItemStoreState>((set, get) => ({
       if (requestId !== browseRequestId) return;
       console.error('Failed to load magic items page', err);
       set({ magicItemBrowseLoading: false });
+    }
+  },
+
+  magicItemsById: {},
+
+  fetchMagicItemById: async (id) => {
+    const cached = get().magicItemsById[id];
+    if (cached) return cached;
+    try {
+      const item = apiItemToMagicItem(await itemsApi.getItem(id));
+      set((state) => ({ magicItemsById: { ...state.magicItemsById, [id]: item } }));
+      return item;
+    } catch (err) {
+      console.error(`Failed to load magic item ${id}`, err);
+      return undefined;
     }
   },
 }));

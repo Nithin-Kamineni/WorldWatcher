@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -10,18 +10,21 @@ import { ItemsSearchFilterBar, type FilterGroupDef } from './ItemsSearchFilterBa
 import { PinnableItemRow } from './PinnableItemRow';
 import { ChipRow } from '../../notes/FactionPreviewCard';
 import { useFactionStore, getFactionsForCampaign } from '../../../store/useFactionStore';
-import { usePlayItemsStore } from '../../../store/usePlayItemsStore';
+import { usePlayItemsStore, getPlayItemsState, getSlotItems } from '../../../store/usePlayItemsStore';
+import type { PaneSlot } from '../layout/playLayoutTrees';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../../theme/scrollbarSx';
 
 interface FactionsSubWindowProps {
   worldId: string;
   campaignId: string;
+  /** Which Items window this is - all pin/open/expand state below is scoped to it. */
+  slot: PaneSlot;
 }
 
 /** Factions sub-window - same search/filter/pin/collapse shell as the other 4 Items
  * sub-windows. Factions have no per-entity deep-link target in WorldManagerPage today, so
  * "open in new tab" only lands on the Factions folder, not the specific faction. */
-export function FactionsSubWindow({ worldId, campaignId }: FactionsSubWindowProps) {
+export function FactionsSubWindow({ worldId, campaignId, slot }: FactionsSubWindowProps) {
   const factionsByCampaignId = useFactionStore((s) => s.factionsByCampaignId);
   const fetchFactionsForCampaign = useFactionStore((s) => s.fetchFactionsForCampaign);
 
@@ -32,14 +35,14 @@ export function FactionsSubWindow({ worldId, campaignId }: FactionsSubWindowProp
   const factions = getFactionsForCampaign(factionsByCampaignId, campaignId);
 
   const byCampaignId = usePlayItemsStore((s) => s.byCampaignId);
-  const selectItem = usePlayItemsStore((s) => s.selectItem);
+  const focusItem = usePlayItemsStore((s) => s.focusItem);
   const pinItem = usePlayItemsStore((s) => s.pinItem);
   const unpinItem = usePlayItemsStore((s) => s.unpinItem);
   const toggleExpanded = usePlayItemsStore((s) => s.toggleExpanded);
-  const campaignState = byCampaignId[campaignId];
-  const pinned = campaignState?.pinnedByKind.factions ?? [];
-  const current = campaignState?.currentByKind.factions ?? null;
-  const expanded = campaignState?.expandedByKind.factions ?? [];
+  const slotState = getSlotItems(getPlayItemsState(byCampaignId, campaignId), slot);
+  const pinned = slotState.pinnedByKind.factions;
+  const current = slotState.currentByKind.factions;
+  const expanded = slotState.expandedByKind.factions;
 
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
@@ -67,6 +70,13 @@ export function FactionsSubWindow({ worldId, campaignId }: FactionsSubWindowProp
         return f.name.toLowerCase().includes(search.trim().toLowerCase());
       });
 
+  // Opening an item puts its row at the top of this pane, which is off-screen if the DM was
+  // scrolled down the browse list - scroll back up so the click visibly lands.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (current) scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [current]);
+
   const displayIds = [...pinned, ...(current && !pinned.includes(current) ? [current] : [])];
   const displayFactions = displayIds.map((id) => factions.find((f) => f.id === id)).filter((f): f is NonNullable<typeof f> => !!f);
 
@@ -82,7 +92,7 @@ export function FactionsSubWindow({ worldId, campaignId }: FactionsSubWindowProp
         onClear={() => setTypeFilter([])}
       />
 
-      <Box className={FLOATING_SCROLLBAR_CLASS} sx={{ flexGrow: 1, overflowY: 'auto', minHeight: 0, px: 1.25, pb: 1, ...thinScrollbarSx }}>
+      <Box ref={scrollRef} className={FLOATING_SCROLLBAR_CLASS} sx={{ flexGrow: 1, overflowY: 'auto', minHeight: 0, px: 1.25, pb: 1, ...thinScrollbarSx }}>
         {displayFactions.length > 0 && (
           <Stack spacing={0} sx={{ mb: 1.5 }}>
             {displayFactions.map((faction) => {
@@ -95,9 +105,9 @@ export function FactionsSubWindow({ worldId, campaignId }: FactionsSubWindowProp
                   title={faction.name}
                   tagline={faction.factionType || 'Faction'}
                   pinned={isPinned}
-                  onTogglePin={() => (isPinned ? unpinItem(campaignId, 'factions', faction.id) : pinItem(campaignId, 'factions', faction.id))}
+                  onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'factions', faction.id) : pinItem(campaignId, slot, 'factions', faction.id))}
                   expanded={isExpanded}
-                  onToggleExpand={() => toggleExpanded(campaignId, 'factions', faction.id)}
+                  onToggleExpand={() => toggleExpanded(campaignId, slot, 'factions', faction.id)}
                   onOpenNewTab={() => window.open(`/w/${worldId}/manager?folder=factions`, '_blank')}
                 >
                   <Stack spacing={0.5}>
@@ -132,7 +142,7 @@ export function FactionsSubWindow({ worldId, campaignId }: FactionsSubWindowProp
         ) : (
           <List dense disablePadding>
             {filtered.map((f) => (
-              <ListItemButton key={f.id} onClick={() => selectItem(campaignId, 'factions', f.id)} sx={{ borderRadius: 1.5 }}>
+              <ListItemButton key={f.id} onClick={() => focusItem(campaignId, slot, 'factions', f.id)} sx={{ borderRadius: 1.5 }}>
                 <ListItemText
                   primary={f.name}
                   secondary={f.factionType || 'Faction'}

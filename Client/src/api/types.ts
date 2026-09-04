@@ -499,7 +499,7 @@ export interface ApiQuest {
   related_faction_ids: unknown;
   related_location_ids: unknown;
   objectives: unknown;
-  rewards: unknown;
+  rewards: { kind: string; description: string; quantity: number }[] | null;
   notes: string | null;
   raw_data: unknown;
   created_at: string;
@@ -660,7 +660,89 @@ export interface ApiEncounterCreature {
   quantity: number;
   size_override: number | null;
   sort_order: number;
+  role: string | null;
+  notes: string | null;
   raw_data: unknown;
+  quantity_formula?: string | null;
+  /** joined from creatures at read time - null when creature_id didn't resolve */
+  creature_name?: string | null;
+  creature_type?: string | null;
+  creature_cr?: string | null;
+  token_asset_id?: string | null;
+  portrait_asset_id?: string | null;
+}
+
+export interface ApiEncounterNpc {
+  id: string;
+  encounter_id: string;
+  npc_id: string;
+  attitude: string | null;
+  agenda: string | null;
+  secret: string | null;
+  leverage: string | null;
+  rp_cues: unknown;
+  sort_order: number;
+  /** joined from creatures at read time */
+  npc_name?: string | null;
+  token_asset_id?: string | null;
+  portrait_asset_id?: string | null;
+}
+
+export interface ApiEncounterCombatBlock {
+  encounter_id: string;
+  shape: string | null;
+  victory_condition: string | null;
+  awareness: string | null;
+  start_range: string | null;
+  lighting: string | null;
+  terrain_type: string | null;
+  terrain_features: string[];
+  morale: string | null;
+  reinforcements: { mode: string; trigger: string; round: number | null; table_id: string | null } | null;
+  dynamic_events: unknown[];
+  difficulty_band: string | null;
+  computed_xp: number | null;
+  has_lair_or_legendary: boolean;
+  aftermath: string[];
+  scaling_notes: string | null;
+  map_id: string | null;
+  transition_encounter_id: string | null;
+}
+
+export interface ApiEncounterSocialBlock {
+  encounter_id: string;
+  shape: string | null;
+  venue: string | null;
+  tone: string | null;
+  stakes: string | null;
+  player_levers: string[];
+  key_checks: unknown[];
+  outcome_tiers: unknown;
+  social_clock: unknown;
+  gated_info: unknown[];
+  complications: string[];
+  escalation: string | null;
+  transition_encounter_id: string | null;
+}
+
+export interface ApiEncounterExplorationBlock {
+  encounter_id: string;
+  shape: string | null;
+  environment: string | null;
+  terrain_difficulty: string | null;
+  obstacle_type: string | null;
+  trap: { name: string; trigger: string; detect_dc: number | null; disable_dc: number | null; effect: string; damage_formula: string; damage_type: string | null; condition_ids: string[] } | null;
+  hazard: { name: string; save_ability: string | null; save_dc: number | null; effect: string; damage_formula: string; damage_type: string | null; condition_ids: string[] } | null;
+  skill_challenge: { goal: string; successes_required: number; failures_allowed: number; skills: string[] } | null;
+  puzzle: { premise: string; solution: string; hints: string[] } | null;
+  sensory_clues: unknown[];
+  points_of_interest: unknown[];
+  navigation: { skill: string | null; dc: number | null; success: string; failure: string } | null;
+  resource_cost: string[];
+  verticality: boolean;
+  complications: string[];
+  transition_encounter_id: string | null;
+  wandering_table_id: string | null;
 }
 
 export interface ApiEncounter {
@@ -686,8 +768,20 @@ export interface ApiEncounter {
   special_rules: unknown;
   notes: string | null;
   raw_data: unknown;
+  primary_type: string | null;
+  category_id: string | null;
+  status: string;
+  read_aloud: string | null;
+  objective: string | null;
+  party_level_min: number | null;
+  party_level_max: number | null;
+  party_size: number | null;
+  scaling_notes: string | null;
+  location_id: string | null;
+  rewards: unknown;
   created_at: string;
   updated_at: string;
+  tag_ids: string[];
 }
 
 export interface ApiEncounterTableCreature {
@@ -700,6 +794,9 @@ export interface ApiEncounterTableCreature {
   /** joined from creatures at read time - null when creature_id didn't resolve */
   creature_name: string | null;
   creature_type: string | null;
+  creature_cr?: string | null;
+  token_asset_id?: string | null;
+  portrait_asset_id?: string | null;
 }
 
 export interface ApiEncounterTable {
@@ -718,6 +815,182 @@ export interface ApiEncounterTable {
 export interface ApiEncounterDetail extends ApiEncounter {
   creatures: ApiEncounterCreature[];
   random_tables: ApiEncounterTable[];
+  npcs: ApiEncounterNpc[];
+  combat_block: ApiEncounterCombatBlock | null;
+  social_block: ApiEncounterSocialBlock | null;
+  exploration_block: ApiEncounterExplorationBlock | null;
+}
+
+// ---- Random Tables + Encounters overhaul: category / tag / table formats /
+// random tables / generators (Server/app/schemas/random_tables.py) ----
+
+export interface ApiCategory {
+  id: string;
+  slug: string;
+  name: string;
+  parent_id: string | null;
+  is_system: boolean;
+  icon: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ApiCategoryNode extends ApiCategory {
+  children: ApiCategoryNode[];
+}
+
+export interface ApiTag {
+  id: string;
+  namespace: string;
+  value: string;
+  label: string;
+  is_system: boolean;
+}
+
+export interface ApiTableFormat {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  tier: 'core' | 'advanced';
+  is_system: boolean;
+}
+
+export interface ApiTableEntry {
+  id: string;
+  column_id: string;
+  min: number | null;
+  max: number | null;
+  secondary_min: number | null;
+  secondary_max: number | null;
+  weight: number | null;
+  kind: 'text' | 'encounter_ref' | 'table_ref' | 'creature_ref' | 'npc_ref' | 'item_ref';
+  text: string | null;
+  encounter_id: string | null;
+  target_table_id: string | null;
+  creature_id: string | null;
+  npc_id: string | null;
+  item_id: string | null;
+  bundle: unknown;
+  notes: string | null;
+  sort_order: number;
+  tag_ids: string[];
+  ref_hydrated: { id: string; name: string; [key: string]: unknown } | null;
+}
+
+export interface ApiTableColumn {
+  id: string;
+  table_id: string;
+  name: string;
+  die_count: number;
+  die_sides: number;
+  die_modifier: number;
+  sort_order: number;
+  entries: ApiTableEntry[];
+}
+
+export interface ApiRandomTable {
+  id: string;
+  campaign_id: string | null;
+  name: string;
+  description: string | null;
+  category_id: string | null;
+  format_id: string;
+  trigger_situation: string | null;
+  image_url: string | null;
+  combine_template: string | null;
+  source_book: string | null;
+  format_config: unknown;
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
+  tag_ids: string[];
+}
+
+export interface ApiRandomTableDetail extends ApiRandomTable {
+  columns: ApiTableColumn[];
+}
+
+export interface ApiRolledDie {
+  sides: number;
+  result: number;
+}
+
+export interface ApiRollResultItem {
+  column_name: string | null;
+  dice: ApiRolledDie[];
+  total: number;
+  entry_id: string | null;
+  tag_ids: string[];
+  kind: string;
+  text: string | null;
+  resolved_text: string | null;
+  ref_id: string | null;
+  ref_hydrated: { id: string; name: string; [key: string]: unknown } | null;
+  extra: Record<string, unknown>;
+  nested: ApiRollResult | null;
+}
+
+export interface ApiRollResult {
+  table_id: string;
+  table_name: string;
+  format_slug: string;
+  items: ApiRollResultItem[];
+  combined_text: string | null;
+  gate_passed: boolean | null;
+}
+
+export interface ApiGeneratorParameter {
+  key: string;
+  label: string;
+  type: string;
+  allowed_tags: string[];
+  required: boolean;
+  default: string | null;
+}
+
+export interface ApiGeneratorComponent {
+  id: string;
+  generator_id: string;
+  table_id: string;
+  output_slot: string;
+  filter_param_key: string | null;
+  roll_count: number;
+  optional: boolean;
+  sort_order: number;
+}
+
+export interface ApiGenerator {
+  id: string;
+  campaign_id: string | null;
+  slug: string;
+  name: string;
+  category_id: string | null;
+  description: string | null;
+  combine_template: string;
+  parameters: ApiGeneratorParameter[];
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
+  tag_ids: string[];
+}
+
+export interface ApiGeneratorDetail extends ApiGenerator {
+  components: ApiGeneratorComponent[];
+}
+
+export interface ApiGeneratorRollSlotResult {
+  slot: string;
+  table_id: string;
+  table_name: string;
+  result: ApiRollResultItem | null;
+  skipped: boolean;
+}
+
+export interface ApiGeneratorRollResult {
+  generator_id: string;
+  slots: ApiGeneratorRollSlotResult[];
+  combined_text: string;
 }
 
 export interface ApiCombatant {

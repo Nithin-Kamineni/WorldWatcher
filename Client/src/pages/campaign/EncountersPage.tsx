@@ -8,8 +8,14 @@ import { useCampaignStore, getCampaignById } from '../../store/useCampaignStore'
 export function EncountersPage() {
   const { worldId, campaignId } = useParams<{ worldId: string; campaignId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const view = (searchParams.get('view') as EncounterView | null) ?? 'menu';
+  const requestedView = searchParams.get('view');
+  const view: EncounterView = requestedView === 'generators'
+    ? 'random_tables'
+    : requestedView === 'management' || requestedView === 'random_tables'
+      ? requestedView
+      : 'menu';
   const openEncounterId = searchParams.get('encounter') ?? undefined;
+  const openTableId = searchParams.get('table') ?? undefined;
 
   const worlds = useWorldStore((s) => s.worlds);
   const world = getWorldById(worlds, worldId);
@@ -26,9 +32,9 @@ export function EncountersPage() {
     });
 
   return (
-    <SectionLayout worldId={worldId} campaignId={campaignId}>
-      <Breadcrumbs items={[{ label: world?.name ?? '…', to: `/w/${worldId}/home` }, { label: campaign?.name ?? '…', to: `/w/${worldId}/c/${campaignId}/home` }, { label: 'Encounters' }]} />
-      <EncountersSection campaignId={campaignId} view={view} onViewChange={setView} openEncounterId={openEncounterId} />
+    <SectionLayout worldId={worldId} campaignId={campaignId} disableContentPadding={view === 'random_tables'}>
+      {view !== 'random_tables' && <Breadcrumbs items={[{ label: world?.name ?? '…', to: `/w/${worldId}/home` }, { label: campaign?.name ?? '…', to: `/w/${worldId}/c/${campaignId}/home` }, { label: 'Encounters' }]} />}
+      <EncountersSection campaignId={campaignId} worldId={worldId} view={view} onViewChange={setView} openEncounterId={openEncounterId} openTableId={openTableId} />
     </SectionLayout>
   );
 }

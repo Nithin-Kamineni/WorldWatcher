@@ -6,6 +6,7 @@ from app.api.routers import (
     assets,
     bastions,
     campaigns,
+    categories,
     characters,
     combats,
     conditions,
@@ -13,6 +14,7 @@ from app.api.routers import (
     effects,
     encounters,
     factions,
+    generators,
     items,
     locations,
     map_tokens,
@@ -21,12 +23,15 @@ from app.api.routers import (
     quests,
     random_bank,
     random_encounter_tables,
+    random_tables,
     raw_entities,
     search,
     session_chats,
     situational_tables,
     sources,
     spells,
+    table_formats,
+    tags,
     token_library,
     worlds,
 )
@@ -67,6 +72,12 @@ api_router.include_router(encounters.router)
 api_router.include_router(combats.router)
 api_router.include_router(random_encounter_tables.router)
 api_router.include_router(situational_tables.router)
+
+api_router.include_router(categories.router)
+api_router.include_router(tags.router)
+api_router.include_router(table_formats.router)
+api_router.include_router(random_tables.router)
+api_router.include_router(generators.router)
 
 api_router.include_router(assets.router)
 api_router.include_router(raw_entities.router)

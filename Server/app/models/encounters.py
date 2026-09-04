@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -35,8 +35,21 @@ class Encounter(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     starting_positions: Mapped[Optional[Any]] = mapped_column(JSONB)
     special_rules: Mapped[Optional[Any]] = mapped_column(JSONB)
+    # DM-only prep notes (kept separate from read_aloud, the player-facing boxed text below).
     notes: Mapped[Optional[str]] = mapped_column(Text)
     raw_data: Mapped[Optional[Any]] = mapped_column(JSONB)
+    # --- shared "run layer" (Task 7.3) ---
+    primary_type: Mapped[Optional[str]] = mapped_column(Text)  # combat | social | exploration
+    category_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("category.id"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")  # draft | ready | used
+    read_aloud: Mapped[Optional[str]] = mapped_column(Text)
+    objective: Mapped[Optional[str]] = mapped_column(Text)
+    party_level_min: Mapped[Optional[int]] = mapped_column(Integer)
+    party_level_max: Mapped[Optional[int]] = mapped_column(Integer)
+    party_size: Mapped[Optional[int]] = mapped_column(Integer)
+    scaling_notes: Mapped[Optional[str]] = mapped_column(Text)
+    location_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("locations.id"))
+    rewards: Mapped[Optional[Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -56,7 +69,107 @@ class EncounterCreature(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     size_override: Mapped[Optional[float]] = mapped_column(Numeric(asdecimal=False))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    role: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
     raw_data: Mapped[Optional[Any]] = mapped_column(JSONB)
+
+
+class EncounterCombatBlock(Base):
+    """Optional 1:1 combat detail block (Task 8) - present when the
+    encounter has a combat dimension, whether primary_type='combat' or a
+    social/exploration encounter that can escalate into one."""
+
+    __tablename__ = "encounter_combat_blocks"
+
+    encounter_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="CASCADE"), primary_key=True
+    )
+    shape: Mapped[Optional[str]] = mapped_column(Text)
+    victory_condition: Mapped[Optional[str]] = mapped_column(Text)
+    awareness: Mapped[Optional[str]] = mapped_column(Text)
+    start_range: Mapped[Optional[str]] = mapped_column(Text)
+    lighting: Mapped[Optional[str]] = mapped_column(Text)
+    terrain_type: Mapped[Optional[str]] = mapped_column(Text)
+    terrain_features: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    morale: Mapped[Optional[str]] = mapped_column(Text)
+    reinforcements: Mapped[Optional[Any]] = mapped_column(JSONB)
+    dynamic_events: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    difficulty_band: Mapped[Optional[str]] = mapped_column(Text)
+    computed_xp: Mapped[Optional[int]] = mapped_column(Integer)
+    has_lair_or_legendary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    aftermath: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    scaling_notes: Mapped[Optional[str]] = mapped_column(Text)
+    map_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("maps.id"))
+
+
+class EncounterSocialBlock(Base):
+    """Optional 1:1 social detail block (Task 9)."""
+
+    __tablename__ = "encounter_social_blocks"
+
+    encounter_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="CASCADE"), primary_key=True
+    )
+    shape: Mapped[Optional[str]] = mapped_column(Text)
+    venue: Mapped[Optional[str]] = mapped_column(Text)
+    tone: Mapped[Optional[str]] = mapped_column(Text)
+    stakes: Mapped[Optional[str]] = mapped_column(Text)
+    player_levers: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    key_checks: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    outcome_tiers: Mapped[Optional[Any]] = mapped_column(JSONB)
+    social_clock: Mapped[Optional[Any]] = mapped_column(JSONB)
+    gated_info: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    complications: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    escalation: Mapped[Optional[str]] = mapped_column(Text)
+    transition_encounter_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"))
+
+
+class EncounterNpc(Base):
+    """Social roster row (Task 9.1) - joins to the existing `creatures`
+    table where category='npc', same reference-not-duplicate pattern as
+    EncounterCreature joining the combat roster to monster rows."""
+
+    __tablename__ = "encounter_npcs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    encounter_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="CASCADE"), nullable=False
+    )
+    npc_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("creatures.id"), nullable=False)
+    attitude: Mapped[Optional[str]] = mapped_column(Text)
+    agenda: Mapped[Optional[str]] = mapped_column(Text)
+    secret: Mapped[Optional[str]] = mapped_column(Text)
+    leverage: Mapped[Optional[str]] = mapped_column(Text)
+    rp_cues: Mapped[Optional[Any]] = mapped_column(JSONB)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class EncounterExplorationBlock(Base):
+    """Optional 1:1 exploration detail block (Task 10)."""
+
+    __tablename__ = "encounter_exploration_blocks"
+
+    encounter_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="CASCADE"), primary_key=True
+    )
+    shape: Mapped[Optional[str]] = mapped_column(Text)
+    environment: Mapped[Optional[str]] = mapped_column(Text)
+    terrain_difficulty: Mapped[Optional[str]] = mapped_column(Text)
+    obstacle_type: Mapped[Optional[str]] = mapped_column(Text)
+    trap: Mapped[Optional[Any]] = mapped_column(JSONB)
+    hazard: Mapped[Optional[Any]] = mapped_column(JSONB)
+    skill_challenge: Mapped[Optional[Any]] = mapped_column(JSONB)
+    puzzle: Mapped[Optional[Any]] = mapped_column(JSONB)
+    sensory_clues: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    points_of_interest: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    navigation: Mapped[Optional[Any]] = mapped_column(JSONB)
+    resource_cost: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    verticality: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    complications: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    transition_encounter_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("encounters.id"))
+    wandering_table_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("random_tables.id"))
 
 
 class EncounterTable(Base):

@@ -27,10 +27,11 @@ from .projectors.creature import project_creature
 from .projectors.encounter import project_encounter
 from .projectors.item import project_item
 from .projectors.spell import project_spell
+from .projectors.table import project_table, project_table_group
 from .report import Report
 
 CONDITION_LIKE_TYPES = ("condition", "disease", "status")
-PROJECTABLE_TYPES = ("creature", "spell", "item", "encounter", "facility") + CONDITION_LIKE_TYPES
+PROJECTABLE_TYPES = ("creature", "spell", "item", "encounter", "facility", "table", "table_group") + CONDITION_LIKE_TYPES
 
 COMMIT_EVERY = 500
 
@@ -329,6 +330,98 @@ def stage4_conditions(cur, cfg: Config, report: Report, pending, meta, source_ca
         cur.connection.commit()
 
 
+def load_category_cache(cur) -> dict:
+    cur.execute("SELECT slug, id FROM category")
+    return {slug: id_ for slug, id_ in cur.fetchall()}
+
+
+def load_format_cache(cur) -> dict:
+    cur.execute("SELECT slug, id FROM table_formats")
+    return {slug: id_ for slug, id_ in cur.fetchall()}
+
+
+def stage4_tables(cur, cfg: Config, report: Report, pending, meta, category_cache: dict, format_cache: dict):
+    """Stage 4 (table/table_group). Doesn't fit stage4_simple's one-row-per-record
+    shape: a table_group projects several random_tables rows from one raw entity
+    (same "one raw record, several projected rows" shape stage4_creatures handles
+    for _versions), so it gets its own loop."""
+    if "lookup" not in format_cache or "reference" not in format_cache:
+        print(
+            "WARNING: table_formats missing 'lookup'/'reference' - run "
+            "Database/Maintainance/scripts/seed_random_tables_taxonomy.py before importing "
+            "tables. Skipping table/table_group projection.",
+            file=sys.stderr,
+        )
+        return
+
+    if type_wanted(cfg, "table"):
+        n = 0
+        projected = 0
+        for source_file, top_level_key, obj, idx in pending.get("table", []):
+            if not passes_filter(cfg, obj):
+                continue
+            if cfg.limit and projected >= cfg.limit:
+                break
+            name, source = obj.get("name", "?"), obj.get("source", "?")
+            source_key = raw_ingest.make_source_key(obj, top_level_key, idx)
+            raw_id, prev_outcome, linked_table, linked_id = meta[("table", source_file, source_key)]
+
+            if prev_outcome == "unchanged" and linked_table == "random_tables":
+                report.record("table", source, name, "unchanged")
+                projected += 1
+                continue
+
+            try:
+                with db_mod.savepoint(cur, "rec"):
+                    table_id, was_insert = project_table(cur, obj, category_cache, format_cache)
+                    raw_ingest.mark_projected(cur, raw_id, "random_tables", table_id)
+                    report.record("table", source, name, "imported" if was_insert else "updated")
+            except Exception as e:
+                report.record("table", source, name, "error", str(e))
+                raw_ingest.mark_error(cur, raw_id)
+
+            projected += 1
+            n += 1
+            if n % COMMIT_EVERY == 0:
+                cur.connection.commit()
+        cur.connection.commit()
+
+    if type_wanted(cfg, "table_group"):
+        n = 0
+        projected = 0
+        for source_file, top_level_key, obj, idx in pending.get("table_group", []):
+            if not passes_filter(cfg, obj):
+                continue
+            if cfg.limit and projected >= cfg.limit:
+                break
+            name, source = obj.get("name", "?"), obj.get("source", "?")
+            source_key = raw_ingest.make_source_key(obj, top_level_key, idx)
+            raw_id, prev_outcome, linked_table, linked_id = meta[("table_group", source_file, source_key)]
+
+            if prev_outcome == "unchanged" and linked_table == "random_tables":
+                report.record("table_group", source, name, "unchanged")
+                projected += 1
+                continue
+
+            try:
+                with db_mod.savepoint(cur, "rec"):
+                    first_id, results = project_table_group(cur, obj, category_cache, format_cache)
+                    if first_id is None:
+                        raise ValueError("table group had no sub-tables")
+                    raw_ingest.mark_projected(cur, raw_id, "random_tables", first_id)
+                    for _table_id, sub_name, was_insert in results:
+                        report.record("table_group", source, sub_name, "imported" if was_insert else "updated")
+            except Exception as e:
+                report.record("table_group", source, name, "error", str(e))
+                raw_ingest.mark_error(cur, raw_id)
+
+            projected += 1
+            n += 1
+            if n % COMMIT_EVERY == 0:
+                cur.connection.commit()
+        cur.connection.commit()
+
+
 def stage5_item_assets(cur, cfg: Config, report: Report, pending, meta, img_index):
     if cfg.skip_assets or img_index is None or not type_wanted(cfg, "item"):
         return
@@ -424,6 +517,8 @@ def run(cfg: Config) -> Report:
 
     try:
         source_cache = sources_mod.load_sources_from_books(cur, cfg.data_dir)
+        category_cache = load_category_cache(cur)
+        format_cache = load_format_cache(cur)
         conn.commit()
 
         pending, all_monsters_raw = discover_all(cfg, report)
@@ -447,6 +542,7 @@ def run(cfg: Config) -> Report:
         stage4_simple(cur, cfg, report, pending, meta, source_cache, "encounter", project_encounter)
         stage4_simple(cur, cfg, report, pending, meta, source_cache, "facility", project_bastion_facility)
         stage4_conditions(cur, cfg, report, pending, meta, source_cache)
+        stage4_tables(cur, cfg, report, pending, meta, category_cache, format_cache)
         stage5_item_assets(cur, cfg, report, pending, meta, img_index)
         stage5_spell_assets(cur, cfg, report, pending, meta, img_index)
         stage5_bastion_facility_assets(cur, cfg, report, pending, meta, img_index)

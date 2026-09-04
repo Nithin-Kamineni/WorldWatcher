@@ -4,7 +4,7 @@ import { useSpellStore, getSpellsForCampaign } from '../store/useSpellStore';
 import { useEncounterStore, getEncountersForCampaign } from '../store/useEncounterStore';
 import { useFactionStore, getFactionsForCampaign } from '../store/useFactionStore';
 import { useArticleStore, getArticlesForWorld } from '../store/useArticleStore';
-import { useSituationalTableStore } from '../store/useSituationalTableStore';
+import { EMPTY_RANDOM_TABLE_RESULTS, useRandomTableStore } from '../store/useRandomTableStore';
 import type { EntityRefType } from '../utils/bbcode';
 import type { ArticleCategory } from '../types/article';
 
@@ -34,8 +34,8 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
   const fetchFactions = useFactionStore((s) => s.fetchFactionsForCampaign);
   const articles = useArticleStore((s) => s.articles);
   const ensureArticlesSeeded = useArticleStore((s) => s.ensureSeeded);
-  const situationalTables = useSituationalTableStore((s) => s.tables);
-  const fetchSituationalTables = useSituationalTableStore((s) => s.fetchTables);
+  const randomTables = useRandomTableStore((s) => s.resultSets.mentions?.results ?? EMPTY_RANDOM_TABLE_RESULTS);
+  const searchRandomTables = useRandomTableStore((s) => s.search);
 
   useEffect(() => {
     if (!campaignId) return;
@@ -49,12 +49,11 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
     if (worldId) ensureArticlesSeeded(worldId);
   }, [worldId, ensureArticlesSeeded]);
 
-  // Situational tables are global reference content (not campaign-scoped) - fetchTables()
-  // is a fetch-once-and-cache guarded by its own `loaded` flag, so this is safe to call
-  // unconditionally on mount.
+  // Random tables span both global reference content and campaign homebrew - a single
+  // unscoped search (own_or_global, no campaign filter) covers both for @-mention purposes.
   useEffect(() => {
-    fetchSituationalTables();
-  }, [fetchSituationalTables]);
+    searchRandomTables({ scope: 'all', limit: 500 }, 'mentions');
+  }, [searchRandomTables]);
 
   return useMemo(() => {
     const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
@@ -69,7 +68,7 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
       ...encounters.map((e) => ({ id: e.id, type: 'encounter' as EntityRefType, name: e.name, subtitle: e.theme })),
       ...factions.map((f) => ({ id: f.id, type: 'faction' as EntityRefType, name: f.name, subtitle: f.factionType })),
       ...places.map((a) => ({ id: a.id, type: 'place' as EntityRefType, name: a.name, subtitle: a.category })),
-      ...situationalTables.map((t) => ({ id: t.id, type: 'situational_table' as EntityRefType, name: t.name, subtitle: t.theme })),
+      ...randomTables.map((t) => ({ id: t.id, type: 'situational_table' as EntityRefType, name: t.name, subtitle: t.sourceBook ?? undefined })),
     ];
     return entities;
   }, [
@@ -78,7 +77,7 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
     encountersByCampaignId,
     factionsByCampaignId,
     articles,
-    situationalTables,
+    randomTables,
     campaignId,
     worldId,
   ]);

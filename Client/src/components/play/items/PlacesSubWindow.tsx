@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -7,15 +7,19 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { ItemsSearchFilterBar, type FilterGroupDef } from './ItemsSearchFilterBar';
 import { PinnableItemRow } from './PinnableItemRow';
+import { PlaceBuilderLauncher } from './BuilderLaunchers';
 import { getArticleCategoryIcon } from '../../world/articleIcons';
 import { useArticleStore, getArticlesForWorld } from '../../../store/useArticleStore';
-import { usePlayItemsStore } from '../../../store/usePlayItemsStore';
+import { usePlayItemsStore, getPlayItemsState, getSlotItems } from '../../../store/usePlayItemsStore';
+import type { PaneSlot } from '../layout/playLayoutTrees';
 import { ARTICLE_TEMPLATES, getArticleTemplatesByGroup } from '../../../types/article';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../../theme/scrollbarSx';
 
 interface PlacesSubWindowProps {
   worldId: string;
   campaignId: string;
+  /** Which Items window this is - all pin/open/expand state below is scoped to it. */
+  slot: PaneSlot;
 }
 
 const PLACE_CATEGORIES = new Set(getArticleTemplatesByGroup('Places').map((t) => t.category));
@@ -24,7 +28,7 @@ const PLACE_CATEGORIES = new Set(getArticleTemplatesByGroup('Places').map((t) =>
  * out of the world's Article catalog by category (see types/article.ts's Places group). Same
  * pin/collapse shell; expanded body is a compact summary since the full ArticleDetailPage
  * layout doesn't fit this space. */
-export function PlacesSubWindow({ worldId, campaignId }: PlacesSubWindowProps) {
+export function PlacesSubWindow({ worldId, campaignId, slot }: PlacesSubWindowProps) {
   const articles = useArticleStore((s) => s.articles);
   const ensureSeeded = useArticleStore((s) => s.ensureSeeded);
 
@@ -35,14 +39,14 @@ export function PlacesSubWindow({ worldId, campaignId }: PlacesSubWindowProps) {
   const places = getArticlesForWorld(articles, worldId).filter((a) => PLACE_CATEGORIES.has(a.category));
 
   const byCampaignId = usePlayItemsStore((s) => s.byCampaignId);
-  const selectItem = usePlayItemsStore((s) => s.selectItem);
+  const focusItem = usePlayItemsStore((s) => s.focusItem);
   const pinItem = usePlayItemsStore((s) => s.pinItem);
   const unpinItem = usePlayItemsStore((s) => s.unpinItem);
   const toggleExpanded = usePlayItemsStore((s) => s.toggleExpanded);
-  const campaignState = byCampaignId[campaignId];
-  const pinned = campaignState?.pinnedByKind.places ?? [];
-  const current = campaignState?.currentByKind.places ?? null;
-  const expanded = campaignState?.expandedByKind.places ?? [];
+  const slotState = getSlotItems(getPlayItemsState(byCampaignId, campaignId), slot);
+  const pinned = slotState.pinnedByKind.places;
+  const current = slotState.currentByKind.places;
+  const expanded = slotState.expandedByKind.places;
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
@@ -68,6 +72,13 @@ export function PlacesSubWindow({ worldId, campaignId }: PlacesSubWindowProps) {
         return a.name.toLowerCase().includes(search.trim().toLowerCase());
       });
 
+  // Opening an item puts its row at the top of this pane, which is off-screen if the DM was
+  // scrolled down the browse list - scroll back up so the click visibly lands.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (current) scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [current]);
+
   const displayIds = [...pinned, ...(current && !pinned.includes(current) ? [current] : [])];
   const displayPlaces = displayIds.map((id) => places.find((a) => a.id === id)).filter((a): a is NonNullable<typeof a> => !!a);
 
@@ -83,7 +94,7 @@ export function PlacesSubWindow({ worldId, campaignId }: PlacesSubWindowProps) {
         onClear={() => setCategoryFilter([])}
       />
 
-      <Box className={FLOATING_SCROLLBAR_CLASS} sx={{ flexGrow: 1, overflowY: 'auto', minHeight: 0, px: 1.25, pb: 1, ...thinScrollbarSx }}>
+      <Box ref={scrollRef} className={FLOATING_SCROLLBAR_CLASS} sx={{ flexGrow: 1, overflowY: 'auto', minHeight: 0, px: 1.25, pb: 1, ...thinScrollbarSx }}>
         {displayPlaces.length > 0 && (
           <Stack spacing={0} sx={{ mb: 1.5 }}>
             {displayPlaces.map((place) => {
@@ -97,9 +108,9 @@ export function PlacesSubWindow({ worldId, campaignId }: PlacesSubWindowProps) {
                   title={place.name}
                   tagline={template.label}
                   pinned={isPinned}
-                  onTogglePin={() => (isPinned ? unpinItem(campaignId, 'places', place.id) : pinItem(campaignId, 'places', place.id))}
+                  onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'places', place.id) : pinItem(campaignId, slot, 'places', place.id))}
                   expanded={isExpanded}
-                  onToggleExpand={() => toggleExpanded(campaignId, 'places', place.id)}
+                  onToggleExpand={() => toggleExpanded(campaignId, slot, 'places', place.id)}
                   onOpenNewTab={() => window.open(`/w/${worldId}/manager/entry/${place.id}`, '_blank')}
                 >
                   <Stack spacing={0.5}>
@@ -125,6 +136,8 @@ export function PlacesSubWindow({ worldId, campaignId }: PlacesSubWindowProps) {
           </Stack>
         )}
 
+        <PlaceBuilderLauncher worldId={worldId} campaignId={campaignId} slot={slot} />
+
         <Typography variant="overline" color="text.secondary" sx={{ pl: 0.5 }}>
           Browse
         </Typography>
@@ -139,7 +152,7 @@ export function PlacesSubWindow({ worldId, campaignId }: PlacesSubWindowProps) {
         ) : (
           <List dense disablePadding>
             {filtered.map((a) => (
-              <ListItemButton key={a.id} onClick={() => selectItem(campaignId, 'places', a.id)} sx={{ borderRadius: 1.5 }}>
+              <ListItemButton key={a.id} onClick={() => focusItem(campaignId, slot, 'places', a.id)} sx={{ borderRadius: 1.5 }}>
                 <ListItemText
                   primary={a.name}
                   secondary={ARTICLE_TEMPLATES[a.category].label}

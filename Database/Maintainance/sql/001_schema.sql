@@ -734,8 +734,53 @@ CREATE TRIGGER trg_token_library_updated_at BEFORE UPDATE ON token_library
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ============================================================
+-- 19b. category / tag / table_formats
+-- (Random Tables + Encounters overhaul, Tasks 1-4: self-referential browse
+--  tree, normalized namespaced tag vocabulary, and the roll-format lookup.
+--  Declared before encounters since encounters.category_id references
+--  category.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS category (
+  id           UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  slug         TEXT        NOT NULL UNIQUE,
+  name         TEXT        NOT NULL,
+  parent_id    UUID        NULL REFERENCES category (id) ON DELETE CASCADE,
+  is_system    BOOLEAN     NOT NULL DEFAULT false,
+  icon         TEXT        NULL,
+  sort_order   INTEGER     NOT NULL DEFAULT 0,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS category_parent_id_idx ON category (parent_id);
+
+CREATE TABLE IF NOT EXISTS tag (
+  id         UUID    NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  namespace  TEXT    NOT NULL,
+  value      TEXT    NOT NULL,
+  label      TEXT    NOT NULL,
+  is_system  BOOLEAN NOT NULL DEFAULT false,
+  UNIQUE (namespace, value)
+);
+CREATE INDEX IF NOT EXISTS tag_namespace_idx ON tag (namespace);
+CREATE INDEX IF NOT EXISTS tag_value_trgm_idx ON tag USING gin (value gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS tag_label_trgm_idx ON tag USING gin (label gin_trgm_ops);
+
+CREATE TABLE IF NOT EXISTS table_formats (
+  id          UUID    NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  slug        TEXT    NOT NULL UNIQUE,
+  name        TEXT    NOT NULL,
+  description TEXT    NULL,
+  tier        TEXT    NOT NULL DEFAULT 'core' CHECK (tier IN ('core','advanced')),
+  is_system   BOOLEAN NOT NULL DEFAULT false
+);
+
+-- ============================================================
 -- 20. encounters
--- (created before map_floors.locked_encounter_id FK, which is added later)
+-- (created before map_floors.locked_encounter_id FK, which is added later.
+--  Extended with the shared "run layer" fields from Task 7.3: primary_type/
+--  category_id/status/read_aloud/objective/party assumptions/scaling_notes/
+--  location_id/rewards. `notes` above continues to serve as dm_notes -
+--  read_aloud is the new player-facing counterpart, kept as a separate
+--  column per Task 7.3's explicit "kept SEPARATE from dm_notes".)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS encounters (
   id                        UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -760,12 +805,26 @@ CREATE TABLE IF NOT EXISTS encounters (
   special_rules              JSONB       NULL,
   notes                      TEXT        NULL,
   raw_data                   JSONB       NULL,
+  primary_type                TEXT        NULL CHECK (primary_type IS NULL OR primary_type IN ('combat','social','exploration')),
+  category_id                  UUID        NULL REFERENCES category (id),
+  status                       TEXT        NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','ready','used')),
+  read_aloud                   TEXT        NULL,
+  objective                    TEXT        NULL,
+  party_level_min               INTEGER     NULL,
+  party_level_max               INTEGER     NULL,
+  party_size                    INTEGER     NULL,
+  scaling_notes                 TEXT        NULL,
+  location_id                   UUID        NULL REFERENCES locations (id),
+  rewards                        JSONB       NULL,
   created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS encounters_campaign_id_idx ON encounters (campaign_id);
 CREATE INDEX IF NOT EXISTS encounters_map_id_idx ON encounters (map_id);
 CREATE INDEX IF NOT EXISTS encounters_source_id_idx ON encounters (source_id);
+CREATE INDEX IF NOT EXISTS encounters_category_id_idx ON encounters (category_id);
+CREATE INDEX IF NOT EXISTS encounters_location_id_idx ON encounters (location_id);
+CREATE INDEX IF NOT EXISTS encounters_primary_type_idx ON encounters (primary_type);
 CREATE UNIQUE INDEX IF NOT EXISTS encounters_name_source_uidx ON encounters (name, source_id) WHERE source_id IS NOT NULL;
 DROP TRIGGER IF EXISTS trg_encounters_updated_at ON encounters;
 CREATE TRIGGER trg_encounters_updated_at BEFORE UPDATE ON encounters
@@ -773,6 +832,7 @@ CREATE TRIGGER trg_encounters_updated_at BEFORE UPDATE ON encounters
 
 -- ============================================================
 -- 21. encounter_creatures
+-- (role/notes added for Task 8.1 - the combat roster row)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS encounter_creatures (
   id                    UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -783,6 +843,8 @@ CREATE TABLE IF NOT EXISTS encounter_creatures (
   quantity              INTEGER     NOT NULL DEFAULT 1,
   size_override         NUMERIC     NULL,
   sort_order            INTEGER     NOT NULL DEFAULT 0,
+  role                  TEXT        NULL CHECK (role IS NULL OR role IN ('minion','skirmisher','brute','soldier','artillery','controller','lurker','leader','solo_boss','support_healer')),
+  notes                 TEXT        NULL,
   raw_data              JSONB       NULL
 );
 CREATE INDEX IF NOT EXISTS encounter_creatures_encounter_id_idx ON encounter_creatures (encounter_id);
@@ -823,6 +885,221 @@ CREATE TABLE IF NOT EXISTS encounter_table_creatures (
 );
 CREATE INDEX IF NOT EXISTS encounter_table_creatures_encounter_table_id_idx ON encounter_table_creatures (encounter_table_id);
 CREATE INDEX IF NOT EXISTS encounter_table_creatures_creature_id_idx ON encounter_table_creatures (creature_id);
+
+-- ============================================================
+-- 25b. random_tables / table_columns / table_entries
+-- (Tasks 1/5 - the new rollable-table core engine that supersedes
+--  random_encounter_tables/situational_tables/encounter_tables+
+--  encounter_table_creatures above; those tables are migrated into this
+--  one and dropped in a later migration once the data-migration script
+--  has run. category_id/format_id are the two of the three orthogonal
+--  dimensions that are FKs; tags are the third, joined via
+--  random_table_tag.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS random_tables (
+  id                UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  campaign_id       UUID        NULL REFERENCES campaigns (id),
+  name              TEXT        NOT NULL,
+  description       TEXT        NULL,
+  category_id       UUID        NULL REFERENCES category (id),
+  format_id         UUID        NOT NULL REFERENCES table_formats (id),
+  trigger_situation TEXT        NULL,
+  image_url         TEXT        NULL,
+  combine_template  TEXT        NULL,
+  source_book       TEXT        NULL,
+  format_config     JSONB       NULL,
+  is_system         BOOLEAN     NOT NULL DEFAULT false,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS random_tables_campaign_id_idx ON random_tables (campaign_id);
+CREATE INDEX IF NOT EXISTS random_tables_category_id_idx ON random_tables (category_id);
+CREATE INDEX IF NOT EXISTS random_tables_format_id_idx ON random_tables (format_id);
+CREATE INDEX IF NOT EXISTS random_tables_name_trgm_idx ON random_tables USING gin (name gin_trgm_ops);
+-- Idempotency key for the table/table_group importer projector (Database/Maintainance/
+-- importer/projectors/table.py), same pattern as encounters_name_source_uidx above.
+CREATE UNIQUE INDEX IF NOT EXISTS random_tables_name_source_book_uidx ON random_tables (name, source_book) WHERE source_book IS NOT NULL;
+DROP TRIGGER IF EXISTS trg_random_tables_updated_at ON random_tables;
+CREATE TRIGGER trg_random_tables_updated_at BEFORE UPDATE ON random_tables
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS random_table_tag (
+  table_id UUID NOT NULL REFERENCES random_tables (id) ON DELETE CASCADE,
+  tag_id   UUID NOT NULL REFERENCES tag (id) ON DELETE CASCADE,
+  PRIMARY KEY (table_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS random_table_tag_tag_id_idx ON random_table_tag (tag_id);
+
+CREATE TABLE IF NOT EXISTS encounter_tag (
+  encounter_id UUID NOT NULL REFERENCES encounters (id) ON DELETE CASCADE,
+  tag_id       UUID NOT NULL REFERENCES tag (id) ON DELETE CASCADE,
+  PRIMARY KEY (encounter_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS encounter_tag_tag_id_idx ON encounter_tag (tag_id);
+
+-- table_entry_tag is declared after table_entries below (needs that table to exist).
+
+CREATE TABLE IF NOT EXISTS table_columns (
+  id            UUID    NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  table_id      UUID    NOT NULL REFERENCES random_tables (id) ON DELETE CASCADE,
+  name          TEXT    NOT NULL,
+  die_count     INTEGER NOT NULL DEFAULT 1,
+  die_sides     INTEGER NOT NULL DEFAULT 20,
+  die_modifier  INTEGER NOT NULL DEFAULT 0,
+  sort_order    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS table_columns_table_id_idx ON table_columns (table_id);
+
+CREATE TABLE IF NOT EXISTS table_entries (
+  id               UUID    NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  column_id        UUID    NOT NULL REFERENCES table_columns (id) ON DELETE CASCADE,
+  min              INTEGER NULL,
+  max              INTEGER NULL,
+  secondary_min    INTEGER NULL,
+  secondary_max    INTEGER NULL,
+  weight           INTEGER NULL,
+  kind             TEXT    NOT NULL DEFAULT 'text' CHECK (kind IN ('text','encounter_ref','table_ref','creature_ref','npc_ref','item_ref')),
+  text             TEXT    NULL,
+  encounter_id     UUID    NULL REFERENCES encounters (id),
+  target_table_id  UUID    NULL REFERENCES random_tables (id),
+  creature_id      UUID    NULL REFERENCES creatures (id),
+  npc_id           UUID    NULL REFERENCES creatures (id),
+  item_id          UUID    NULL REFERENCES items (id),
+  bundle           JSONB   NULL,
+  notes            TEXT    NULL,
+  sort_order       INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS table_entries_column_id_idx ON table_entries (column_id);
+CREATE INDEX IF NOT EXISTS table_entries_encounter_id_idx ON table_entries (encounter_id);
+CREATE INDEX IF NOT EXISTS table_entries_target_table_id_idx ON table_entries (target_table_id);
+
+CREATE TABLE IF NOT EXISTS table_entry_tag (
+  entry_id UUID NOT NULL REFERENCES table_entries (id) ON DELETE CASCADE,
+  tag_id   UUID NOT NULL REFERENCES tag (id) ON DELETE CASCADE,
+  PRIMARY KEY (entry_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS table_entry_tag_tag_id_idx ON table_entry_tag (tag_id);
+
+-- ============================================================
+-- 25c. generators / generator_components
+-- (Task 6 - composite generators combining several random_tables into
+--  named, optionally tag-filtered output slots.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS generators (
+  id               UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  campaign_id      UUID        NULL REFERENCES campaigns (id),
+  slug             TEXT        NOT NULL UNIQUE,
+  name             TEXT        NOT NULL,
+  category_id      UUID        NULL REFERENCES category (id),
+  description      TEXT        NULL,
+  combine_template TEXT        NOT NULL,
+  parameters       JSONB       NOT NULL DEFAULT '[]'::jsonb,
+  is_system        BOOLEAN     NOT NULL DEFAULT false,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS generators_campaign_id_idx ON generators (campaign_id);
+CREATE INDEX IF NOT EXISTS generators_category_id_idx ON generators (category_id);
+DROP TRIGGER IF EXISTS trg_generators_updated_at ON generators;
+CREATE TRIGGER trg_generators_updated_at BEFORE UPDATE ON generators
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS generator_components (
+  id                UUID    NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  generator_id      UUID    NOT NULL REFERENCES generators (id) ON DELETE CASCADE,
+  table_id          UUID    NOT NULL REFERENCES random_tables (id),
+  output_slot       TEXT    NOT NULL,
+  filter_param_key  TEXT    NULL,
+  roll_count        INTEGER NOT NULL DEFAULT 1,
+  optional          BOOLEAN NOT NULL DEFAULT false,
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (generator_id, output_slot)
+);
+CREATE INDEX IF NOT EXISTS generator_components_generator_id_idx ON generator_components (generator_id);
+
+CREATE TABLE IF NOT EXISTS generator_tag (
+  generator_id UUID NOT NULL REFERENCES generators (id) ON DELETE CASCADE,
+  tag_id       UUID NOT NULL REFERENCES tag (id) ON DELETE CASCADE,
+  PRIMARY KEY (generator_id, tag_id)
+);
+
+-- ============================================================
+-- 25d. encounter_combat_blocks / encounter_social_blocks /
+--      encounter_npcs / encounter_exploration_blocks
+-- (Tasks 8-10 - optional 1:1 pillar detail blocks. An encounter can carry
+--  more than one at once, e.g. a parley (social) that can escalate into a
+--  fight (combat) - see each block's `escalation`/`complications` fields.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS encounter_combat_blocks (
+  encounter_id          UUID    NOT NULL PRIMARY KEY REFERENCES encounters (id) ON DELETE CASCADE,
+  shape                 TEXT    NULL CHECK (shape IS NULL OR shape IN ('ambush','skirmish','set_piece_boss','horde_swarm','waves_gauntlet','duel','siege','chase','escort_defense','puzzle_combat')),
+  victory_condition     TEXT    NULL CHECK (victory_condition IS NULL OR victory_condition IN ('defeat_all','defeat_leader','survive_rounds','protect_escort','reach_escape','retrieve_destroy','capture_alive','hold_position','slip_past','break_morale')),
+  awareness             TEXT    NULL CHECK (awareness IS NULL OR awareness IN ('party_surprised','enemies_surprised','mutual','stealth_approach')),
+  start_range           TEXT    NULL CHECK (start_range IS NULL OR start_range IN ('melee','close','medium','long','variable')),
+  lighting              TEXT    NULL CHECK (lighting IS NULL OR lighting IN ('bright','dim','darkness','magical_darkness')),
+  terrain_type          TEXT    NULL CHECK (terrain_type IS NULL OR terrain_type IN ('open','dense_forest','corridor_cramped','cavern','rooftops_urban','bridge_chokepoint','water_swamp','vertical_cliffs','ruins_rubble','interior_room')),
+  terrain_features      JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  morale                TEXT    NULL CHECK (morale IS NULL OR morale IN ('fights_to_death','flees_50pct','flees_leader_falls','surrenders_losing','parleys','retreats_reinforce','fanatical')),
+  reinforcements        JSONB   NULL,
+  dynamic_events        JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  difficulty_band       TEXT    NULL CHECK (difficulty_band IS NULL OR difficulty_band IN ('low','moderate','high','easy','medium','hard','deadly')),
+  computed_xp           INTEGER NULL,
+  has_lair_or_legendary BOOLEAN NOT NULL DEFAULT false,
+  aftermath             JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  scaling_notes         TEXT    NULL,
+  map_id                UUID    NULL REFERENCES maps (id),
+  transition_encounter_id UUID NULL REFERENCES encounters (id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS encounter_social_blocks (
+  encounter_id   UUID  NOT NULL PRIMARY KEY REFERENCES encounters (id) ON DELETE CASCADE,
+  shape          TEXT  NULL CHECK (shape IS NULL OR shape IN ('negotiation','interrogation','request_persuasion','deception_infiltration','intimidation','haggle_bargain','court_audience','trial','info_gathering','recruitment','calming_hostility','debate','performance','verbal_puzzle')),
+  venue          TEXT  NULL CHECK (venue IS NULL OR venue IN ('tavern','court_throne_room','street_market','prison','temple','guild_hall','camp','private_residence','battlefield_parley','shop')),
+  tone           TEXT  NULL CHECK (tone IS NULL OR tone IN ('tense','cordial','formal','comedic','threatening','somber','mysterious')),
+  stakes         TEXT  NULL CHECK (stakes IS NULL OR stakes IN ('information','ally_introduction','item_reward','safe_passage','job_quest','a_life','contract_deal','access','nothing')),
+  player_levers  JSONB NOT NULL DEFAULT '[]'::jsonb,
+  key_checks     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  outcome_tiers  JSONB NULL,
+  social_clock   JSONB NULL,
+  gated_info     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  complications  JSONB NOT NULL DEFAULT '[]'::jsonb,
+  escalation     TEXT  NULL CHECK (escalation IS NULL OR escalation IN ('can_turn_combat','can_turn_chase','locks_out_if_failed','alerts_others')),
+  transition_encounter_id UUID NULL REFERENCES encounters (id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS encounter_npcs (
+  id           UUID    NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  encounter_id UUID    NOT NULL REFERENCES encounters (id) ON DELETE CASCADE,
+  npc_id       UUID    NOT NULL REFERENCES creatures (id),
+  attitude     TEXT    NULL CHECK (attitude IS NULL OR attitude IN ('hostile','unfriendly','indifferent','friendly','helpful')),
+  agenda       TEXT    NULL CHECK (agenda IS NULL OR agenda IN ('wants_money','wants_protection','wants_information','wants_revenge','wants_recruit','wants_deceive','wants_escape','wants_status','hiding_secret','testing_party')),
+  secret       TEXT    NULL,
+  leverage     TEXT    NULL,
+  rp_cues      JSONB   NULL,
+  sort_order   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS encounter_npcs_encounter_id_idx ON encounter_npcs (encounter_id);
+CREATE INDEX IF NOT EXISTS encounter_npcs_npc_id_idx ON encounter_npcs (npc_id);
+
+CREATE TABLE IF NOT EXISTS encounter_exploration_blocks (
+  encounter_id        UUID    NOT NULL PRIMARY KEY REFERENCES encounters (id) ON DELETE CASCADE,
+  shape                TEXT    NULL CHECK (shape IS NULL OR shape IN ('navigation_travel','dungeon_delve','trap','hazard','puzzle','investigation_discovery','survival','traversal','timed_escape','skill_challenge','environmental_set_piece','stealth_infiltration')),
+  environment          TEXT    NULL CHECK (environment IS NULL OR environment IN ('forest','mountain','desert','swamp','arctic','coast','sea','underdark','urban','dungeon','ruins','jungle','grassland','feywild','shadowfell','planar')),
+  terrain_difficulty   TEXT    NULL CHECK (terrain_difficulty IS NULL OR terrain_difficulty IN ('normal','difficult','hazardous','impassable')),
+  obstacle_type        TEXT    NULL CHECK (obstacle_type IS NULL OR obstacle_type IN ('physical_barrier','trap','environmental_hazard','locked_sealed','puzzle_mechanism','guardian','natural_feature','maze_navigation')),
+  trap                 JSONB   NULL,
+  hazard               JSONB   NULL,
+  skill_challenge      JSONB   NULL,
+  puzzle               JSONB   NULL,
+  sensory_clues        JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  points_of_interest   JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  navigation           JSONB   NULL,
+  resource_cost        JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  verticality          BOOLEAN NOT NULL DEFAULT false,
+  complications        JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  transition_encounter_id UUID NULL REFERENCES encounters (id) ON DELETE SET NULL,
+  wandering_table_id   UUID NULL REFERENCES random_tables (id) ON DELETE SET NULL
+);
 
 -- ============================================================
 -- 17. map_tokens

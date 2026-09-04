@@ -16,6 +16,8 @@ import AddCommentIcon from '@mui/icons-material/AddCommentOutlined';
 import SendIcon from '@mui/icons-material/Send';
 import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
+import { PaneHeader, type PaneCloseProps } from './layout/PaneHeader';
+import type { PaneSlot } from './layout/playLayoutTrees';
 import { EntityRefPreview } from '../notes/EntityRefPreview';
 import { useMentionInput } from '../../hooks/useMentionInput';
 import { useSessionChatStore, getChatsForNote } from '../../store/useSessionChatStore';
@@ -24,7 +26,9 @@ import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../theme/scrollbar
 import type { SplitDirection } from './layout/playLayoutTrees';
 import type { SessionChat } from '../../types/sessionChat';
 
-interface ChatPanelProps {
+interface ChatPanelProps extends PaneCloseProps {
+  /** Which pane this panel occupies - the header uses it as its drag handle identity. */
+  slot: PaneSlot;
   worldId: string;
   campaignId: string;
   noteId: string;
@@ -49,7 +53,18 @@ function newChatName(): string {
  * Notes (reuses useMentionInput/EntityRefPreview). When no chat has been picked yet (the setup
  * screen's "No notes thread" option, or a window freshly switched to this kind), renders a
  * blurred placeholder prompting the DM to choose or start one instead of an empty message list. */
-export function ChatPanel({ worldId, campaignId, noteId, chatId, compact, kindSwitcher, onCollapse, parentDirection = 'row' }: ChatPanelProps) {
+export function ChatPanel({
+  slot,
+  worldId,
+  campaignId,
+  noteId,
+  chatId,
+  compact,
+  kindSwitcher,
+  onCollapse,
+  parentDirection = 'row',
+  ...closeProps
+}: ChatPanelProps) {
   const chats = useSessionChatStore((s) => s.chats);
   const fetchChatsForNote = useSessionChatStore((s) => s.fetchChatsForNote);
   const addChat = useSessionChatStore((s) => s.addChat);
@@ -119,35 +134,28 @@ export function ChatPanel({ worldId, campaignId, noteId, chatId, compact, kindSw
       variant="outlined"
       sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, borderRadius: 1.5, overflow: 'hidden' }}
     >
-      <Stack
-        direction="row"
-        sx={{ alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: compact ? 1 : 1.25, borderBottom: 1, borderColor: 'divider', bgcolor: 'action.hover' }}
-      >
-        <Stack
-          direction="row"
-          spacing={1}
-          sx={{ alignItems: 'center', minWidth: 0, pr: 1, mr: 0.5, borderRight: 1, borderColor: 'divider' }}
-        >
-          {kindSwitcher ?? <ForumOutlinedIcon fontSize="small" color="action" />}
-        </Stack>
-        <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700, flexGrow: 1, minWidth: 0 }}>
-          {activeChat?.name ?? 'DM Notes'}
-        </Typography>
-        <Stack direction="row" spacing={0.25}>
-          <Tooltip title="Switch or start a chat">
-            <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)}>
-              <ExpandMoreIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          {onCollapse && (
-            <Tooltip title="Collapse">
-              <IconButton size="small" onClick={onCollapse}>
-                <UnfoldLessIcon fontSize="small" sx={{ transform: parentDirection === 'row' ? 'rotate(90deg)' : 'none' }} />
+      <PaneHeader
+        slot={slot}
+        leading={kindSwitcher ?? <ForumOutlinedIcon fontSize="small" color="action" />}
+        title={activeChat?.name ?? 'DM Notes'}
+        {...closeProps}
+        actions={
+          <>
+            <Tooltip title="Switch or start a chat">
+              <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)}>
+                <ExpandMoreIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-          )}
-        </Stack>
-      </Stack>
+            {onCollapse && (
+              <Tooltip title="Collapse">
+                <IconButton size="small" onClick={onCollapse}>
+                  <UnfoldLessIcon fontSize="small" sx={{ transform: parentDirection === 'row' ? 'rotate(90deg)' : 'none' }} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </>
+        }
+      />
 
       <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
         <MenuItem onClick={handleNewChat}>

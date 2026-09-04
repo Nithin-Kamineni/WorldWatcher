@@ -1,0 +1,212 @@
+# WorldWatcher
+
+A Dungeon-Master web app: worlds, campaigns, compendium (creatures/spells/magic
+items), maps with fog of war, random tables + encounters, notes, and a
+session-running "Play" panel.
+
+Single developer, Windows, PowerShell. There is no CI, no test suite, and no
+staging environment — verification is type-check, lint, and running the app.
+
+## Stack
+
+- **Client** — React 19 + TypeScript + Vite 8, MUI v9 (`@mui/material`),
+  Zustand v5 for state, React Router v7, TipTap v3 for rich text, Konva +
+  react-konva for the map canvas. Lint is **oxlint**, not ESLint.
+- **Server** — FastAPI, async SQLAlchemy 2.0 (`asyncpg`), Pydantic v2,
+  Alembic for migrations, WebSockets for live map/combat updates.
+- **Database** — PostgreSQL 16, database name `WorldWatcher_DB`.
+- **Importer** — a separate Python project under `Database/Maintainance/` that
+  scrapes/normalises 5e source data and seeds the DB. Its own `.venv`.
+
+## Layout
+
+```
+Client/src/
+  api/            client.ts (fetch wrapper), types.ts (server DTOs),
+                  adapters.ts (DTO <-> domain mapping), resources/ (one
+                  module per endpoint group, 25 of them)
+  components/     dm/ home/ layout/ map/ notes/ play/ settings/ shell/ world/
+  pages/          campaign/ world/ + top-level pages
+  store/          one Zustand store per domain (use*Store.ts) + sync/
+  types/          domain types (distinct from api/types.ts DTOs)
+  hooks/ utils/ theme/ routes/
+Server/app/
+  api/router.py       aggregates every router under /api
+  api/routers/        one module per resource (~32)
+  models/             SQLAlchemy ORM
+  schemas/            Pydantic request/response
+  services/ ws/ core/config.py
+Database/Maintainance/
+  importer/           scrapers + projectors
+  scripts/            seed_*.py and migrate_*.py
+  sql/001_schema.sql  full schema (idempotent, safe to re-run)
+```
+
+`checklist.txt` in the repo root is the backlog. Keep it updated when you
+finish or discover work — do not create new `issues*.txt` / `progress*.txt`
+files, they were consolidated into it.
+
+It holds **only open work**: finished items were stripped out on 2026-09-03 so
+it reads as a to-do list rather than a history, and it now uses just
+⚠️ partial / ❌ not done. Three live backlogs, kept apart on purpose:
+
+- **Part E** — the tail of the two big feature efforts (Play panel redesign;
+  Random Tables + Encounters), verified against the code.
+- **Part I** — the UI-refinement backlog: what the Play-page refinement round
+  did not do, plus the same class of problem elsewhere in the app.
+- **Parts F–G** — the older map / notes / articles / shell backlog inherited
+  from the deleted `Client/` tracking files. *Not* re-verified — check these
+  against the code before acting on them.
+
+**Part H** records where the deleted DB-architecture spec's content survives.
+Parts A–D keep only their still-open items; C and D were entirely finished
+and are gone.
+
+Many source comments still cite requirement numbers like `issues.txt 10.c.3a`
+or `Task 4.3.7`. Those files are gone, and so is the text of every *finished*
+requirement — look those numbers up in `checklist.txt`'s **git history** (the
+commit before the 2026-09-03 strip). Numbers that are still open resolve
+against **Part A** (issues.txt numbering) and **Part B** (task numbering).
+
+### The Play page
+
+The most important screen in the app, and the most machinery per pixel. Worth
+knowing before touching it:
+
+- `components/play/layout/playLayoutTrees.ts` — the 6 layouts as static
+  row/column split trees. `SplitPane.tsx` is the one generic renderer, and
+  `LayoutGlyph.tsx` draws each layout's toolbar icon *from the same tree*, so a
+  new layout gets a correct icon for free. Don't hand-pick an MUI icon for a
+  layout; that is how the old icons came to show the wrong pane counts.
+- `PaneHeader.tsx` owns `PANE_HEADER_HEIGHT` (40px) and every pane's chrome:
+  kind switcher, truncating title, actions, close button — and it is the drag
+  handle. All three pane bodies render it; none of them draws its own header.
+- Closing a pane sets its kind to `'empty'` (a real `PlayWindowKind`), leaving
+  a droppable placeholder; "give space back" marks it in `dismissedPanes` and
+  `SessionRunnerWorkspace` prunes it out of the tree, which is what makes the
+  effective layout change without changing `layoutId`.
+- `paneDrag.tsx` + `PaneDropZone.tsx` — native HTML5 drag; dropping one pane
+  header on another swaps them. Both stores swap in step: `usePlayLayoutStore`
+  for the assignment, `usePlayItemsStore` for the tab sets and pins.
+- **Items state is per pane slot, not per campaign** (`usePlayItemsStore`,
+  persist version 2). Two Items windows must behave independently; anything you
+  add there takes a `slot`.
+- Random-table search and browse are ranked by relevance blended with recorded
+  usefulness (`tableSearch.ts` `rankTablesByUsefulness` + `useTableUsageStore`),
+  never alphabetically. Both random-table surfaces share it.
+
+## Running it
+
+Two independent options — don't mix them.
+
+**Docker (the whole stack, closest to deployed):**
+
+```powershell
+./scripts/up.ps1          # docker compose up -d + prints URLs
+```
+
+Serves the app at `http://localhost/campaigns`. Images are pulled from Docker
+Hub, not built locally. On first run the DB restores from
+`Database/WorldWatcher_DB_Backup_v1.sql`; re-seed with `docker compose down -v`.
+
+**Native dev (what you want for iterating):**
+
+```powershell
+# backend
+cd Server; .venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8006
+# frontend
+cd Client; npm run dev        # http://localhost:5173
+```
+
+### Ports — read this before starting the backend
+
+The backend port has drifted repeatedly because stale processes hold ports open
+and cannot be killed on this machine (8000 → 8001 → 8002 → 8003 → 8006). **The
+port is whatever `Client/.env` says**, currently `8006`:
+
+```
+VITE_API_BASE_URL=http://localhost:8006/api
+VITE_WS_BASE_URL=ws://localhost:8006/ws
+```
+
+There is no Vite dev proxy, so the client talks to that absolute URL directly.
+If you must move the port, change `Client/.env` and restart Vite, otherwise the
+UI silently fails every request. `Server/.env` still says `WW_PORT=8000` and the
+README still says 8001 — both are stale; the `--port` flag is what matters.
+
+Always use `Server/.venv/Scripts/python.exe -m uvicorn`, never a bare
+`uvicorn`. Backgrounding a bare `uvicorn` here has silently run under the pyenv
+global Python instead of the venv, producing confusing import errors.
+
+## Verifying a change
+
+There are no tests. The real gates are:
+
+```powershell
+cd Client; npx tsc --noEmit    # type-check   - clean, keep it that way
+cd Client; npx oxlint src      # lint         - warnings only, no errors
+cd Client; npx vite build      # bundle       - the build gate that passes
+```
+
+Note on the build: `npm run build` runs `tsc -b` first and **fails**, on 18
+pre-existing errors from a library-version mismatch (MUI v9 `slotProps`, Konva
+event types) in 11 files: the map popovers/layers, `NotesFolderExplorer`,
+`ArticleFolderTree`, `FactionRelationsField`, `CommandPalette`, `ComingSoon`
+and the world/maps pages. Tracked as `E9` in `checklist.txt`. `npx vite build`
+succeeds. Verified 2026-09-03: `npx tsc --noEmit` itself is clean — those
+errors only surface under `tsc -b`'s stricter project mode, so a `tsc --noEmit`
+error IS yours. Don't treat the 18 as regressions, and don't get drawn into
+fixing them mid-task.
+
+For backend changes, hit the endpoint — the API serves interactive docs at
+`/docs`. For DB state, connect directly:
+
+```powershell
+psql -h localhost -U postgres -d WorldWatcher_DB
+```
+
+Credentials come from `Server/.env` (git-ignored). Migrations:
+
+```powershell
+cd Server; .venv/Scripts/python.exe -m alembic current
+cd Server; .venv/Scripts/python.exe -m alembic upgrade head
+```
+
+## Conventions that matter here
+
+- **Reference, never duplicate.** This is the core rule of the data model. Any
+  field naming a creature, NPC, spell, magic item, skill, damage type,
+  condition or CR must FK to the existing entity, with encounter-specific
+  metadata (quantity, role, attitude) living on the join row. Free-text
+  restatement of an entity is a bug.
+- **Random tables have three orthogonal dimensions**, kept as three separate
+  fields and never collapsed: exactly one `category` (a node in a browsable
+  tree — what the table is about), many `tags` (faceted: `env:forest`,
+  `tier:1`, `theme:horror`), and exactly one `format` (how it rolls). Do not
+  add category nodes per environment or tier; that belongs in tags and makes
+  the tree explode combinatorially.
+- **Server DTO vs domain type.** `Client/src/api/types.ts` holds server shapes,
+  `Client/src/types/` holds domain shapes, and `Client/src/api/adapters.ts`
+  maps between them. New endpoints get a resource module in
+  `Client/src/api/resources/`, not ad-hoc `fetch` calls.
+- **One Zustand store per domain**, named `use<Domain>Store.ts`. UI preference
+  state (layouts, pins, collapse) persists to `localStorage` through these
+  stores — follow `usePlayLayoutStore.ts` as the pattern.
+- **Itemized multi-value text fields** (NPC personality, appearance, secrets,
+  relationships) are stored as newline-joined Text on the server and edited
+  with `ItemListField` on the client. Reuse that pattern rather than inventing
+  a new one.
+- **Reuse before adding.** The codebase already has search bars, filter chip
+  groups, pinnable rows, split panes and BBCode/TipTap editors. Look for the
+  existing component before writing a parallel one.
+- Some files are large by intent (`EncounterFormDialog.tsx` ~1600 lines,
+  `adapters.ts` ~1400, `MapPage.tsx` ~1200). Match the surrounding style;
+  don't opportunistically refactor them as part of an unrelated change.
+
+## Known dead weight
+
+The old random-table subsystems were replaced but their backend was never
+removed: `Server/app/models/situational_table.py` plus the
+`situational_tables.py` and `random_encounter_tables.py` routers are still
+registered in `api/router.py` while their client-side code is gone. Tracked as
+`E5` in `checklist.txt`. Don't build anything new on them.

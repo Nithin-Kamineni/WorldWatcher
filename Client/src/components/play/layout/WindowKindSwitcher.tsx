@@ -8,24 +8,26 @@ import ListItemText from '@mui/material/ListItemText';
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined';
 import WidgetsOutlinedIcon from '@mui/icons-material/WidgetsOutlined';
-import type { PlayWindowKind } from '../../../store/usePlayLayoutStore';
+import { PICKABLE_WINDOW_KINDS, type PlayWindowKind } from '../../../store/usePlayLayoutStore';
 
-const KIND_ICONS: Record<PlayWindowKind, typeof MenuBookOutlinedIcon> = {
+/** A pane kind the DM can pick. `empty` is deliberately not one of them - a pane becomes empty
+ * by being closed, and fills again by being picked/dropped into. */
+export type ContentWindowKind = Exclude<PlayWindowKind, 'empty'>;
+
+export const KIND_ICONS: Record<ContentWindowKind, typeof MenuBookOutlinedIcon> = {
   session: MenuBookOutlinedIcon,
   chat: ForumOutlinedIcon,
   items: WidgetsOutlinedIcon,
 };
 
-const KIND_LABELS: Record<PlayWindowKind, string> = {
+export const KIND_LABELS: Record<ContentWindowKind, string> = {
   session: 'Session Notes',
   chat: 'DM Notes',
   items: 'Items',
 };
 
-const KIND_ORDER: PlayWindowKind[] = ['session', 'items', 'chat'];
-
 interface WindowKindSwitcherProps {
-  kind: PlayWindowKind;
+  kind: ContentWindowKind;
   onSetKind: (kind: PlayWindowKind) => void;
   disabled?: boolean;
 }
@@ -47,7 +49,7 @@ export function WindowKindSwitcher({ kind, onSetKind, disabled }: WindowKindSwit
         </span>
       </Tooltip>
       <Menu anchorEl={anchorEl} open={!!anchorEl} onClose={() => setAnchorEl(null)}>
-        {KIND_ORDER.map((k) => {
+        {PICKABLE_WINDOW_KINDS.map((k) => {
           const Icon = KIND_ICONS[k];
           return (
             <MenuItem

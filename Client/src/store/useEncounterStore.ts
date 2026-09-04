@@ -1,8 +1,14 @@
 import { create } from 'zustand';
-import type { Encounter, EncounterCreatureEntry } from '../types/encounter';
-import { apiEncounterToEncounter, encounterEntryToApiPayload, encounterToApiPayload } from '../api/adapters';
-import { assetFileUrl } from '../api/client';
-import * as creaturesApi from '../api/resources/creatures';
+import type { Encounter, EncounterCreatureEntry, EncounterNpcEntry } from '../types/encounter';
+import {
+  apiEncounterToEncounter,
+  combatBlockToApiPayload,
+  encounterEntryToApiPayload,
+  encounterNpcToApiPayload,
+  encounterToApiPayload,
+  explorationBlockToApiPayload,
+  socialBlockToApiPayload,
+} from '../api/adapters';
 import * as encountersApi from '../api/resources/encounters';
 
 /** 'own_or_global' (default) = this campaign's own encounters plus the shared/global reference
@@ -17,19 +23,10 @@ interface EncounterStoreState {
    * fresh fetch instead of reusing a narrower scope's cached (and now stale) result. */
   loadedKeys: Record<string, boolean>;
   fetchEncountersForCampaign: (campaignId: string, scope?: EncounterScope) => Promise<void>;
+  fetchEncounterById: (campaignId: string, encounterId: string) => Promise<Encounter | null>;
   addEncounterToCampaign: (campaignId: string, encounter: Encounter) => void;
   updateEncounterInCampaign: (campaignId: string, encounter: Encounter) => void;
   deleteEncounterFromCampaign: (campaignId: string, encounterId: string) => void;
-}
-
-async function buildCreatureLookup(campaignId: string): Promise<Map<string, { name: string; tokenImage: string }>> {
-  const page = await creaturesApi.listCreatures({ campaign_id: campaignId, limit: 200 });
-  return new Map(
-    page.items.map((c) => [
-      c.id,
-      { name: c.name, tokenImage: assetFileUrl(c.token_asset_id ?? c.portrait_asset_id) },
-    ]),
-  );
 }
 
 async function syncEncounterEntries(
@@ -44,7 +41,10 @@ async function syncEncounterEntries(
     const old = oldById.get(entry.id);
     if (!old) {
       await encountersApi.addEncounterCreature(encounterId, { id: entry.id, ...encounterEntryToApiPayload(entry) });
-    } else if (old.quantity !== entry.quantity || old.creatureId !== entry.creatureId || old.name !== entry.name) {
+    } else if (
+      old.quantity !== entry.quantity || old.creatureId !== entry.creatureId || old.name !== entry.name ||
+      old.role !== entry.role || old.notes !== entry.notes
+    ) {
       await encountersApi.updateEncounterCreature(entry.id, encounterEntryToApiPayload(entry));
     }
   }
@@ -56,6 +56,60 @@ async function syncEncounterEntries(
   }
 }
 
+async function syncEncounterNpcs(
+  encounterId: string,
+  oldNpcs: EncounterNpcEntry[],
+  newNpcs: EncounterNpcEntry[],
+): Promise<void> {
+  const oldById = new Map(oldNpcs.map((n) => [n.id, n]));
+  const newById = new Map(newNpcs.map((n) => [n.id, n]));
+
+  for (const npc of newNpcs) {
+    const old = oldById.get(npc.id);
+    if (!old) {
+      await encountersApi.addEncounterNpc(encounterId, { id: npc.id, ...encounterNpcToApiPayload(npc) });
+    } else if (JSON.stringify(old) !== JSON.stringify(npc)) {
+      await encountersApi.updateEncounterNpc(npc.id, encounterNpcToApiPayload(npc));
+    }
+  }
+
+  for (const npc of oldNpcs) {
+    if (!newById.has(npc.id)) {
+      await encountersApi.removeEncounterNpc(npc.id);
+    }
+  }
+}
+
+async function syncEncounterBlocks(encounterId: string, oldEncounter: Encounter | undefined, encounter: Encounter): Promise<void> {
+  if (encounter.combatBlock) {
+    if (JSON.stringify(oldEncounter?.combatBlock) !== JSON.stringify(encounter.combatBlock)) {
+      await encountersApi.upsertCombatBlock(encounterId, combatBlockToApiPayload(encounter.combatBlock));
+    }
+  } else if (oldEncounter?.combatBlock) {
+    await encountersApi.deleteCombatBlock(encounterId);
+  }
+
+  if (encounter.socialBlock) {
+    if (JSON.stringify(oldEncounter?.socialBlock) !== JSON.stringify(encounter.socialBlock)) {
+      await encountersApi.upsertSocialBlock(encounterId, socialBlockToApiPayload(encounter.socialBlock));
+    }
+  } else if (oldEncounter?.socialBlock) {
+    await encountersApi.deleteSocialBlock(encounterId);
+  }
+
+  if (encounter.explorationBlock) {
+    if (JSON.stringify(oldEncounter?.explorationBlock) !== JSON.stringify(encounter.explorationBlock)) {
+      await encountersApi.upsertExplorationBlock(encounterId, explorationBlockToApiPayload(encounter.explorationBlock));
+    }
+  } else if (oldEncounter?.explorationBlock) {
+    await encountersApi.deleteExplorationBlock(encounterId);
+  }
+
+  if (JSON.stringify(oldEncounter?.tagIds ?? []) !== JSON.stringify(encounter.tagIds)) {
+    await encountersApi.replaceEncounterTags(encounterId, encounter.tagIds);
+  }
+}
+
 export const useEncounterStore = create<EncounterStoreState>((set, get) => ({
   encountersByCampaignId: {},
   loadedKeys: {},
@@ -64,16 +118,13 @@ export const useEncounterStore = create<EncounterStoreState>((set, get) => ({
     const key = `${campaignId}:${scope}`;
     if (get().loadedKeys[key]) return;
     try {
-      const [page, lookup] = await Promise.all([
-        // 'own_or_global' (default) so imported random-table reference encounters
-        // (campaign_id IS NULL, source_id set - see the importer's projectors/encounter.py)
-        // show up here too, alongside this campaign's own hand-authored encounters. 'all' (the
-        // "All campaigns" toggle) drops the campaign filter entirely.
-        encountersApi.listEncounters({ campaign_id: campaignId, scope, limit: 200 }),
-        buildCreatureLookup(campaignId),
-      ]);
+      // 'own_or_global' (default) so imported random-table reference encounters
+      // (campaign_id IS NULL, source_id set - see the importer's projectors/encounter.py)
+      // show up here too, alongside this campaign's own hand-authored encounters. 'all' (the
+      // "All campaigns" toggle) drops the campaign filter entirely.
+      const page = await encountersApi.listEncounters({ campaign_id: campaignId, scope, limit: 200 });
       const encounters = await Promise.all(
-        page.items.map(async (e) => apiEncounterToEncounter(await encountersApi.getEncounter(e.id), lookup)),
+        page.items.map(async (e) => apiEncounterToEncounter(await encountersApi.getEncounter(e.id))),
       );
       set((state) => ({
         encountersByCampaignId: { ...state.encountersByCampaignId, [campaignId]: encounters },
@@ -81,6 +132,25 @@ export const useEncounterStore = create<EncounterStoreState>((set, get) => ({
       }));
     } catch (err) {
       console.error(`Failed to load encounters for campaign ${campaignId}`, err);
+    }
+  },
+
+  fetchEncounterById: async (campaignId, encounterId) => {
+    const cached = get().encountersByCampaignId[campaignId]?.find((encounter) => encounter.id === encounterId);
+    if (cached) return cached;
+    try {
+      const detail = await encountersApi.getEncounter(encounterId);
+      const encounter = apiEncounterToEncounter(detail);
+      set((state) => ({
+        encountersByCampaignId: {
+          ...state.encountersByCampaignId,
+          [campaignId]: [...(state.encountersByCampaignId[campaignId] ?? []), encounter],
+        },
+      }));
+      return encounter;
+    } catch (err) {
+      console.error(`Failed to load encounter ${encounterId}`, err);
+      return null;
     }
   },
 
@@ -94,6 +164,8 @@ export const useEncounterStore = create<EncounterStoreState>((set, get) => ({
     (async () => {
       await encountersApi.createEncounter({ id: encounter.id, ...encounterToApiPayload(encounter, campaignId) });
       await syncEncounterEntries(encounter.id, [], encounter.creatures);
+      await syncEncounterNpcs(encounter.id, [], encounter.npcs);
+      await syncEncounterBlocks(encounter.id, undefined, encounter);
     })().catch((err) => console.error('Failed to persist new encounter', err));
   },
 
@@ -110,6 +182,8 @@ export const useEncounterStore = create<EncounterStoreState>((set, get) => ({
     (async () => {
       await encountersApi.updateEncounter(encounter.id, encounterToApiPayload(encounter, campaignId));
       await syncEncounterEntries(encounter.id, oldEncounter?.creatures ?? [], encounter.creatures);
+      await syncEncounterNpcs(encounter.id, oldEncounter?.npcs ?? [], encounter.npcs);
+      await syncEncounterBlocks(encounter.id, oldEncounter, encounter);
     })().catch((err) => console.error('Failed to persist encounter update', err));
   },
 

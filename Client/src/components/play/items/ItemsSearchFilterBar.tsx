@@ -97,6 +97,12 @@ interface ItemsSearchFilterBarProps {
   onClear: () => void;
   /** e.g. Stats' All/Creature/Spell/Magic-Item toggle - rendered above search+filter. */
   extra?: ReactNode;
+  /** Replaces the built-in search box, keeping the filter popover and layout. Used by Random
+   * Tables, whose search is a counted suggestion field (RandomTableSearchField) rather than a
+   * plain text box; `search`/`onSearchChange` are then owned by that field. */
+  searchSlot?: ReactNode;
+  /** Right-hand actions on the search row (e.g. a "clear everything" button). */
+  trailing?: ReactNode;
 }
 
 /** One-row search + filter-popover bar shared by all 4 Items sub-windows (issues.txt 10.c.3a,
@@ -111,6 +117,8 @@ export function ItemsSearchFilterBar({
   onToggle,
   onClear,
   extra,
+  searchSlot,
+  trailing,
 }: ItemsSearchFilterBarProps) {
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const activeFilterCount = Object.values(selected).reduce((sum, values) => sum + values.length, 0);
@@ -119,16 +127,20 @@ export function ItemsSearchFilterBar({
     <Box sx={{ px: 1.5, pt: 1.25, pb: 1 }}>
       {extra && <Box sx={{ mb: 1 }}>{extra}</Box>}
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-        <TextField
-          size="small"
-          fullWidth
-          placeholder={searchPlaceholder ?? 'Search…'}
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          slotProps={{
-            input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> },
-          }}
-        />
+        {searchSlot ? (
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>{searchSlot}</Box>
+        ) : (
+          <TextField
+            size="small"
+            fullWidth
+            placeholder={searchPlaceholder ?? 'Search…'}
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            slotProps={{
+              input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> },
+            }}
+          />
+        )}
         {groups.length > 0 && (
           <Tooltip title="Filters">
             <IconButton
@@ -141,6 +153,7 @@ export function ItemsSearchFilterBar({
             </IconButton>
           </Tooltip>
         )}
+        {trailing}
       </Stack>
 
       <Popover

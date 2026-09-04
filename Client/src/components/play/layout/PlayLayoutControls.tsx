@@ -6,48 +6,43 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Popover from '@mui/material/Popover';
 import Typography from '@mui/material/Typography';
-import CheckBoxOutlineBlankOutlinedIcon from '@mui/icons-material/CheckBoxOutlineBlankOutlined';
-import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined';
-import ViewAgendaOutlinedIcon from '@mui/icons-material/ViewAgendaOutlined';
-import ViewWeekOutlinedIcon from '@mui/icons-material/ViewWeekOutlined';
-import ViewQuiltOutlinedIcon from '@mui/icons-material/ViewQuiltOutlined';
-import ViewComfyOutlinedIcon from '@mui/icons-material/ViewComfyOutlined';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import LockIcon from '@mui/icons-material/Lock';
 import LockOpenOutlinedIcon from '@mui/icons-material/LockOpenOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import { ALL_LAYOUT_IDS, PLAY_LAYOUTS, QUICK_LAYOUT_IDS, type PlayLayoutId, type PlayLayoutIconKey } from './playLayoutTrees';
-
-const LAYOUT_ICONS: Record<PlayLayoutIconKey, typeof CheckBoxOutlineBlankOutlinedIcon> = {
-  single: CheckBoxOutlineBlankOutlinedIcon,
-  'double-row': ViewColumnOutlinedIcon,
-  'double-col': ViewAgendaOutlinedIcon,
-  'triple-even': ViewWeekOutlinedIcon,
-  'triple-half': ViewQuiltOutlinedIcon,
-  quad: ViewComfyOutlinedIcon,
-};
+import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
+import { LayoutGlyph } from './LayoutGlyph';
+import { ALL_LAYOUT_IDS, PLAY_LAYOUTS, QUICK_LAYOUT_IDS, type PaneSlot, type PlayLayoutId } from './playLayoutTrees';
 
 interface PlayLayoutControlsProps {
   layoutId: PlayLayoutId;
   locked: boolean;
+  /** Slots the DM has closed in the *current* layout - drawn hollow on its button so the
+   * toolbar reflects what is actually on screen, not just which layout is selected. */
+  closedSlots?: PaneSlot[];
+  /** True when at least one pane in the current layout has had its space handed back to its
+   * neighbours - enables the "bring closed windows back" button. */
+  hasDismissedPanes?: boolean;
   onSelectLayout: (id: PlayLayoutId) => void;
   onToggleLock: () => void;
   onResetLayout: () => void;
+  onRestorePanes?: () => void;
 }
 
 function LayoutButton({
   id,
   active,
   disabled,
+  emptySlots,
   onClick,
 }: {
   id: PlayLayoutId;
   active: boolean;
   disabled: boolean;
+  emptySlots?: PaneSlot[];
   onClick: () => void;
 }) {
   const def = PLAY_LAYOUTS[id];
-  const Icon = LAYOUT_ICONS[def.iconKey];
   return (
     <Tooltip title={def.label}>
       <span>
@@ -56,13 +51,14 @@ function LayoutButton({
           onClick={onClick}
           disabled={disabled}
           sx={{
+            borderRadius: 1.5,
             border: 1,
             borderColor: active ? 'primary.main' : 'divider',
             bgcolor: active ? 'action.selected' : 'transparent',
             color: active ? 'primary.main' : 'text.secondary',
           }}
         >
-          <Icon fontSize="small" />
+          <LayoutGlyph layoutId={id} emptySlots={active ? emptySlots : undefined} />
         </IconButton>
       </span>
     </Tooltip>
@@ -72,8 +68,20 @@ function LayoutButton({
 /** The Play workspace's layout picker + lock/reset controls, extracted out of the (now removed)
  * standalone PlayLayoutToolbar row so it can be embedded directly in the top bar on the Play
  * page instead of costing its own full-width row (issues.txt main-page point 10). No wrapper
- * Paper/back-button here - the host (TopBar) supplies its own chrome and back affordance. */
-export function PlayLayoutControls({ layoutId, locked, onSelectLayout, onToggleLock, onResetLayout }: PlayLayoutControlsProps) {
+ * Paper/back-button here - the host (TopBar) supplies its own chrome and back affordance.
+ *
+ * Every layout is labelled by a LayoutGlyph drawn from its own split tree rather than by a
+ * hand-picked MUI icon, so the button always shows the pane arrangement it selects. */
+export function PlayLayoutControls({
+  layoutId,
+  locked,
+  closedSlots,
+  hasDismissedPanes,
+  onSelectLayout,
+  onToggleLock,
+  onResetLayout,
+  onRestorePanes,
+}: PlayLayoutControlsProps) {
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
   const otherLayouts = ALL_LAYOUT_IDS.filter((id) => !QUICK_LAYOUT_IDS.includes(id));
   const moreActive = otherLayouts.includes(layoutId);
@@ -82,7 +90,14 @@ export function PlayLayoutControls({ layoutId, locked, onSelectLayout, onToggleL
     <>
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
         {QUICK_LAYOUT_IDS.map((id) => (
-          <LayoutButton key={id} id={id} active={layoutId === id} disabled={locked} onClick={() => onSelectLayout(id)} />
+          <LayoutButton
+            key={id}
+            id={id}
+            active={layoutId === id}
+            disabled={locked}
+            emptySlots={closedSlots}
+            onClick={() => onSelectLayout(id)}
+          />
         ))}
 
         <Tooltip title="More layouts">
@@ -92,13 +107,14 @@ export function PlayLayoutControls({ layoutId, locked, onSelectLayout, onToggleL
               disabled={locked}
               onClick={(e) => setMoreAnchor(e.currentTarget)}
               sx={{
+                borderRadius: 1.5,
                 border: 1,
                 borderColor: moreActive ? 'primary.main' : 'divider',
                 bgcolor: moreActive ? 'action.selected' : 'transparent',
                 color: moreActive ? 'primary.main' : 'text.secondary',
               }}
             >
-              <MoreHorizIcon fontSize="small" />
+              {moreActive ? <LayoutGlyph layoutId={layoutId} emptySlots={closedSlots} /> : <MoreHorizIcon fontSize="small" />}
             </IconButton>
           </span>
         </Tooltip>
@@ -106,13 +122,23 @@ export function PlayLayoutControls({ layoutId, locked, onSelectLayout, onToggleL
 
       <Divider orientation="vertical" flexItem sx={{ my: 0.5 }} />
 
+      {hasDismissedPanes && onRestorePanes && (
+        <Tooltip title="Bring closed windows back">
+          <span>
+            <IconButton size="small" onClick={onRestorePanes} disabled={locked} color="primary">
+              <GridViewOutlinedIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+      )}
+
       <Tooltip title={locked ? 'Unlock layout' : 'Lock layout (prevents accidental changes)'}>
         <IconButton size="small" onClick={onToggleLock} color={locked ? 'primary' : 'default'}>
           {locked ? <LockIcon fontSize="small" /> : <LockOpenOutlinedIcon fontSize="small" />}
         </IconButton>
       </Tooltip>
 
-      <Tooltip title="Reset layout sizes">
+      <Tooltip title="Reset this layout (sizes, closed windows and window types)">
         <span>
           <IconButton size="small" onClick={onResetLayout} disabled={locked}>
             <RestartAltIcon fontSize="small" />
@@ -127,13 +153,13 @@ export function PlayLayoutControls({ layoutId, locked, onSelectLayout, onToggleL
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <Box sx={{ p: 1.25, display: 'flex', flexDirection: 'column', gap: 0.5, width: 240 }}>
+        <Box sx={{ p: 1.25, display: 'flex', flexDirection: 'column', gap: 0.5, width: 260 }}>
           <Typography variant="caption" color="text.secondary" sx={{ px: 0.5, pb: 0.5 }}>
             More layouts
           </Typography>
           {otherLayouts.map((id) => {
             const def = PLAY_LAYOUTS[id];
-            const Icon = LAYOUT_ICONS[def.iconKey];
+            const selected = layoutId === id;
             return (
               <Stack
                 key={id}
@@ -149,12 +175,15 @@ export function PlayLayoutControls({ layoutId, locked, onSelectLayout, onToggleL
                   py: 0.75,
                   borderRadius: 2,
                   cursor: 'pointer',
-                  bgcolor: layoutId === id ? 'action.selected' : 'transparent',
+                  color: selected ? 'primary.main' : 'text.secondary',
+                  bgcolor: selected ? 'action.selected' : 'transparent',
                   '&:hover': { bgcolor: 'action.hover' },
                 }}
               >
-                <Icon fontSize="small" color={layoutId === id ? 'primary' : 'action'} />
-                <Typography variant="body2">{def.label}</Typography>
+                <LayoutGlyph layoutId={id} emptySlots={selected ? closedSlots : undefined} size={20} />
+                <Typography variant="body2" sx={{ color: 'text.primary' }}>
+                  {def.label}
+                </Typography>
               </Stack>
             );
           })}

@@ -34,6 +34,24 @@ export function getTheme(mode: PaletteMode): Theme {
       h6: { fontWeight: 600 },
     },
     components: {
+      MuiCssBaseline: {
+        styleOverrides: {
+          '*': {
+            scrollbarWidth: 'thin',
+            scrollbarColor: `${isDark ? '#625c6d' : '#8a8378'} transparent`,
+          },
+          '*::-webkit-scrollbar': { width: 8, height: 8 },
+          '*::-webkit-scrollbar-track': { background: 'transparent' },
+          '*::-webkit-scrollbar-thumb': {
+            backgroundColor: isDark ? '#625c6d99' : '#8a837899',
+            borderRadius: 999,
+            border: '2px solid transparent',
+            backgroundClip: 'padding-box',
+          },
+          '*::-webkit-scrollbar-thumb:hover': { backgroundColor: isDark ? '#81798e' : '#6f685f' },
+          '*::-webkit-scrollbar-corner': { background: 'transparent' },
+        },
+      },
       MuiCard: {
         styleOverrides: {
           root: {
@@ -57,6 +75,14 @@ export function getTheme(mode: PaletteMode): Theme {
             textTransform: 'none',
             fontWeight: 600,
           },
+        },
+      },
+      MuiSelect: {
+        defaultProps: {
+          // Keep menus anchored inside their dialog/popover. Portaled menus can
+          // appear under the pointer between mouse-down and mouse-up, which made
+          // every other click select an item immediately instead of opening.
+          MenuProps: { disablePortal: true },
         },
       },
       MuiAppBar: {

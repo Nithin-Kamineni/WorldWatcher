@@ -159,11 +159,13 @@ export const ARTICLE_TEMPLATES: Record<ArticleCategory, ArticleTemplate> = {
       {
         label: 'Overview',
         fields: [
+          { key: 'settlementType', label: 'Settlement size / type', type: 'select', options: ['Hamlet', 'Village', 'Town', 'City', 'Metropolis'] },
           { key: 'population', label: 'Population', type: 'number', placeholder: '24000' },
           { key: 'inhabitantDemonym', label: 'Inhabitant demonym', type: 'text', placeholder: 'Silverportian' },
           { key: 'locationUnder', label: 'Location under', type: 'text', placeholder: 'The Sundered Coast' },
           { key: 'rulerOwner', label: 'Ruler / Owner', type: 'text', placeholder: 'The Silver Hand merchant guild' },
           { key: 'government', label: 'Government', type: 'text', placeholder: 'Merchant council' },
+          { key: 'overallTone', label: 'Overall tone', type: 'text', placeholder: 'Welcoming, tense, prosperous…' },
         ],
       },
       {
@@ -241,10 +243,13 @@ export const ARTICLE_TEMPLATES: Record<ArticleCategory, ArticleTemplate> = {
             key: 'buildingType',
             label: 'Type',
             type: 'select',
-            options: ['Tavern', 'Temple', 'Shop', 'Tower', 'Keep', 'Warehouse', 'Other'],
+            options: ['Shop', 'Tavern', 'Inn', 'Noble house', 'Noble mansion', 'Market', 'Landmark', 'Park', 'Hospital', 'Fire station', 'Guard post', 'Funeral house', 'Temple', 'Cathedral', 'Church', 'Barracks', 'Guildhall', 'Library', 'School', 'University', 'Theater', 'Bathhouse', 'Warehouse', 'Mill', 'Forge', 'Prison', 'Courthouse', 'Town hall', 'Embassy', 'Stables', 'Orphanage', 'Watchtower', 'Lighthouse', 'Monastery', 'Casino', 'Other'],
           },
           { key: 'locationUnder', label: 'Location under', type: 'text', placeholder: 'Silverport' },
+          { key: 'country', label: 'Country', type: 'text', placeholder: 'The country containing this city' },
           { key: 'owner', label: 'Owner', type: 'text', placeholder: 'Grum the Fence' },
+          { key: 'floors', label: 'Number of floors', type: 'number', placeholder: '2' },
+          { key: 'scale', label: 'Scale', type: 'text', placeholder: 'Modest neighborhood building' },
           {
             key: 'shopType',
             label: 'Shop type',
@@ -258,6 +263,9 @@ export const ARTICLE_TEMPLATES: Record<ArticleCategory, ArticleTemplate> = {
         label: 'Purpose & features',
         fields: [
           { key: 'purpose', label: 'Purpose', type: 'text', placeholder: 'Fencing stolen goods behind a legitimate front' },
+          { key: 'condition', label: 'Condition', type: 'text', placeholder: 'Weathered but sound' },
+          { key: 'atmosphere', label: 'Atmosphere', type: 'text', placeholder: 'Warm and welcoming' },
+          { key: 'secret', label: 'Secret', type: 'textarea', placeholder: 'What the establishment conceals…' },
           { key: 'notableFeatures', label: 'Notable features', type: 'textarea', placeholder: 'A hidden cellar, a trapdoor behind the bar…' },
         ],
       },
@@ -274,7 +282,11 @@ export const ARTICLE_TEMPLATES: Record<ArticleCategory, ArticleTemplate> = {
         label: 'Overview',
         fields: [
           { key: 'locationUnder', label: 'Location under', type: 'text', placeholder: 'The Sundered Coast' },
+          { key: 'country', label: 'Country', type: 'text', placeholder: 'The realm containing the dungeon' },
           { key: 'origin', label: 'Built / discovered by', type: 'text', placeholder: 'Dwarven miners, later abandoned' },
+          { key: 'dungeonEnvironment', label: 'Environment', type: 'text', placeholder: 'Subterranean, urban, aquatic…' },
+          { key: 'danger', label: 'Danger', type: 'text', placeholder: 'Moderate, deadly, mythic…' },
+          { key: 'dungeonTheme', label: 'Theme', type: 'text', placeholder: 'Horror, mystery, war…' },
           { key: 'purpose', label: 'Purpose', type: 'text', placeholder: 'Treasure vault, tomb, stronghold…' },
         ],
       },
@@ -288,6 +300,8 @@ export const ARTICLE_TEMPLATES: Record<ArticleCategory, ArticleTemplate> = {
       {
         label: 'Inhabitants & features',
         fields: [
+          { key: 'treasure', label: 'Treasure', type: 'textarea', placeholder: 'The prize hidden within…' },
+          { key: 'hook', label: 'Adventure hook', type: 'textarea', placeholder: 'Why adventurers enter now…' },
           { key: 'inhabitants', label: 'Inhabitants', type: 'text', placeholder: 'Kobolds, an ancient guardian construct…' },
           { key: 'notableFeatures', label: 'Notable features', type: 'textarea', placeholder: 'A flooded lower level, a collapsed stair…' },
         ],
@@ -308,6 +322,7 @@ export const ARTICLE_TEMPLATES: Record<ArticleCategory, ArticleTemplate> = {
           { key: 'ruler', label: 'Ruler', type: 'text', placeholder: 'Queen Ashen Vale III' },
           { key: 'capital', label: 'Capital', type: 'text', placeholder: 'Silverport' },
           { key: 'population', label: 'Population', type: 'number', placeholder: '2400000' },
+          { key: 'culture', label: 'Culture', type: 'text', placeholder: 'Cosmopolitan crossroads' },
         ],
       },
       {
@@ -316,6 +331,7 @@ export const ARTICLE_TEMPLATES: Record<ArticleCategory, ArticleTemplate> = {
           { key: 'territories', label: 'Territories / regions', type: 'text', placeholder: 'The Sundered Coast, the Ember Reaches' },
           { key: 'currency', label: 'Currency', type: 'text', placeholder: 'Silver crowns' },
           { key: 'militaryStrength', label: 'Military strength', type: 'text', placeholder: 'A standing navy, city militias' },
+          { key: 'currentConflict', label: 'Current conflict', type: 'textarea', placeholder: 'The crisis shaping the realm now…' },
         ],
       },
     ],

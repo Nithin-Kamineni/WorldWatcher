@@ -1,7 +1,35 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.venv/Scripts/python.exe -m alembic current)"
+      "Bash(.venv/Scripts/python.exe -m alembic current)",
+
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx oxlint *)",
+      "Bash(npm run lint *)",
+      "Bash(npm run build *)",
+
+      "Bash(Server/.venv/Scripts/python.exe -m alembic current)",
+      "Bash(Server/.venv/Scripts/python.exe -m alembic history *)",
+
+      "Bash(psql -h localhost -U postgres -d WorldWatcher_DB -c SELECT *)",
+
+      "Bash(curl -s http://localhost:*)",
+      "Bash(docker compose ps *)",
+      "Bash(docker compose logs *)",
+
+      "Bash(ls *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(find *)",
+      "Bash(sed -n *)",
+      "Bash(grep *)",
+      "Bash(rg *)"
     ]
   }
 }

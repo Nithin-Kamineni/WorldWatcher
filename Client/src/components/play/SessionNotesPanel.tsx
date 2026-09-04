@@ -2,7 +2,6 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
-import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
@@ -14,13 +13,17 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import OpenInNewIcon from '@mui/icons-material/OpenInNewOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import CheckIcon from '@mui/icons-material/Check';
+import { PaneHeader, type PaneCloseProps } from './layout/PaneHeader';
+import type { PaneSlot } from './layout/playLayoutTrees';
 import { EntityRefPreview } from '../notes/EntityRefPreview';
 import { BBCodeEditor } from '../world/BBCodeEditor';
 import { useNoteStore } from '../../store/useNoteStore';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../theme/scrollbarSx';
 import type { Note } from '../../types/note';
 
-interface SessionNotesPanelProps {
+interface SessionNotesPanelProps extends PaneCloseProps {
+  /** Which pane this panel occupies - the header uses it as its drag handle identity. */
+  slot: PaneSlot;
   worldId: string;
   campaignId: string;
   note: Note;
@@ -41,6 +44,7 @@ interface SessionNotesPanelProps {
  * edit" toggle (issues.txt 10.a) for small mid-session touch-ups without leaving Play. Full
  * editing (tags, rename, etc.) still happens in the full Notes editor via "Open in Notes". */
 export function SessionNotesPanel({
+  slot,
   worldId,
   campaignId,
   note,
@@ -48,6 +52,7 @@ export function SessionNotesPanel({
   onSwitchNote,
   onOpenSituationalTable,
   kindSwitcher,
+  ...closeProps
 }: SessionNotesPanelProps) {
   const navigate = useNavigate();
   const updateNote = useNoteStore((s) => s.updateNote);
@@ -70,40 +75,34 @@ export function SessionNotesPanel({
       variant="outlined"
       sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, borderRadius: 1.5, overflow: 'hidden' }}
     >
-      <Stack
-        direction="row"
-        spacing={1}
-        sx={{ alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1.25, borderBottom: 1, borderColor: 'divider', bgcolor: 'action.hover' }}
-      >
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-          {kindSwitcher && (
-            <Box sx={{ display: 'flex', alignItems: 'center', pr: 1, mr: 0.25, borderRight: 1, borderColor: 'divider' }}>{kindSwitcher}</Box>
-          )}
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700 }}>
-              {note.name}
-            </Typography>
-            <Chip label={kindLabel} size="small" variant="outlined" sx={{ height: 18, fontSize: 11 }} />
-          </Box>
-        </Stack>
-        <Stack direction="row" spacing={0.25}>
-          <Tooltip title={editing ? 'Save' : 'Quick edit'}>
-            <IconButton size="small" onClick={editing ? finishEdit : startEdit} color={editing ? 'primary' : 'default'}>
-              {editing ? <CheckIcon fontSize="small" /> : <EditOutlinedIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Switch note">
-            <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)} disabled={editing}>
-              <SwapHorizIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Open in Notes">
-            <IconButton size="small" onClick={() => navigate(`/w/${worldId}/c/${campaignId}/notes/${note.id}`)}>
-              <OpenInNewIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Stack>
+      <PaneHeader
+        slot={slot}
+        leading={kindSwitcher}
+        title={note.name}
+        {...closeProps}
+        actions={
+          <>
+            <Chip label={kindLabel} size="small" variant="outlined" sx={{ height: 19, fontSize: 11, mr: 0.25, flexShrink: 0 }} />
+            <Tooltip title={editing ? 'Save' : 'Quick edit'}>
+              <IconButton size="small" onClick={editing ? finishEdit : startEdit} color={editing ? 'primary' : 'default'}>
+                {editing ? <CheckIcon fontSize="small" /> : <EditOutlinedIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Switch note">
+              <span>
+                <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)} disabled={editing}>
+                  <SwapHorizIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Open in Notes">
+              <IconButton size="small" onClick={() => navigate(`/w/${worldId}/c/${campaignId}/notes/${note.id}`)}>
+                <OpenInNewIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </>
+        }
+      />
 
       <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
         {switchableNotes.length === 0 && <MenuItem disabled>No notes yet</MenuItem>}

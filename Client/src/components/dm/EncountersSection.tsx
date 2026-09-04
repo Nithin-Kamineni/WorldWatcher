@@ -9,41 +9,35 @@ import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
+import TextField from '@mui/material/TextField';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
 import CasinoIcon from '@mui/icons-material/Casino';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ListAltIcon from '@mui/icons-material/ListAlt';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
-import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { EncountersTable } from './EncountersTable';
 import { EncounterFormDialog } from './EncounterFormDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
-import { RandomEncounterTableFormDialog } from './RandomEncounterTableFormDialog';
 import { FilterBar } from './FilterBar';
 import { FilterChipGroup } from './FilterChipGroup';
-import { SituationalTablesView } from './SituationalTablesView';
+import { RandomTablesBrowseView } from './randomTables/RandomTablesBrowseView';
+import { EncounterDetailDialog } from './EncounterDetailDialog';
+import { NpcFormDialog, type NpcRollPrefill } from './NpcFormDialog';
+import { QuickNpcRollDialog } from './npc/QuickNpcRollDialog';
+import { PlaceBuilderDialog, type PlaceType } from '../world/PlaceBuilderDialog';
+import { EncounterBuilderDialog } from './encounter/EncounterBuilderDialog';
 import { useEncounterStore, getEncountersForCampaign } from '../../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatureStore';
-import {
-  useRandomEncounterTableStore,
-  getRandomEncounterTablesForCampaign,
-} from '../../store/useRandomEncounterTableStore';
-import { useSituationalTableStore } from '../../store/useSituationalTableStore';
-import type { Encounter } from '../../types/encounter';
-import type { RandomEncounterTable } from '../../types/randomEncounterTable';
+import { useEncounterDifficultySettingsStore } from '../../store/useEncounterDifficultySettingsStore';
+import type { Encounter, EncounterPrimaryType } from '../../types/encounter';
+import type { Creature } from '../../types/creature';
 
-export type EncounterView = 'menu' | 'management' | 'random_tables' | 'situational_tables';
+export type EncounterView = 'menu' | 'management' | 'random_tables';
 
 interface EncountersSectionProps {
   campaignId: string;
+  worldId?: string;
   /** Optional controlled view - lets a page-level owner (e.g. EncountersPage, via the
    * `?view=` query param) drive which sub-view is shown. Falls back to internal state
    * when omitted. */
@@ -52,9 +46,11 @@ interface EncountersSectionProps {
   /** Deep-link support (e.g. from the Play page's Items window "open in new tab") - opens this
    * encounter's edit dialog once, as soon as it's loaded. */
   openEncounterId?: string;
+  /** Same, for a single random table - opens its roll view in the Random Tables view. */
+  openTableId?: string;
 }
 
-export function EncountersSection({ campaignId, view: controlledView, onViewChange, openEncounterId }: EncountersSectionProps) {
+export function EncountersSection({ campaignId, worldId, view: controlledView, onViewChange, openEncounterId, openTableId }: EncountersSectionProps) {
   const [internalView, setInternalView] = useState<EncounterView>('menu');
   const view = controlledView ?? internalView;
   const setView = (next: EncounterView) => {
@@ -63,33 +59,32 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
   };
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEncounter, setEditingEncounter] = useState<Encounter | undefined>(undefined);
+  const [viewingEncounter, setViewingEncounter] = useState<Encounter | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Encounter | null>(null);
   const [allCampaigns, setAllCampaigns] = useState(false);
+  const [npcBuilderOpen, setNpcBuilderOpen] = useState(false);
+  const [placeBuilderOpen, setPlaceBuilderOpen] = useState(false);
+  const [placeBuilderType, setPlaceBuilderType] = useState<PlaceType | undefined>();
+  const [encounterBuilderOpen, setEncounterBuilderOpen] = useState(false);
+  const [encounterBuilderType, setEncounterBuilderType] = useState<EncounterPrimaryType | undefined>();
+  const [npcFormOpen, setNpcFormOpen] = useState(false);
+  const [npcPrefill, setNpcPrefill] = useState<NpcRollPrefill | undefined>();
+  const [editingNpc, setEditingNpc] = useState<Creature | undefined>();
 
-  const [randomTableDialogOpen, setRandomTableDialogOpen] = useState(false);
-  const [editingRandomTable, setEditingRandomTable] = useState<RandomEncounterTable | undefined>(undefined);
-  const [deleteRandomTableTarget, setDeleteRandomTableTarget] = useState<RandomEncounterTable | null>(null);
+  const party = useEncounterDifficultySettingsStore((s) => s.getParty(campaignId));
+  const setPartySize = useEncounterDifficultySettingsStore((s) => s.setPartySize);
+  const setPartyLevel = useEncounterDifficultySettingsStore((s) => s.setPartyLevel);
 
   const encountersByCampaignId = useEncounterStore((s) => s.encountersByCampaignId);
   const addEncounterToCampaign = useEncounterStore((s) => s.addEncounterToCampaign);
   const updateEncounterInCampaign = useEncounterStore((s) => s.updateEncounterInCampaign);
   const deleteEncounterFromCampaign = useEncounterStore((s) => s.deleteEncounterFromCampaign);
   const fetchEncountersForCampaign = useEncounterStore((s) => s.fetchEncountersForCampaign);
+  const fetchEncounterById = useEncounterStore((s) => s.fetchEncounterById);
   const creaturesByCampaignId = useCreatureStore((s) => s.creaturesByCampaignId);
   const fetchCreaturesForCampaign = useCreatureStore((s) => s.fetchCreaturesForCampaign);
-
-  const tablesByCampaignId = useRandomEncounterTableStore((s) => s.tablesByCampaignId);
-  const addRandomTableAction = useRandomEncounterTableStore((s) => s.addTable);
-  const updateRandomTableAction = useRandomEncounterTableStore((s) => s.updateTable);
-  const deleteRandomTableAction = useRandomEncounterTableStore((s) => s.deleteTable);
-  const fetchTablesForCampaign = useRandomEncounterTableStore((s) => s.fetchTablesForCampaign);
-  const campaignRandomTables = getRandomEncounterTablesForCampaign(tablesByCampaignId, campaignId);
-  const addRandomTable = (table: RandomEncounterTable) => addRandomTableAction(campaignId, table);
-  const updateRandomTable = (table: RandomEncounterTable) => updateRandomTableAction(campaignId, table);
-  const deleteRandomTable = (tableId: string) => deleteRandomTableAction(campaignId, tableId);
-
-  const situationalTables = useSituationalTableStore((s) => s.tables);
-  const fetchSituationalTables = useSituationalTableStore((s) => s.fetchTables);
+  const addCreatureToCampaign = useCreatureStore((s) => s.addCreatureToCampaign);
+  const updateCreatureInCampaign = useCreatureStore((s) => s.updateCreatureInCampaign);
 
   const encounters = getEncountersForCampaign(encountersByCampaignId, campaignId);
   const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
@@ -97,16 +92,7 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
   useEffect(() => {
     fetchCreaturesForCampaign(campaignId);
     fetchEncountersForCampaign(campaignId, allCampaigns ? 'all' : 'own_or_global');
-    fetchTablesForCampaign(campaignId);
-    fetchSituationalTables();
-  }, [
-    campaignId,
-    allCampaigns,
-    fetchCreaturesForCampaign,
-    fetchEncountersForCampaign,
-    fetchTablesForCampaign,
-    fetchSituationalTables,
-  ]);
+  }, [campaignId, allCampaigns, fetchCreaturesForCampaign, fetchEncountersForCampaign]);
 
   const deepLinkedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -168,9 +154,9 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
           <Card onClick={() => setView('random_tables')} sx={{ p: 3, borderRadius: 4 }}>
             <Stack spacing={1.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
               <CasinoIcon sx={{ fontSize: 40 }} color="primary" />
-              <Typography variant="h6">Random Encounters</Typography>
+              <Typography variant="h6">Random Tables</Typography>
               <Typography variant="body2" color="text.secondary">
-                {campaignRandomTables.length} table{campaignRandomTables.length === 1 ? '' : 's'}
+                Roll for encounters, loot, roleplay & exploration prompts
               </Typography>
             </Stack>
           </Card>
@@ -180,21 +166,9 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
           <Card onClick={() => setView('management')} sx={{ p: 3, borderRadius: 4 }}>
             <Stack spacing={1.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
               <ListAltIcon sx={{ fontSize: 40 }} color="primary" />
-              <Typography variant="h6">Encounter Management</Typography>
+              <Typography variant="h6">Encounters</Typography>
               <Typography variant="body2" color="text.secondary">
                 {encounters.length} saved encounter{encounters.length === 1 ? '' : 's'}
-              </Typography>
-            </Stack>
-          </Card>
-        </Paper>
-
-        <Paper elevation={2} sx={{ borderRadius: 4, width: 260 }}>
-          <Card onClick={() => setView('situational_tables')} sx={{ p: 3, borderRadius: 4 }}>
-            <Stack spacing={1.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
-              <TravelExploreIcon sx={{ fontSize: 40 }} color="primary" />
-              <Typography variant="h6">Roleplay & Exploration</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {situationalTables.length} table{situationalTables.length === 1 ? '' : 's'}
               </Typography>
             </Stack>
           </Card>
@@ -205,136 +179,59 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
 
   if (view === 'random_tables') {
     return (
-      <Box>
-        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <IconButton size="small" onClick={() => setView('menu')}>
-              <ArrowBackIcon fontSize="small" />
-            </IconButton>
-            <Typography variant="h5" component="h2">
-              Random Encounters
-            </Typography>
-          </Stack>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => {
-              setEditingRandomTable(undefined);
-              setRandomTableDialogOpen(true);
-            }}
-          >
-            New Table
-          </Button>
-        </Stack>
-
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Group several encounters into a table, then roll a die for it from the map toolbar's
-          "Manage tokens" → Encounters tab to pick one at random.
-        </Typography>
-
-        {campaignRandomTables.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 8, px: 3, borderRadius: 4, border: '1px dashed', borderColor: 'divider' }}>
-            <CasinoIcon sx={{ fontSize: 56, mb: 1, color: 'text.disabled' }} />
-            <Typography variant="h6" sx={{ mb: 0.5 }}>
-              No random encounter tables yet
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Create one to roll for a random encounter on the map.
-            </Typography>
-          </Box>
-        ) : (
-          <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 1.5, overflow: 'hidden' }}>
-            <Table>
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'action.hover' }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Die</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Encounters</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }} align="right">
-                    Actions
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {campaignRandomTables.map((table) => (
-                  <TableRow key={table.id} hover sx={{ '&:last-child td': { borderBottom: 0 } }}>
-                    <TableCell>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                        {table.name}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>{table.dieExpression}</TableCell>
-                    <TableCell>
-                      {table.entries
-                        .map((entry) => encounters.find((e) => e.id === entry.encounterId)?.name ?? 'Unknown')
-                        .join(', ')}
-                    </TableCell>
-                    <TableCell align="right">
-                      <Tooltip title="Edit table">
-                        <IconButton
-                          size="small"
-                          onClick={() => {
-                            setEditingRandomTable(table);
-                            setRandomTableDialogOpen(true);
-                          }}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete table">
-                        <IconButton size="small" onClick={() => setDeleteRandomTableTarget(table)}>
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-
-        <RandomEncounterTableFormDialog
-          open={randomTableDialogOpen}
-          onClose={() => setRandomTableDialogOpen(false)}
-          encounters={encounters}
+      <Box sx={{ width: '100%', height: '100%', minHeight: 0 }}>
+        <RandomTablesBrowseView
           campaignId={campaignId}
-          initialTable={editingRandomTable}
-          onSubmit={(table) => {
-            if (editingRandomTable) updateRandomTable(table);
-            else addRandomTable(table);
-            setRandomTableDialogOpen(false);
-            setEditingRandomTable(undefined);
+          openTableId={openTableId}
+          onBack={() => setView('menu')}
+          onGoToEncounters={() => setView('management')}
+          onOpenEncounter={(id) => { void fetchEncounterById(campaignId, id).then((encounter) => setViewingEncounter(encounter)); }}
+          onOpenNpcBuilder={() => setNpcBuilderOpen(true)}
+          onOpenPlaceBuilder={worldId ? (type) => { setPlaceBuilderType(type); setPlaceBuilderOpen(true); } : undefined}
+          onOpenEncounterBuilder={(type) => { setEncounterBuilderType(type); setEncounterBuilderOpen(true); }}
+        />
+        <EncounterDetailDialog encounter={viewingEncounter} creatures={creatures} campaignId={campaignId} onClose={() => setViewingEncounter(null)} />
+        <QuickNpcRollDialog
+          open={npcBuilderOpen}
+          onClose={() => setNpcBuilderOpen(false)}
+          campaignId={campaignId}
+          onAddToNew={(prefill) => { setEditingNpc(undefined); setNpcPrefill(prefill); setNpcBuilderOpen(false); setNpcFormOpen(true); }}
+          onAddToExisting={(creature, prefill) => { setEditingNpc(creature); setNpcPrefill(prefill); setNpcBuilderOpen(false); setNpcFormOpen(true); }}
+        />
+        {worldId && (
+          <PlaceBuilderDialog
+            open={placeBuilderOpen}
+            worldId={worldId}
+            campaignId={campaignId}
+            initialType={placeBuilderType}
+            onClose={() => setPlaceBuilderOpen(false)}
+            onCreated={() => setPlaceBuilderOpen(false)}
+          />
+        )}
+        <NpcFormDialog
+          open={npcFormOpen}
+          onClose={() => { setNpcFormOpen(false); setNpcPrefill(undefined); setEditingNpc(undefined); }}
+          campaignId={campaignId}
+          worldId={worldId}
+          initialCreature={editingNpc}
+          prefill={npcPrefill}
+          onSubmit={(creature) => {
+            if (editingNpc) updateCreatureInCampaign(campaignId, creature);
+            else addCreatureToCampaign(campaignId, creature);
+            setNpcFormOpen(false);
+            setNpcPrefill(undefined);
+            setEditingNpc(undefined);
           }}
         />
-
-        <ConfirmDeleteDialog
-          open={!!deleteRandomTableTarget}
-          itemName={deleteRandomTableTarget?.name ?? ''}
-          itemType="random encounter table"
-          onCancel={() => setDeleteRandomTableTarget(null)}
-          onConfirm={() => {
-            if (deleteRandomTableTarget) deleteRandomTable(deleteRandomTableTarget.id);
-            setDeleteRandomTableTarget(null);
-          }}
+        <EncounterBuilderDialog
+          open={encounterBuilderOpen}
+          campaignId={campaignId}
+          initialType={encounterBuilderType}
+          partySize={party.partySize}
+          partyLevel={party.partyLevel}
+          onClose={() => setEncounterBuilderOpen(false)}
+          onAdd={(encounter) => { addEncounterToCampaign(campaignId, encounter); setEncounterBuilderOpen(false); setView('management'); }}
         />
-      </Box>
-    );
-  }
-
-  if (view === 'situational_tables') {
-    return (
-      <Box>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 3 }}>
-          <IconButton size="small" onClick={() => setView('menu')}>
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-          <Typography variant="h5" component="h2">
-            Roleplay & Exploration
-          </Typography>
-        </Stack>
-
-        <SituationalTablesView />
       </Box>
     );
   }
@@ -351,6 +248,28 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
           </Typography>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <Tooltip title="Assumed party used to compute each encounter's live difficulty badge">
+            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', mr: 0.5 }}>
+              <TextField
+                size="small"
+                type="number"
+                label="Players"
+                value={party.partySize}
+                onChange={(e) => setPartySize(campaignId, Number(e.target.value) || 1)}
+                slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                sx={{ width: 88 }}
+              />
+              <TextField
+                size="small"
+                type="number"
+                label="Level"
+                value={party.partyLevel}
+                onChange={(e) => setPartyLevel(campaignId, Number(e.target.value) || 1)}
+                slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                sx={{ width: 88 }}
+              />
+            </Stack>
+          </Tooltip>
           <Tooltip title="This campaign's own encounters and the shared reference library (imported random-encounter tables) are always shown. Turn this on to also include every other campaign's encounters.">
             <FormControlLabel
               sx={{ mr: 0.5 }}
@@ -363,6 +282,8 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
               <SearchIcon />
             </IconButton>
           </Tooltip>
+          <Button variant="outlined" startIcon={<CasinoIcon />} onClick={() => setView('random_tables')}>Random Tables</Button>
+          <Button variant="outlined" startIcon={<AutoAwesomeIcon />} onClick={() => { setEncounterBuilderType(undefined); setEncounterBuilderOpen(true); }}>Generate Encounter</Button>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
@@ -432,17 +353,29 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
         <EncountersTable
           encounters={filteredEncounters}
           creatures={creatures}
+          partySize={party.partySize}
+          partyLevel={party.partyLevel}
           onEdit={(encounter) => {
             setEditingEncounter(encounter);
             setDialogOpen(true);
           }}
           onDelete={(encounter) => setDeleteTarget(encounter)}
+          onView={setViewingEncounter}
         />
       )}
+
+      <EncounterDetailDialog
+        encounter={viewingEncounter}
+        creatures={creatures}
+        campaignId={campaignId}
+        onClose={() => setViewingEncounter(null)}
+        onEdit={(encounter) => { setViewingEncounter(null); setEditingEncounter(encounter); setDialogOpen(true); }}
+      />
 
       <EncounterFormDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
+        campaignId={campaignId}
         creatures={creatures}
         initialEncounter={editingEncounter}
         onSubmit={(encounter) => {
@@ -451,6 +384,16 @@ export function EncountersSection({ campaignId, view: controlledView, onViewChan
           setDialogOpen(false);
           setEditingEncounter(undefined);
         }}
+      />
+
+      <EncounterBuilderDialog
+        open={encounterBuilderOpen}
+        campaignId={campaignId}
+        initialType={encounterBuilderType}
+        partySize={party.partySize}
+        partyLevel={party.partyLevel}
+        onClose={() => setEncounterBuilderOpen(false)}
+        onAdd={(encounter) => { addEncounterToCampaign(campaignId, encounter); setEncounterBuilderOpen(false); }}
       />
 
       <ConfirmDeleteDialog

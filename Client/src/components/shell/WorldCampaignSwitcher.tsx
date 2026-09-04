@@ -68,7 +68,7 @@ export function WorldBrand({ worldId }: WorldBrandProps) {
             component="img"
             src={world?.imageSrc || DEFAULT_WORLD_LOGO}
             alt=""
-            sx={{ width: 26, height: 26, borderRadius: 0.75, objectFit: 'cover', flexShrink: 0 }}
+            sx={{ width: 30, height: 30, borderRadius: 0.85, objectFit: 'cover', flexShrink: 0 }}
           />
           <Typography
             variant="subtitle2"

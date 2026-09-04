@@ -25,6 +25,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { WorldBrand, CampaignSwitcher } from './WorldCampaignSwitcher';
 import { NameDescriptionDialog } from './NameDescriptionDialog';
 import { PlayLayoutControls } from '../play/layout/PlayLayoutControls';
+import type { PaneSlot } from '../play/layout/playLayoutTrees';
 import { useThemeMode } from '../../theme/ThemeModeContext';
 import { useTutorialStore } from '../../store/useTutorialStore';
 import { useShellStore } from '../../store/useShellStore';
@@ -61,9 +62,20 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
   const setLayout = usePlayLayoutStore((s) => s.setLayout);
   const toggleLock = usePlayLayoutStore((s) => s.toggleLock);
   const resetLayout = usePlayLayoutStore((s) => s.resetLayout);
+  const restoreDismissedPanes = usePlayLayoutStore((s) => s.restoreDismissedPanes);
 
   const inPlaySession = !!campaignId && location.pathname.endsWith('/play') && !!getPlayState(playByCampaignId, campaignId).sessionNoteId;
   const layoutState = campaignId ? getPlayLayoutState(layoutByCampaignId, campaignId) : null;
+
+  // Which panes the DM has closed in the layout that is actually on screen - the layout
+  // buttons draw those slots hollow, so the toolbar shows the arrangement rather than just the
+  // layout name (see LayoutGlyph).
+  const activeAssignment = layoutState ? (layoutState.windowAssignment[layoutState.layoutId] ?? {}) : {};
+  const activeDismissed = layoutState ? (layoutState.dismissedPanes[layoutState.layoutId] ?? {}) : {};
+  const closedSlots = (Object.keys(activeAssignment) as PaneSlot[]).filter(
+    (slot) => activeAssignment[slot] === 'empty' || activeDismissed[slot],
+  );
+  const hasDismissedPanes = Object.values(activeDismissed).some(Boolean);
 
   const [newMenuAnchor, setNewMenuAnchor] = useState<HTMLElement | null>(null);
   const [runMenuAnchor, setRunMenuAnchor] = useState<HTMLElement | null>(null);
@@ -88,9 +100,9 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
               <WorldBrand worldId={worldId} />
             ) : (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box component="img" src="/app-icon.png" alt="" sx={{ width: 26, height: 26, borderRadius: 1, objectFit: 'cover' }} />
+                <Box component="img" src="/app-icon.png" alt="" sx={{ width: 58, height: 58, borderRadius: 1.25, objectFit: 'cover' }} />
                 <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  WorldWatcher
+                  World Watcher
                 </Typography>
               </Box>
             )}
@@ -146,9 +158,12 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
               <PlayLayoutControls
                 layoutId={layoutState.layoutId}
                 locked={layoutState.locked}
+                closedSlots={closedSlots}
+                hasDismissedPanes={hasDismissedPanes}
                 onSelectLayout={(id) => setLayout(campaignId, id)}
                 onToggleLock={() => toggleLock(campaignId)}
                 onResetLayout={() => resetLayout(campaignId)}
+                onRestorePanes={() => restoreDismissedPanes(campaignId, layoutState.layoutId)}
               />
             </>
           ) : (

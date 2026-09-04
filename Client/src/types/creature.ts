@@ -120,6 +120,7 @@ export interface Creature {
   category: CreatureCategory;
   tokenImage: string;
   name: string;
+  edition?: string | null;
   /** npc-only: relation/importance/profession/roleplay fields don't apply to vanilla monster-manual stat blocks */
   relation: CreatureRelation;
   importance: CreatureImportance;

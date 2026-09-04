@@ -11,6 +11,7 @@ import Divider from '@mui/material/Divider';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ToggleButton from '@mui/material/ToggleButton';
 import Stack from '@mui/material/Stack';
+import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
@@ -21,6 +22,8 @@ import PersonIcon from '@mui/icons-material/Person';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import TableRowsIcon from '@mui/icons-material/TableRows';
 import AddIcon from '@mui/icons-material/Add';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import CasinoIcon from '@mui/icons-material/Casino';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -37,6 +40,7 @@ import { FilterChipGroup } from '../../components/dm/FilterChipGroup';
 import { ArticleFolderTree } from '../../components/world/ArticleFolderTree';
 import { ArticleGridStage, type ArticleGridStageHandle } from '../../components/world/ArticleGridStage';
 import { ArticleTable } from '../../components/world/ArticleTable';
+import { PlaceBuilderDialog, type PlaceType } from '../../components/world/PlaceBuilderDialog';
 import { getArticleCategoryIcon } from '../../components/world/articleIcons';
 import { useWorldStore, getWorldById, getPrimaryCampaignForWorld } from '../../store/useWorldStore';
 import { useCampaignStore, getCampaignById } from '../../store/useCampaignStore';
@@ -149,6 +153,7 @@ export function WorldManagerPage() {
   const [articleSearch, setArticleSearch] = useState('');
   const [articleCategoryFilter, setArticleCategoryFilter] = useState<ArticleCategory[]>([]);
   const [articleFilterBarOpen, setArticleFilterBarOpen] = useState(false);
+  const [placeBuilderOpen, setPlaceBuilderOpen] = useState(false);
   const gridRef = useRef<ArticleGridStageHandle>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
     const owner = FOLDER_TREE.find((g) => g.headingKey === folder || g.items.some((i) => i.key === folder));
@@ -389,6 +394,49 @@ export function WorldManagerPage() {
 
       {folder === 'articles' || isCategoryScopedView ? (
         <>
+          {isCategoryScopedView && (
+            <Paper
+              variant="outlined"
+              onClick={() => setPlaceBuilderOpen(true)}
+              sx={{
+                p: 2,
+                mb: 2,
+                borderRadius: 3,
+                cursor: 'pointer',
+                borderColor: 'primary.main',
+                background: (theme) => `linear-gradient(135deg, ${theme.palette.primary.main}20, ${theme.palette.background.paper} 68%)`,
+                transition: '150ms',
+                '&:hover': { boxShadow: 4, transform: 'translateY(-1px)' },
+              }}
+            >
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.75} sx={{ alignItems: { sm: 'center' } }}>
+                <Box sx={{ width: 48, height: 48, borderRadius: 2.5, bgcolor: 'primary.main', color: 'primary.contrastText', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                  <AutoAwesomeIcon />
+                </Box>
+                <Box sx={{ flexGrow: 1 }}>
+                  <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 850 }}>Place Builder</Typography>
+                    <Chip size="small" color="primary" label="Multi-table" />
+                    <Chip size="small" variant="outlined" label="Recommended" />
+                    {singleScopedCategory && <Chip size="small" variant="outlined" label={`${ARTICLE_TEMPLATES[singleScopedCategory].label} selected`} />}
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary">
+                    {singleScopedCategory
+                      ? `Guide and roll a complete ${ARTICLE_TEMPLATES[singleScopedCategory].label.toLowerCase()}, then save it as an article.`
+                      : 'Choose a Country, Settlement, Building, or Dungeon; guide its taxonomy and roll every detail independently.'}
+                  </Typography>
+                </Box>
+                <Button
+                  variant="contained"
+                  startIcon={<CasinoIcon />}
+                  onClick={(event) => { event.stopPropagation(); setPlaceBuilderOpen(true); }}
+                  sx={{ flexShrink: 0 }}
+                >
+                  Build place
+                </Button>
+              </Stack>
+            </Paper>
+          )}
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: articleFilterBarOpen ? 1 : 2, flexWrap: 'wrap', rowGap: 1 }}>
             <Button
               variant="contained"
@@ -469,6 +517,17 @@ export function WorldManagerPage() {
           ) : (
             <ArticleTable articles={tableArticles} folders={worldFolders} onOpen={(id) => navigate(entryHref(id))} />
           )}
+          <PlaceBuilderDialog
+            open={placeBuilderOpen}
+            worldId={worldId!}
+            campaignId={primaryCampaign?.id}
+            initialType={singleScopedCategory as PlaceType | undefined}
+            onClose={() => setPlaceBuilderOpen(false)}
+            onCreated={(article) => {
+              setPlaceBuilderOpen(false);
+              navigate(entryHref(article.id));
+            }}
+          />
         </>
       ) : !primaryCampaign && (folder === 'npcs' || folder === 'factions' || folder === 'places-bastions') ? (
         <ComingSoon

@@ -32,6 +32,12 @@ interface SpellStoreState {
   spellBrowse: SpellBrowseResult | null;
   spellBrowseLoading: boolean;
   fetchSpellBrowse: (params: SpellBrowseParams) => Promise<void>;
+
+  /** Spells resolved one at a time by id, independent of any list/browse query - lets a
+   * surface that only knows an id (an @-mention click, a pinned row) render it even when no
+   * loaded page happens to contain it. Mirrors useCreatureStore's creaturesById. */
+  spellsById: Record<string, Spell>;
+  fetchSpellById: (id: string) => Promise<Spell | undefined>;
 }
 
 let browseRequestId = 0;
@@ -127,6 +133,21 @@ export const useSpellStore = create<SpellStoreState>((set, get) => ({
       if (requestId !== browseRequestId) return;
       console.error('Failed to load spells page', err);
       set({ spellBrowseLoading: false });
+    }
+  },
+
+  spellsById: {},
+
+  fetchSpellById: async (id) => {
+    const cached = get().spellsById[id];
+    if (cached) return cached;
+    try {
+      const spell = apiSpellToSpell(await spellsApi.getSpell(id));
+      set((state) => ({ spellsById: { ...state.spellsById, [id]: spell } }));
+      return spell;
+    } catch (err) {
+      console.error(`Failed to load spell ${id}`, err);
+      return undefined;
     }
   },
 }));

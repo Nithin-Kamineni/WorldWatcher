@@ -1,0 +1,681 @@
+=====================================================================
+WORLDWATCHER - CONSOLIDATED REQUIREMENTS CHECKLIST
+=====================================================================
+Consolidated 2026-09-03 from the nine tracking files that used to live in
+this repo, all of which were deleted after this file was written:
+
+  repo root:
+  issues.txt              - Play panel redesign request (source spec)
+  issues2.txt             - progress report written against issues.txt
+  encouters-tables.txt    - Random Tables + Encounters build prompt (spec)
+  progress.txt            - prose summary of the tables/encounters overhaul
+  progress2.txt           - task-by-task status of encouters-tables.txt
+
+  Client/:
+  Progress.txt            - 732-line running build summary, rounds 1-9
+  Progress copy.txt       - 91-line Map page snapshot (2026-08-14)
+  To-Do.txt               - the original 8-line product goals
+  TODo2.txt               - the DB architecture / 5etools import spec
+
+This file is the single source of truth for WHAT IS STILL OPEN.
+
+2026-09-03 (later): every item marked done was REMOVED from this file, on
+request, so it reads as a backlog rather than a history. What that means
+in practice:
+
+  - Parts A-D now hold only their ⚠️ and ❌ items. The full original
+    requirement text - including the ~230 finished items and their
+    "Impl:" notes - is in this file's git history (see the version of
+    checklist.txt in the commit before this one).
+  - Source comments citing numbers like "issues.txt 10.c.3a" or
+    "Task 4.3.7" therefore no longer resolve to a line in this file when
+    the item was finished. Look them up in git history instead.
+  - Parts C and D were entirely finished and are gone.
+
+LEGEND
+  ✅  done      - implemented and verified against the code
+  ⚠️  partial   - works, but does not fully meet the stated requirement
+  ❌  not done  - missing, or regressed since it was last reported done
+  🈶  moot      - the app deliberately went a different way; building this
+                  now would undo that direction rather than add to it
+
+Status marks were verified against the actual code on 2026-09-03 rather
+than copied from the old progress files. Where the old files disagree
+with the code, the code wins and the difference is called out on a
+"VERIFIED:" line.
+
+2026-09-03 (re-verification pass): Parts A, B and E were re-checked
+against the working tree, mid-refactor. Lines beginning "RE-VERIFIED:"
+record what changed since the marks above were set. Four items moved:
+one to ✅ (free-form encounter fields), one to 🈶 (chats as folder rows),
+and two narrowed (custom formats done, only generator cloning left).
+
+2026-09-03 (later): the "visual-polish pass against the reference
+screenshots" items were DELETED, not marked - A2.10.2, E1, P6 and the
+Part A scope note about them. They traced back to the mockups in
+"Prompt Images/", which are old app-shell renders that the app has
+since implemented in an enhanced form. Polishing the Play windows
+toward that art would now move the UI backwards. Nothing replaces
+them; U1 (header/toolbar scale consistent app-wide) is the surviving
+item in that area and stands on its own evidence.
+
+
+#####################################################################
+PART A - PLAY PANEL REDESIGN   (source: issues.txt)
+#####################################################################
+
+--- A2.10. THE WINDOWS THEMSELVES -----------------------------------
+
+🈶    .b.3   Chats must be saved in the folders section inside the
+             session folder, and be viewable/editable there.
+             STATUS: implemented as an "Attached chats" section on the
+             session-prep note's own page (NoteDetailPage.tsx), with
+             inline rename and a "Run" shortcut into Play. NOT
+             implemented as literal sibling rows inside
+             NotesFolderExplorer's own folder browser - that component
+             renders purely from Note/NoteFolder arrays, and SessionChat
+             rows have no folderId of their own (only a noteId), so
+             teaching it to render them touches a large shared component
+             used across all of Notes.
+             RE-VERIFIED 2026-09-03: NotesFolderExplorer.tsx contains no
+             reference to chats at all, and SessionChat still has only
+             note_id (Server/app/models/session_chat.py:30) - no
+             folder_id. The app committed to the other model: a chat
+             belongs to a NOTE, not to a folder, which is what makes the
+             "Attached chats" section and the Run shortcut work.
+             -> RECLASSIFIED 🈶. Giving SessionChat its own folder_id now
+             would create a second, competing ownership path for the same
+             row and force NotesFolderExplorer to render a heterogeneous
+             list. The requirement's INTENT - chats findable and editable
+             from the session's folder - is already met one click in.
+
+--- A3. PART A SCOPE NOTES (carried over) ---------------------------
+
+- Part A was implemented Client-only: new Zustand stores with all UI
+  state localStorage-persisted, and no backend or DB changes, consistent
+  with issues.txt not asking for schema changes.
+- Verification done at the time: `npx tsc --noEmit` clean and
+  `npx oxlint src` clean across the whole Client project after every
+  phase. Full click-through verification of every layout and interaction
+  in a browser was NEVER done and is still outstanding.
+
+
+#####################################################################
+PART B - RANDOM TABLES + ENCOUNTERS SUBSYSTEM
+        (source: encouters-tables.txt, status from progress2.txt)
+#####################################################################
+
+--- B0. ORIGINAL FRAMING --------------------------------------------
+
+The Encounters page used to hold four overlapping sections - random
+encounters, encounter management, roleplay and exploration - where
+"encounter management" and "random encounters" did more or less the same
+thing. The whole thing was to be restructured: a RANDOM TABLE is the
+rollable container, and ENCOUNTERS are the items inside it (the old
+model had it backwards, with random tables holding multiple encounters).
+Existing data had to be migrated afterwards into the new structure with
+correct formats, correct placement and reasonable tags. The roleplay and
+exploration sections were rehauled by the same changes.
+
+STACK CONTEXT (respect what exists - never rebuild or duplicate it):
+React + Konva + Vite + TypeScript + Zustand frontend; FastAPI +
+PostgreSQL backend. The app already has creature/monster stat blocks,
+spells and magic items (D&D Beyond + 5e SRD, with CR/HP/type), an
+initiative + combat tracker (HP/conditions), a faction relationship
+graph, an NPC generator and NPC records, a quest tracker, and maps with
+fog of war. Combat encounters must LINK to existing creature stat-block
+rows, social encounters to existing NPC rows, treasure tables to
+existing magic-item rows - storing only encounter-specific metadata
+(quantity, role, attitude) on the join rows, so a stat-block edit
+propagates everywhere.
+
+CORE DESIGN PHILOSOPHY - a random table is described along THREE
+INDEPENDENT dimensions, kept as three separate fields, never collapsed:
+  1. CATEGORY - what the table is ABOUT. Exactly ONE per table. A node
+     in a browsable tree.
+  2. TAGS - cross-cutting facets for search/filter (environment, tier,
+     theme, source book). MANY per table.
+  3. FORMAT - how the table is STRUCTURED and rolled. Exactly ONE.
+Example: a forest tier-1 wandering-monster table has
+category = Encounters > Combat, tags = [env:forest, tier:1,
+pillar:combat, phase:travel], format = lookup (or scene_generator).
+Environment and tier are TAGS, never categories - category nodes per
+environment or tier make the tree explode combinatorially.
+
+--- B11. TASK 11 - CROSS-CUTTING INTEGRATION (the weak spot) --------
+
+⚠️  11.1    Every *_ref in tables and every entity-naming encounter
+            field must resolve to the existing creature/NPC/spell/item
+            records, with hydration endpoints provided.
+            STATUS: hydration endpoints exist and most fields are
+            reference-backed, but NOT every entity-naming field is yet
+            reference-backed or hydrated.
+            RE-VERIFIED 2026-09-03: hydration is real but LOCAL to random
+            tables - _hydrate_ref lives in random_tables.py:353 and is
+            called only from that router. Concrete confirmed gap, the
+            clearest one to act on first: EncounterReward is
+            `{ kind; description; quantity }` (Client/src/types/
+            encounter.ts:185) - a reward of kind 'item' names a magic
+            item in FREE TEXT with no FK, which is exactly the
+            "reference, never duplicate" rule being broken. By contrast
+            the exploration blocks ARE reference-backed (trap/hazard
+            carry damageType + conditionIds).
+            -> STILL OPEN: start with rewards -> magic_items FK.
+
+⚠️  11.2    Encounters must be referenceable FROM random tables
+            (reference / set-piece formats) AND random tables/generators
+            must be referenceable FROM encounters (e.g. an exploration
+            "wandering monster" complication rolling a table).
+            STATUS: tables -> encounters works fully. The reverse
+            direction is only partly there.
+            VERIFIED: encounters DO now carry wandering_table_id, an FK
+            to random_tables (Server/app/models/encounters.py:172), so
+            the exploration wandering-monster hook specifically works.
+            What is still missing is the general case - encounters
+            cannot reference generators, or tables in other contexts.
+            RE-VERIFIED 2026-09-03: unchanged. wandering_table_id
+            (encounters.py:172) is STILL the only encounter -> table FK
+            in the model; there is no generator_id anywhere on encounters.
+            -> STILL OPEN, but further along than progress2.txt claimed.
+
+⚠️  11.3    One browse/search screen unifying CATEGORY (tree) + TAGS
+            (facets) + FORMAT filters + full-text, for BOTH random
+            tables and encounters.
+            STATUS: random tables have the full unified graph/tag/
+            format/text browse. Encounters are still browsed separately.
+            VERIFIED: the backend for unified encounter browsing now
+            EXISTS - Encounter carries category_id and tags, there is an
+            encounter_tag join, and the encounters list endpoint already
+            accepts q, category_id and tag_ids (ANY-match)
+            (Server/app/api/routers/encounters.py:78-106). So the
+            remaining work is front-end only: EncountersSection still
+            renders encounters in their own view instead of through the
+            same unified browser as random tables.
+            RE-VERIFIED 2026-09-03: confirmed, and the shape of the work
+            is now clear. EncountersSection.tsx has a hard three-way view
+            switch - EncounterView = 'menu' | 'management' |
+            'random_tables' - and imports RandomTablesBrowseView for the
+            third one only; the file contains no category / tag / format
+            filtering of its own. The client API module has
+            replaceEncounterTags but listEncounters is a bare
+            QueryParams passthrough with no browse UI feeding it.
+            -> STILL OPEN, and now mostly a UI task rather than a
+            backend one: the job is to make RandomTablesBrowseView (or a
+            shared extraction of it) serve both entity kinds.
+
+⚠️  11.4    Respect user vs system content everywhere (is_system):
+            curated seed data read-only-ish, users can clone-to-edit and
+            freely add categories, tags, formats, tables, generators and
+            encounters.
+            STATUS: system/user rules exist for most content, but custom
+            formats and full generator clone-to-edit do not.
+            RE-VERIFIED 2026-09-03: HALF OF THIS IS NOW DONE. Custom
+            formats exist end to end - table_formats.py has GET/POST/
+            PATCH/DELETE and the client has the matching resource module
+            (Client/src/api/resources/tableFormats.ts, all four verbs).
+            Random tables have clone-to-edit
+            (random_tables.py:314, which explicitly sets is_system=False
+            on the clone) and generators DO enforce the read-only rule
+            (generators.py:113,137 guard PATCH and DELETE on is_system).
+            What is missing is only the escape hatch: generators.py has
+            no /clone route, so a curated generator is read-only with no
+            way to fork it.
+            -> STILL OPEN, but narrowed to ONE endpoint + its button.
+
+--- B12. PART B DATA MIGRATION + REBUILD OUTCOMES -------------------
+
+⚠️  All old, now-unused code deleted rather than left as dead weight.
+    STATUS: the client side was cleaned up (the old random-table dialog,
+    the old roleplay-tables page and their data stores are gone).
+    VERIFIED: the BACKEND still carries the old subsystems -
+    Server/app/models/situational_table.py, and the routers
+    situational_tables.py and random_encounter_tables.py are all still
+    present and registered.
+    RE-VERIFIED 2026-09-03: unchanged - all three files still exist and
+    both routers are still included (api/router.py:73-74).
+    IMPORTANT NUANCE FOUND: the STRING 'situational_table' is still very
+    much alive on the client, but as a legacy ALIAS for random tables,
+    not as a use of the dead backend - useMentionableEntities.ts:71 maps
+    randomTables to type 'situational_table', and bbcode.ts:107 bakes
+    that literal into the EntityRefType union and the stored [ref]
+    markup. So the backend removal is safe, but do NOT rename that
+    literal as part of it: it is persisted inside users' note bodies.
+    -> STILL OPEN: decide whether those are still needed and, if not,
+    remove them along with their models/schemas and migration remnants.
+
+VERIFICATION PERFORMED AT THE TIME
+❌  PRE-EXISTING UNRELATED ISSUE, still outstanding: the project's
+    strict type-check step (not the actual app build) already had about
+    a dozen errors before the tables/encounters work began, caused by a
+    library-version mismatch elsewhere in the app - map popovers, the
+    notes folder tree, and the world pages. Confirmed unrelated to that
+    work and deliberately left alone, but it is worth a separate cleanup
+    pass.
+    RE-VERIFIED 2026-09-03: `npx tsc -b` now reports 21 errors in 13
+    files, not 18 in 11. THREE OF THEM ARE NEW AND ARE NOT THE LIBRARY
+    MISMATCH - EmptyPaneWindow.tsx:29 (x2) and PaneWindow.tsx:85: the
+    caller passes a `locked` prop that EmptyPaneWindowProps does not
+    declare. That is a real defect in the current Play-layout work and
+    should be fixed on its own, not filed under this cleanup item. The
+    other 18 are the same MUI v9 / Konva mismatch as before.
+
+
+#####################################################################
+PART E - EVERYTHING STILL OPEN, IN ONE PLACE
+#####################################################################
+Extracted from the ⚠️ and ❌ marks in Parts A-D, roughly highest value
+first. These are the items for the two big feature efforts, and they
+were each verified against the code on 2026-09-03.
+
+RE-VERIFIED 2026-09-03. Current tally of this list:
+  ✅ done      E11
+  ⚠️ partial   E6, E7, E8, E12
+  ❌ not done  E4, E5, E9, E13
+  🈶 moot      E10
+WHERE TO SPEND EFFORT, in order:
+  1. The 3 NEW type errors called out under E9 - a live defect in the
+     Play-layout code you are mid-refactor on, and the cheapest fix here.
+  2. E8 - one clone endpoint on generators closes all of 11.4.
+  3. E6 - reward -> magic item FK; a named, bounded instance of the
+     codebase's core "reference, never duplicate" rule being violated.
+  4. E4 - the biggest genuine feature left, and now UI-only.
+  5. E5 - pure deletion, no design needed (mind the alias caveat).
+  6. E13 - needs a layout decision from you before any code.
+
+Parts F and G carry a second, older backlog (map, notes, articles,
+shell, randomizers, original product goals) inherited from the Client/
+tracking files. Those were NOT re-verified, so they are kept separate
+rather than merged in here - see the note at the top of Part F.
+
+❌  E4  Unified encounter browsing in the UI (11.3). The backend already
+        supports q + category_id + tag_ids; only the front end still
+        keeps encounters on a separate view.
+        RE-VERIFIED: EncountersSection still hard-switches between
+        'management' and 'random_tables' views and does no category/tag/
+        format filtering of its own.
+
+❌  E5  Remove the dead backend for the old subsystems - the
+        situational_table model plus the situational_tables and
+        random_encounter_tables routers - or document why they stay
+        (B12).
+        RE-VERIFIED: all three files present, both routers still included
+        at api/router.py:73-74. CAVEAT: keep the 'situational_table'
+        STRING - it is a live alias for random tables in mentions and is
+        persisted in stored [ref] BBCode.
+
+⚠️  E6  Audit remaining free-text entity-naming fields and make them
+        reference-backed + hydrated (11.1).
+        RE-VERIFIED: partly done - exploration blocks are reference-backed,
+        but EncounterReward still names magic items in free text. Start there.
+
+⚠️  E7  Let encounters reference generators, and tables from contexts
+        beyond the wandering-monster hook (11.2).
+        RE-VERIFIED: wandering_table_id is still the only such FK; no
+        generator_id on encounters at all.
+
+⚠️  E8  Custom formats and full generator clone-to-edit under the
+        is_system user/system rules (11.4).
+        RE-VERIFIED: custom formats are DONE (table_formats CRUD + client
+        resource module). Only the generator /clone route is missing -
+        curated generators are guarded read-only with no way to fork.
+
+❌  E9  Fix the ~dozen pre-existing strict type-check errors from the
+        library-version mismatch in map popovers, the notes folder tree
+        and the world pages (Part B verification note).
+        RE-VERIFIED: now 21 errors in 13 files. 18 are the known
+        mismatch; 3 are NEW and unrelated to it - EmptyPaneWindow.tsx:29
+        (x2) and PaneWindow.tsx:85 pass/expect a `locked` prop that
+        EmptyPaneWindowProps never declares. Fix those 3 FIRST and
+        separately: they are a real bug in current Play-layout work.
+
+🈶  E10 Session chats as literal sibling rows inside
+        NotesFolderExplorer's folder browser (A2.10.3b.3).
+        RECLASSIFIED: the app settled on chat-belongs-to-NOTE (SessionChat
+        has note_id only). Adding folder_id now would introduce a second,
+        competing ownership path for the same row and undo that model.
+        The intent - chats findable and editable from the session - is
+        already met via the note page's "Attached chats" section.
+
+✅  E11 Replace the text/JSON boxes on the free-form encounter fields
+        (rewards, some exploration sub-details) with real mini-forms.
+        DONE. Rewards are a typed repeating row; trap/hazard/puzzle/
+        skillChallenge/navigation/sensoryClues all have typed editors.
+        No JSON boxes remain in EncounterFormDialog. (The reward->magic
+        item FK gap is tracked under E6, not here.)
+
+⚠️  E12 Manual browser click-through of every Play layout and
+        interaction.
+        2026-09-03: the Items window's four sub-windows were driven in a
+        real browser (Playwright) - tab open/close, the counted
+        random-table search (including a misspelling), selecting and
+        rolling a table, logging a roll to the session chat (verified
+        persisted through /api/session-chats), opening the Place
+        Builder, and an NPC mention clicked out of the session note
+        landing expanded in Stats.
+        2026-09-03 (later): the layout tree itself was finally
+        exercised - all six layout glyphs verified to draw as many panes
+        as their layout actually has, closing a pane to an empty
+        placeholder, "give space back" collapsing a two-pane layout to
+        one full-width pane, "bring closed windows back", reset, a
+        header drag-and-drop swap (snap tint shown, swap committed to
+        the store), the quad layout with two Items windows verified
+        independent (different currentByKind values per slot), a
+        creature stat card opened from an encounter roster, and a rolled
+        table climbing from row 6 to row 1 of the browse list.
+        -> STILL OPEN, but much narrower: divider resizing by drag,
+        chat-pane collapse, the triple-half layout, and the whole page
+        under a locked layout are all still unexercised. Pane
+        drag-and-drop was verified by dispatching synthetic DragEvents
+        (Playwright cannot drive native HTML5 drag), so the real mouse
+        path has still never been used.
+
+❌  E13 Clicking a map token or an initiative-tracker entry cannot open
+        that creature in the Items window. Asked for 2026-09-03 and NOT
+        built: the map and the initiative panel live on MapPage, a
+        separate route from PlayPage, so there is no Items window on
+        screen to open into. Needs either a 'map' pane kind in the Play
+        workspace (playLayoutTrees/PaneWindow/usePlayLayoutStore) or the
+        Items window rendered as a MapPage sidebar - a layout decision,
+        not a wiring one.
+
+
+#####################################################################
+PART I - UI REFINEMENT BACKLOG
+#####################################################################
+Deliberately sits next to Part E: both are live backlogs. Part E is the
+tail of the two big feature efforts; this part is the UI-quality work
+that came out of the 2026-09-03 Play-page refinement round - what that
+round did NOT do, plus the same class of problem elsewhere in the app.
+
+Context for the P-series. The Play page now has: pane-accurate layout
+icons drawn from the layout trees themselves (LayoutGlyph.tsx), one
+40px pane header everywhere (PaneHeader.tsx), closable panes that leave
+a droppable empty placeholder (EmptyPaneWindow.tsx) or hand their space
+back to their neighbours, header drag-and-drop pane swapping with a snap
+tint (paneDrag.tsx / PaneDropZone.tsx), Items state keyed per pane slot
+so two Items windows are independent, and usefulness-ranked random-table
+search and browse (tableSearch.ts + useTableUsageStore.ts).
+
+--- I-P. PLAY PAGE --------------------------------------------------
+
+❌  P1  Pane drag-and-drop only SWAPS two panes. Dropping on a pane's
+        edge to split it, or dropping to create a new row/column, is not
+        supported - so the reachable arrangements are still the 6 static
+        trees in playLayoutTrees.ts, minus whatever is closed. A DM who
+        wants "three panes, the middle one narrow and split top/bottom"
+        still cannot build it.
+
+❌  P2  Pane rearranging is mouse-only. It uses native HTML5 drag, so
+        there is no keyboard path to move or swap a window and no
+        pointer-event fallback for touch. This is also why it cannot be
+        driven by Playwright's real mouse (see E12).
+
+❌  P3  A sub-tab can only be reordered within its own Items window.
+        Dragging a sub-tab into the OTHER Items window, or tearing one
+        off into its own pane, is not supported - which is the natural
+        next thing to try once two Items windows exist.
+
+❌  P4  Closing a pane leaves an empty placeholder, but nothing
+        remembers what used to be in it. "Bring closed windows back"
+        restores the SPACE, not the window kind that was there; the DM
+        has to pick the kind again.
+
+❌  P5  Still only three window kinds (Session Notes / DM Notes /
+        Items). A 'map' kind and an 'initiative tracker' kind are what
+        E13 actually needs, and are the obvious way to make Play the
+        single command centre instead of one of three routes a DM keeps
+        switching between mid-session.
+
+❌  P7  Per-slot Items state is never garbage-collected. Pins, opened
+        rows and expanded rows persist per pane slot in localStorage
+        forever, including slots belonging to layouts the DM no longer
+        uses, and there is no "clear this window" action. Reset clears
+        the layout, not the Items state behind it.
+
+❌  P8  Only Random Tables got usefulness ranking. Encounters, Stats,
+        Places and Factions still sort alphabetically AND still refuse
+        to list anything until something is typed - so a sub-window
+        opened mid-fight starts empty. Each needs the same treatment: a
+        usage signal recorded on open/use, and a ranked default list.
+
+❌  P9  Usage signals (useTableUsageStore) are localStorage-only, so
+        "most useful" resets on a new browser or machine and cannot
+        inform anything server-side. Worth a real table on the server
+        once the ranking has proven itself in play.
+
+⚠️  P10 The Items tab strip does not handle overflow. Each tab caps at
+        168px and shrinks to a 32px minimum, so five tabs in a narrow
+        pane crush together with no scroll and no overflow menu.
+
+⚠️  P11 Chat-pane collapse and pane close now overlap conceptually -
+        collapse is a chat-only thin strip, close is generic and leaves
+        an empty placeholder - and a chat pane carries both at once.
+        Decide whether collapse becomes generic (any pane collapsible to
+        a strip) or goes away in favour of close.
+
+⚠️  P12 A truncated pane title has no tooltip, so a long session-note
+        name cannot be read without widening the pane.
+
+--- I-U. THE REST OF THE APPLICATION --------------------------------
+
+❌  U1  Header/toolbar scale is not consistent app-wide. Play's panes
+        are now a deliberate 40px; the section headers on the world,
+        notes, encounters and map pages were each styled independently.
+        Pick one header scale and apply it the way PaneHeader did for
+        Play.
+
+❌  U2  Encounters page still browses encounters in its own view rather
+        than through the unified category/tag/format browser the random
+        tables use (= E4; the backend already supports it).
+
+❌  U3  The client ships as one 2.27 MB (675 kB gzipped) chunk with no
+        code splitting, so opening Play downloads the map canvas, the
+        editors and the whole compendium UI with it. Route-level dynamic
+        imports would cut what a session-time page has to load.
+
+❌  U4  The Random Tables sub-window loads the WHOLE table library
+        (limit 20000, 2622 rows today) per Items window on mount - two
+        Items windows means two full loads into two result sets. The
+        browse list then renders 40 rows behind a "Show all 2622" button
+        that mounts every remaining row un-virtualised.
+
+❌  U5  The new Play chrome (LayoutGlyph, PaneDropZone, EmptyPaneWindow,
+        PaneHeader) was only eyeballed in whatever theme was active.
+        Neither light nor dark was checked deliberately, and the snap
+        tint is a hard-coded 22% primary alpha.
+
+❌  U6  No accessibility pass on any of it: the layout buttons and most
+        pane actions are icon-only with tooltips as their sole label,
+        the drag handle is decorative, and the empty-pane placeholder is
+        not announced.
+
+❌  U7  app-icon.png is a stock illustration and appears to carry a
+        stock-library watermark - faint diagonal text is visible across
+        the die at full size. It is the app's brand mark (top bar,
+        favicon, apple-touch icon), so it wants replacing with licensed
+        or original art. A simple flat mark would also survive 16px far
+        better than a detailed illustration does; public/favicon.svg is
+        such a mark, unreferenced, left over from an earlier iteration.
+
+❌  U8  Icon sizing was set by eye on 2026-09-03, never against a design:
+        the top-bar brand icon (58px), the world logo in the switcher
+        (30px), and the favicon set, which is the d20 cropped out of
+        app-icon.png and squared (the full composition is wide, so its
+        subject only filled ~60% of a square icon box). favicon-16/32/
+        48/256.png and apple-touch-icon.png are all generated from
+        app-icon.png and must be regenerated together if the brand
+        changes - see the comment in Client/index.html.
+
+❌  U9  The map / combat gaps (Part F1) and the notes / articles /
+        world-manager gaps (Part F2) are still unaddressed, and Parts
+        F-G were never re-verified against the code - check them against
+        the code before acting on any of them.
+
+
+#####################################################################
+PART F - CLIENT / MAP / APP-WIDE KNOWN GAPS
+        (source: Client/Progress.txt, deleted 2026-09-03)
+#####################################################################
+Client/Progress.txt was a 732-line running build summary covering rounds
+1-9 of the app (map page, notes, articles, world manager, campaigns,
+factions, NPCs, combat tracker, randomizers). Everything it recorded as
+finished is left out here - that is what the code already does, and
+re-listing it adds nothing. What follows is only its open "KNOWN
+SIMPLIFICATIONS / NOT DONE" and "WHAT'S LEFT" items, so they survive
+that file being deleted.
+
+IMPORTANT: unlike Parts A-E, these were NOT re-verified line by line on
+2026-09-03. They are carried over as that file recorded them, except
+where a "VERIFIED:" line says otherwise. Check against the code before
+acting on any of them.
+
+--- F1. MAP + COMBAT -------------------------------------------------
+
+❌  F1.1  Map flip/rotate pivots around the stage center, not the exact
+          background-image center. Visually identical whenever the image
+          is centered in the stage, which is the normal case.
+❌  F1.2  Hex/square grids are purely visual - no snapping for tokens or
+          shapes.
+❌  F1.3  Hobgoblin, Merfolk and Pixie have no real token art; a fallback
+          initial-letter avatar shows on the map, in the initiative bar
+          and in every list.
+          VERIFIED 2026-09-03: still open. Client/src/assets/tokens/
+          holds only goblin.png, player.png and zombie-token.png.
+❌  F1.4  Undo/redo covers floor-level edits only (tokens, shapes, flip,
+          rotate). Grid settings, initiative/roll state and
+          encounter-lock changes are deliberately excluded - not typical
+          "oops" targets, and they would flood the history stack.
+❌  F1.5  Combat tracking is deliberately lightweight (HP, concentration,
+          death saves, freeform notes) - no structured spell-slot or
+          resource system, per the user's "don't bother too much, I will
+          improve it later".
+❌  F1.6  "Cancel" exists only in the pre-start "rolling" initiative
+          state; once active, "End Encounter" is the one-click way out.
+❌  F1.7  Custom one-off encounter creature entries carry a flat size
+          rather than the default/current size split, since a one-off
+          entry has no reusable definition to reset back to.
+
+--- F2. NOTES, ARTICLES, WORLD MANAGER -------------------------------
+
+❌  F2.1  Notes' "Plots" toggle and the World Manager's "Characters" item
+          are both bare ComingSoon placeholders - relocated, never built.
+          No requirement has asked for real functionality yet.
+❌  F2.2  Note bodies use the same hand-rolled BBCode editor as Articles,
+          with no interactive checkboxes - so the session-prep
+          "checklist" is a styled list of prompts to fill in, not
+          tickable boxes.
+❌  F2.3  The article folder tree supports one level of add / rename /
+          delete but not drag-to-reorder or re-parent. There is no manual
+          "move to folder" either; folder is only settable from the
+          article form's Folder dropdown.
+❌  F2.4  Article "Linked" (backlinks) is a placeholder - there is no
+          [[mention]] / backlink engine yet, per the design doc's future
+          Entry-link table.
+❌  F2.5  Only 10 of the ~20 World Anvil-style article categories from the
+          reference image have templates. Adding more is a new entry in
+          ARTICLE_TEMPLATES, not new code.
+❌  F2.6  Linked articles use a loose linked_entity_type /
+          linked_entity_id reference with no FK and no cascade-delete.
+          Deleting the real NPC/Creature/Spell/Item an article points at
+          neither deletes nor unlinks the article - it just becomes a
+          dangling reference. Worth deciding on cleanup behaviour if it
+          starts to hurt.
+
+--- F3. SHELL, RIGHT PANEL, NAVIGATION -------------------------------
+
+❌  F3.1  The right panel is built but nothing populates it - no page
+          wires a row click to a selection + detail view (Faction /
+          Quest / NPC / Encounter / Map / Bastion), so it permanently
+          shows the empty "select an item" state.
+❌  F3.2  Context sidebars are real navigation, but only Encounters'
+          actually drives the wrapped section's internal state (its menu
+          view, via a lifted prop). Quests' status-group counts and Maps'
+          quick-jump list are informational only, not wired as live
+          filters into QuestsSection / MapsTable.
+❌  F3.3  TopBar's "+New" menu and the command palette's "New quest /
+          encounter / map / bastion" actions navigate to the right page
+          with a ?new=1 query param but do not auto-open that page's
+          create dialog. Each section component would need a small
+          autoOpenCreate prop.
+❌  F3.4  Widget layout editing is deliberately non-functional - the edit
+          pencil is a static placeholder, per the original request's own
+          "not a necessity to make it working".
+❌  F3.5  The right-panel utility strip's TODO / Notes are per-world
+          localStorage scratch state (useQuickToolsStore), not synced to
+          any backend or shared across devices. Same reasoning as the
+          other prototype-tier features in this codebase.
+❌  F3.6  The Docker Hub / GitHub widgets fetch those public APIs directly
+          from the browser with no backend proxy. Both degrade to a small
+          "unavailable" state on failure, but neither has been tested
+          against real CORS / rate-limiting conditions in a deployed
+          environment - only local dev.
+
+--- F4. SITUATIONAL TABLES (largely superseded - check before acting) -
+
+⚠️  F4.1  The situational_tables library was global reference content, not
+          tied to a campaign / world / "narrative", because there is no
+          Narrative entity to join against (Notes' "Narratives" folder is
+          prep-note content, not a queryable entity). Tables carried a
+          freeform tags array that could have grown real narrative
+          linkage later.
+⚠️  F4.2  situational_tables had no write endpoints or UI - seeded content
+          only, so adding a table meant a new seed-script entry plus a
+          re-run.
+          NOTE on both: the Part B overhaul replaced this subsystem
+          entirely with the new random-tables engine, which does have
+          real categories, a normalized tag vocabulary and a full write
+          UI. The old backend still exists but is dead (see E5). Treat
+          all of F4 as historical unless something is still reading it.
+
+--- F5. RANDOMIZER CONTENT QUALITY -----------------------------------
+
+❌  F5.1  random_professions / random_motivations / random_pitfalls are a
+          hand-authored first draft (36 / 5 / 5 entries) seeded once from
+          the importer script and never reviewed for tone or setting fit.
+          Worth a look before relying on the randomizer in real sessions.
+❌  F5.2  The NPC importance randomizer picks among every existing
+          importance value except 'monster' (boss / npc / side-character
+          / recurring / important / quest-giver / minion / summon), with
+          no further narrowing. Flag if that is not the intent.
+
+--- F6. VERIFICATION DEBT (the recurring theme) ----------------------
+
+❌  F6.1  Almost nothing in rounds 4-9 was click-tested in a real browser.
+          Verification was type-check + production build + curling the
+          running backend, because no browser-automation tool was
+          available at the time. Rounds called out as especially worth an
+          in-browser pass: the notes/articles round (a new file-explorer
+          view and a new filterable table browser), and round 4's Manage
+          Tokens popover fix, Reset View auto-rotation, and NPC
+          creature-picker autofill.
+          Same underlying gap as E12. A Playwright MCP server is now
+          configured in .mcp.json, so this is finally actionable.
+❌  F6.2  No automated regression test suite anywhere in the project -
+          everything has been manual smoke-testing.
+❌  F6.3  Touch / mobile input has never been tested for any of the newer
+          interactions (drag-and-drop, drawing tools, dice roller),
+          despite "works well on both phone and PC" being an original
+          product goal (see G1).
+❌  F6.4  The ~14 pre-existing MUI v9 typing errors are the same issue as
+          E9, and they spread: NotesPage's 3-item sidebar and
+          EncountersPage's 3rd sidebar button both copied the existing
+          primaryTypographyProps-on-ListItemText pattern verbatim from
+          the files they were modelled on. The fix is swapping
+          primaryTypographyProps / InputProps / PaperProps for the MUI v9
+          slotProps equivalents, before npm run build can be trusted as a
+          gate.
+
+#####################################################################
+PART G - ORIGINAL PRODUCT GOALS
+        (source: Client/To-Do.txt, deleted 2026-09-03)
+#####################################################################
+The original 8-line statement of what this app is for. Kept because it
+is the only record of the founding intent.
+
+⚠️  G1   Cross-platform web app - a single React web application that
+          looks and works well on both phone and PC.
+          STATUS: it is a single React web app, but mobile has never been
+          tested for any of the newer interactions - see F6.3.
+❌  G6   Line-of-sight (optional) - optionally drive fog of war with
+          line-of-sight physics so vision is blocked by walls. Marked
+          optional in the original goal, and never built.

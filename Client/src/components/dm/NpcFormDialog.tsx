@@ -75,6 +75,22 @@ function parseItems(text: string): string[] {
     .filter(Boolean);
 }
 
+/** Rolled values handed in from QuickNpcRollDialog - merged into the form's initial state
+ * and locked (see `locked` below) so a subsequent "randomize all" leaves them alone. */
+export interface NpcRollPrefill {
+  name?: string;
+  appearance?: string;
+  occupation?: string;
+  motivation?: string;
+  secret?: string;
+  alignment?: string;
+  personality?: string;
+  pitfall?: string;
+  relationship?: string;
+  history?: string;
+  description?: string;
+}
+
 interface NpcFormDialogProps {
   open: boolean;
   onClose: () => void;
@@ -84,6 +100,10 @@ interface NpcFormDialogProps {
   /** World this NPC's article (if any) belongs to - omit when there's no world in scope,
    * which hides the "also create a world article" checkbox entirely (issue 4c/4g). */
   worldId?: string;
+  /** Quick-roll results to merge into the form on open (appended to itemized fields, set-or-
+   * append for the plain-text ones) and lock, whether creating a new NPC or editing an
+   * existing one. */
+  prefill?: NpcRollPrefill;
 }
 
 const emptyAbilities: AbilityScores = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
@@ -188,6 +208,64 @@ function applyBaseCreature(prev: ReturnType<typeof emptyState>, base: Creature):
   };
 }
 
+/** Merges a QuickNpcRollDialog result into form state: itemized fields (appearance/secrets)
+ * get the roll appended as a new item, plain fields (profession/motivations) are set if empty
+ * or appended with a separator otherwise - never silently overwritten. Returns the merged
+ * state plus which RandomizableFields were actually touched, for the initial `locked` set. */
+function applyPrefill(
+  state: ReturnType<typeof emptyState>,
+  prefill: NpcRollPrefill | undefined,
+): { state: ReturnType<typeof emptyState>; lockedFields: RandomizableField[] } {
+  if (!prefill) return { state, lockedFields: [] };
+  const next = { ...state };
+  const lockedFields: RandomizableField[] = [];
+
+  if (prefill.name) {
+    if (next.name) next.description = [next.description, `Suggested name: ${prefill.name}`].filter(Boolean).join('\n');
+    else {
+      next.name = prefill.name;
+      lockedFields.push('name');
+    }
+  }
+  if (prefill.alignment) {
+    if (next.alignment && next.alignment !== prefill.alignment) {
+      next.description = [next.description, `Suggested alignment: ${prefill.alignment}`].filter(Boolean).join('\n');
+    } else next.alignment = prefill.alignment;
+  }
+
+  if (prefill.occupation) {
+    next.profession = next.profession ? `${next.profession}; ${prefill.occupation}` : prefill.occupation;
+    lockedFields.push('profession');
+  }
+  if (prefill.motivation) {
+    next.motivations = next.motivations ? `${next.motivations}\n${prefill.motivation}` : prefill.motivation;
+    lockedFields.push('motivations');
+  }
+  if (prefill.appearance) {
+    next.appearance = [...parseItems(next.appearance), prefill.appearance].join('\n');
+    lockedFields.push('appearance');
+  }
+  if (prefill.secret) {
+    next.secrets = [...parseItems(next.secrets), prefill.secret].join('\n');
+    lockedFields.push('secrets');
+  }
+  if (prefill.personality) {
+    next.traits = [...parseItems(next.traits), prefill.personality].join('\n');
+    lockedFields.push('personality');
+  }
+  if (prefill.pitfall) {
+    next.pitfalls = next.pitfalls ? `${next.pitfalls}\n${prefill.pitfall}` : prefill.pitfall;
+    lockedFields.push('pitfalls');
+  }
+  if (prefill.relationship) {
+    next.relationships = [...parseItems(next.relationships), prefill.relationship].join('\n');
+    lockedFields.push('relationships');
+  }
+  if (prefill.history) next.history = next.history ? `${next.history}\n${prefill.history}` : prefill.history;
+  if (prefill.description) next.description = next.description ? `${next.description}\n${prefill.description}` : prefill.description;
+  return { state: next, lockedFields };
+}
+
 export function NpcFormDialog({
   open,
   onClose,
@@ -195,6 +273,7 @@ export function NpcFormDialog({
   initialCreature,
   campaignId,
   worldId,
+  prefill,
 }: NpcFormDialogProps) {
   const navigate = useNavigate();
   const isEditMode = !!initialCreature;
@@ -227,10 +306,12 @@ export function NpcFormDialog({
 
   useEffect(() => {
     if (!open) return;
-    setState(initialCreature ? stateFromCreature(initialCreature) : emptyState());
+    const base = initialCreature ? stateFromCreature(initialCreature) : emptyState();
+    const { state: merged, lockedFields } = applyPrefill(base, prefill);
+    setState(merged);
     setImageManuallySet(false);
     setCreatureSearch('');
-    setLocked(new Set());
+    setLocked(new Set(lockedFields));
     setCreateArticle(false);
     setCreateArticleNow(true);
     fetchBanks();
@@ -239,7 +320,7 @@ export function NpcFormDialog({
     } else {
       setBaseCreature(null);
     }
-  }, [open, initialCreature, campaignId, fetchCreaturesForCampaign, fetchBanks]);
+  }, [open, initialCreature, prefill, campaignId, fetchCreaturesForCampaign, fetchBanks]);
 
   useEffect(() => {
     if (!open || !initialCreature?.baseCreatureId) return;

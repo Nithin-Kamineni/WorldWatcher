@@ -13,13 +13,24 @@ import type {
   ApiBastionFacility,
   ApiBastionFacilityInstance,
   ApiCampaign,
+  ApiCategory,
+  ApiCategoryNode,
   ApiCreature,
   ApiCreatureDetail,
+  ApiEncounterCombatBlock,
   ApiEncounterCreature,
   ApiEncounterDetail,
+  ApiEncounterExplorationBlock,
+  ApiEncounterNpc,
+  ApiEncounterSocialBlock,
   ApiEncounterTableCreature,
   ApiFaction,
   ApiFactionRelation,
+  ApiGenerator,
+  ApiGeneratorComponent,
+  ApiGeneratorDetail,
+  ApiGeneratorRollResult,
+  ApiGeneratorRollSlotResult,
   ApiItem,
   ApiMapFloor,
   ApiMapShape,
@@ -27,9 +38,17 @@ import type {
   ApiNote,
   ApiNoteFolder,
   ApiQuest,
-  ApiRandomEncounterTable,
+  ApiRandomTable,
+  ApiRandomTableDetail,
+  ApiRolledDie,
+  ApiRollResult,
+  ApiRollResultItem,
   ApiSessionChat,
   ApiSpell,
+  ApiTableColumn,
+  ApiTableEntry,
+  ApiTableFormat,
+  ApiTag,
   ApiTokenLibraryEntry,
   ApiWorld,
 } from './types';
@@ -41,19 +60,42 @@ import type { Campaign } from '../types/campaign';
 import type { World } from '../types/world';
 import type { AbilityScores, Creature, CreatureCategory } from '../types/creature';
 import type {
+  CombatRole,
   Encounter,
+  EncounterCombatBlock,
   EncounterCreatureEntry,
+  EncounterExplorationBlock,
+  EncounterNpcEntry,
+  EncounterPrimaryType,
   EncounterResolutionType,
   EncounterRollTable,
+  EncounterSocialBlock,
+  EncounterStatus,
+  NpcAgenda,
+  NpcAttitude,
   RandomTableCreature,
   RandomTableRow,
+  RpCues,
 } from '../types/encounter';
 import type { Faction, FactionInfluence } from '../types/faction';
 import type { FactionRelation, FactionRelationImportance, FactionRelationType } from '../types/factionRelation';
 import type { MagicItem, MagicItemRarity } from '../types/magicItem';
 import type { MapFloor } from '../types/map';
 import type { Quest, QuestObjective, QuestStatus } from '../types/quest';
-import type { RandomEncounterTable, RandomEncounterTableEntry } from '../types/randomEncounterTable';
+import type { Category, CategoryNode } from '../types/category';
+import type { Tag } from '../types/tag';
+import type { TableFormat } from '../types/tableFormat';
+import type {
+  RandomTable,
+  RandomTableDetail,
+  TableColumn,
+  TableEntry,
+  TableEntryKind,
+  RolledDie,
+  RollResult,
+  RollResultItem,
+} from '../types/randomTable';
+import type { Generator, GeneratorComponent, GeneratorDetail, GeneratorRollResult, GeneratorRollSlotResult } from '../types/generator';
 import { DEFAULT_INITIATIVE_STATE } from '../types/initiative';
 import type { AoEShape, AoEShapeType } from '../types/shape';
 import type { Spell } from '../types/spell';
@@ -368,6 +410,7 @@ export function apiCreatureToCreature(c: ApiCreature | ApiCreatureDetail): Creat
     category: c.category,
     tokenImage: assetFileUrl(c.token_asset_id ?? c.portrait_asset_id),
     name: c.name,
+    edition: c.edition,
     relation: (c.relation as Creature['relation']) ?? 'neutral',
     importance: (c.importance as Creature['importance']) ?? 'monster',
     profession: c.profession ?? undefined,
@@ -721,41 +764,148 @@ export function applyApiFloorMetaPatch(floor: MapFloor, data: ApiMapFloor): MapF
 // Encounter
 // ---------------------------------------------------------------------
 
-function apiEncounterCreatureToEntry(e: ApiEncounterCreature, creatureName: string, imageSrc: string): EncounterCreatureEntry {
+function apiEncounterCreatureToEntry(e: ApiEncounterCreature): EncounterCreatureEntry {
   return {
     id: e.id,
     creatureId: e.creature_id,
-    name: e.creature_id ? creatureName : (e.custom_name ?? 'Creature'),
-    imageSrc,
+    name: e.creature_id ? (e.creature_name ?? 'Creature') : (e.custom_name ?? 'Creature'),
+    imageSrc: assetFileUrl(e.token_asset_id ?? e.portrait_asset_id ?? e.custom_image_asset_id),
     quantity: e.quantity,
+    quantityFormula: e.quantity_formula ?? null,
     size: e.size_override ?? undefined,
+    role: (e.role as CombatRole | null) ?? null,
+    notes: e.notes,
+    cr: e.creature_cr ?? null,
   };
 }
 
-function apiEncounterTableCreatureToEntry(
-  c: ApiEncounterTableCreature,
-  creatureLookup: Map<string, { name: string; tokenImage: string }>,
-): RandomTableCreature {
-  const linked = c.creature_id ? creatureLookup.get(c.creature_id) : undefined;
+function apiEncounterNpcToEntry(n: ApiEncounterNpc): EncounterNpcEntry {
+  return {
+    id: n.id,
+    npcId: n.npc_id,
+    name: n.npc_name ?? 'NPC',
+    imageSrc: assetFileUrl(n.token_asset_id ?? n.portrait_asset_id),
+    attitude: (n.attitude as NpcAttitude | null) ?? null,
+    agenda: (n.agenda as NpcAgenda | null) ?? null,
+    secret: n.secret,
+    leverage: n.leverage,
+    rpCues: (n.rp_cues as RpCues | null) ?? null,
+    sortOrder: n.sort_order,
+  };
+}
+
+function apiCombatBlockToBlock(b: ApiEncounterCombatBlock): EncounterCombatBlock {
+  return {
+    shape: b.shape,
+    victoryCondition: b.victory_condition,
+    awareness: b.awareness,
+    startRange: b.start_range,
+    lighting: b.lighting,
+    terrainType: b.terrain_type,
+    terrainFeatures: b.terrain_features,
+    morale: b.morale,
+    reinforcements: b.reinforcements ? { mode: b.reinforcements.mode, trigger: b.reinforcements.trigger, round: b.reinforcements.round, tableId: b.reinforcements.table_id } : null,
+    dynamicEvents: (b.dynamic_events as { trigger: string; event: string }[]) ?? [],
+    difficultyBand: b.difficulty_band,
+    computedXp: b.computed_xp,
+    hasLairOrLegendary: b.has_lair_or_legendary,
+    aftermath: b.aftermath,
+    scalingNotes: b.scaling_notes,
+    mapId: b.map_id,
+    transitionEncounterId: b.transition_encounter_id,
+  };
+}
+
+export function combatBlockToApiPayload(b: EncounterCombatBlock): Record<string, unknown> {
+  return {
+    shape: b.shape, victory_condition: b.victoryCondition, awareness: b.awareness, start_range: b.startRange,
+    lighting: b.lighting, terrain_type: b.terrainType, terrain_features: b.terrainFeatures, morale: b.morale,
+    reinforcements: b.reinforcements ? { mode: b.reinforcements.mode, trigger: b.reinforcements.trigger, round: b.reinforcements.round, table_id: b.reinforcements.tableId } : null, dynamic_events: b.dynamicEvents, difficulty_band: b.difficultyBand,
+    computed_xp: b.computedXp, has_lair_or_legendary: b.hasLairOrLegendary, aftermath: b.aftermath,
+    scaling_notes: b.scalingNotes, map_id: b.mapId, transition_encounter_id: b.transitionEncounterId,
+  };
+}
+
+function apiSocialBlockToBlock(b: ApiEncounterSocialBlock): EncounterSocialBlock {
+  return {
+    shape: b.shape,
+    venue: b.venue,
+    tone: b.tone,
+    stakes: b.stakes,
+    playerLevers: b.player_levers,
+    keyChecks: (b.key_checks as { skill: string; dc: number; onSuccess: string; onFailure: string }[]) ?? [],
+    outcomeTiers: b.outcome_tiers,
+    socialClock: (b.social_clock as { successesNeeded: number; failuresAllowed: number } | null) ?? null,
+    gatedInfo: (b.gated_info as { fact: string; revealWhen: string }[]) ?? [],
+    complications: b.complications,
+    escalation: b.escalation,
+    transitionEncounterId: b.transition_encounter_id,
+  };
+}
+
+export function socialBlockToApiPayload(b: EncounterSocialBlock): Record<string, unknown> {
+  return {
+    shape: b.shape, venue: b.venue, tone: b.tone, stakes: b.stakes, player_levers: b.playerLevers,
+    key_checks: b.keyChecks, outcome_tiers: b.outcomeTiers, social_clock: b.socialClock,
+    gated_info: b.gatedInfo, complications: b.complications, escalation: b.escalation,
+    transition_encounter_id: b.transitionEncounterId,
+  };
+}
+
+function apiExplorationBlockToBlock(b: ApiEncounterExplorationBlock): EncounterExplorationBlock {
+  return {
+    shape: b.shape,
+    environment: b.environment,
+    terrainDifficulty: b.terrain_difficulty,
+    obstacleType: b.obstacle_type,
+    trap: b.trap ? { name: b.trap.name, trigger: b.trap.trigger, detectDc: b.trap.detect_dc, disableDc: b.trap.disable_dc, effect: b.trap.effect, damageFormula: b.trap.damage_formula, damageType: b.trap.damage_type, conditionIds: b.trap.condition_ids ?? [] } : null,
+    hazard: b.hazard ? { name: b.hazard.name, saveAbility: b.hazard.save_ability, saveDc: b.hazard.save_dc, effect: b.hazard.effect, damageFormula: b.hazard.damage_formula, damageType: b.hazard.damage_type, conditionIds: b.hazard.condition_ids ?? [] } : null,
+    skillChallenge: b.skill_challenge ? { goal: b.skill_challenge.goal, successesRequired: b.skill_challenge.successes_required, failuresAllowed: b.skill_challenge.failures_allowed, skills: b.skill_challenge.skills } : null,
+    puzzle: b.puzzle,
+    sensoryClues: (b.sensory_clues as { sense: string; detail: string; perceiveDc: number | null }[]) ?? [],
+    pointsOfInterest: (b.points_of_interest as { name: string; hidden?: boolean; revealWhen?: string; rewardOrInfo?: string }[]) ?? [],
+    navigation: b.navigation,
+    resourceCost: b.resource_cost,
+    verticality: b.verticality,
+    complications: b.complications,
+    transitionEncounterId: b.transition_encounter_id,
+    wanderingTableId: b.wandering_table_id,
+  };
+}
+
+export function explorationBlockToApiPayload(b: EncounterExplorationBlock): Record<string, unknown> {
+  return {
+    shape: b.shape, environment: b.environment, terrain_difficulty: b.terrainDifficulty,
+    obstacle_type: b.obstacleType,
+    trap: b.trap ? { name: b.trap.name, trigger: b.trap.trigger, detect_dc: b.trap.detectDc, disable_dc: b.trap.disableDc, effect: b.trap.effect, damage_formula: b.trap.damageFormula, damage_type: b.trap.damageType, condition_ids: b.trap.conditionIds } : null,
+    hazard: b.hazard ? { name: b.hazard.name, save_ability: b.hazard.saveAbility, save_dc: b.hazard.saveDc, effect: b.hazard.effect, damage_formula: b.hazard.damageFormula, damage_type: b.hazard.damageType, condition_ids: b.hazard.conditionIds } : null,
+    skill_challenge: b.skillChallenge ? { goal: b.skillChallenge.goal, successes_required: b.skillChallenge.successesRequired, failures_allowed: b.skillChallenge.failuresAllowed, skills: b.skillChallenge.skills } : null,
+    puzzle: b.puzzle, sensory_clues: b.sensoryClues, points_of_interest: b.pointsOfInterest,
+    navigation: b.navigation, resource_cost: b.resourceCost, verticality: b.verticality,
+    complications: b.complications, transition_encounter_id: b.transitionEncounterId, wandering_table_id: b.wanderingTableId,
+  };
+}
+
+function apiEncounterTableCreatureToEntry(c: ApiEncounterTableCreature): RandomTableCreature {
   return {
     id: c.id,
     creatureId: c.creature_id,
     name: c.creature_name ?? c.creature_name_raw,
     type: c.creature_type,
-    imageSrc: linked?.tokenImage ?? '',
+    imageSrc: assetFileUrl(c.token_asset_id ?? c.portrait_asset_id),
     quantityFormula: c.quantity_formula,
+    cr: c.creature_cr ?? null,
   };
 }
 
-export function apiEncounterToEncounter(
-  e: ApiEncounterDetail,
-  creatureLookup: Map<string, { name: string; tokenImage: string }>,
-): Encounter {
+export function apiEncounterToEncounter(e: ApiEncounterDetail): Encounter {
   return {
     id: e.id,
     name: e.name,
     description: e.description ?? '',
     challengeRating: e.challenge_rating_display ?? '',
+    computedXp: e.computed_adjusted_xp,
+    difficulty: e.difficulty,
     theme: e.theme ?? '',
     encounterType: e.encounter_type ?? undefined,
     possibleLocations: e.possible_locations ?? undefined,
@@ -772,18 +922,27 @@ export function apiEncounterToEncounter(
       min: t.min,
       max: t.max,
       resultText: t.result_text ?? '',
-      creatures: t.creatures.map((c) => apiEncounterTableCreatureToEntry(c, creatureLookup)),
+      creatures: t.creatures.map((c) => apiEncounterTableCreatureToEntry(c)),
     })),
-    creatures: e.creatures.map((entry) => {
-      const linked = entry.creature_id ? creatureLookup.get(entry.creature_id) : undefined;
-      return apiEncounterCreatureToEntry(
-        entry,
-        linked?.name ?? entry.custom_name ?? 'Creature',
-        linked?.tokenImage ?? '',
-      );
-    }),
+    creatures: e.creatures.map((entry) => apiEncounterCreatureToEntry(entry)),
     createdAt: toEpochMs(e.created_at),
     updatedAt: toEpochMs(e.updated_at),
+    primaryType: (e.primary_type as EncounterPrimaryType | null) ?? null,
+    categoryId: e.category_id,
+    status: (e.status as EncounterStatus) ?? 'draft',
+    readAloud: e.read_aloud,
+    objective: e.objective,
+    partyLevelMin: e.party_level_min,
+    partyLevelMax: e.party_level_max,
+    partySize: e.party_size,
+    scalingNotes: e.scaling_notes,
+    locationId: e.location_id,
+    rewards: Array.isArray(e.rewards) ? e.rewards : [],
+    tagIds: e.tag_ids ?? [],
+    npcs: (e.npcs ?? []).map((n) => apiEncounterNpcToEntry(n)),
+    combatBlock: e.combat_block ? apiCombatBlockToBlock(e.combat_block) : null,
+    socialBlock: e.social_block ? apiSocialBlockToBlock(e.social_block) : null,
+    explorationBlock: e.exploration_block ? apiExplorationBlockToBlock(e.exploration_block) : null,
   };
 }
 
@@ -793,6 +952,8 @@ export function encounterToApiPayload(encounter: Encounter, campaignId: string):
     name: encounter.name,
     description: encounter.description || null,
     challenge_rating_display: encounter.challengeRating || null,
+    computed_adjusted_xp: encounter.computedXp,
+    difficulty: encounter.difficulty,
     theme: encounter.theme || null,
     encounter_type: encounter.encounterType ?? null,
     possible_locations: encounter.possibleLocations ?? null,
@@ -800,6 +961,17 @@ export function encounterToApiPayload(encounter: Encounter, campaignId: string):
     resolution_type: encounter.resolutionType,
     page: encounter.page ?? null,
     tables: encounter.tables ?? null,
+    primary_type: encounter.primaryType,
+    category_id: encounter.categoryId,
+    status: encounter.status,
+    read_aloud: encounter.readAloud,
+    objective: encounter.objective,
+    party_level_min: encounter.partyLevelMin,
+    party_level_max: encounter.partyLevelMax,
+    party_size: encounter.partySize,
+    scaling_notes: encounter.scalingNotes,
+    location_id: encounter.locationId,
+    rewards: encounter.rewards,
   };
 }
 
@@ -808,7 +980,22 @@ export function encounterEntryToApiPayload(entry: EncounterCreatureEntry): Recor
     creature_id: entry.creatureId,
     custom_name: entry.creatureId ? null : entry.name,
     quantity: entry.quantity,
+    raw_data: entry.quantityFormula ? { quantity_formula: entry.quantityFormula } : null,
     size_override: entry.size ?? null,
+    role: entry.role ?? null,
+    notes: entry.notes ?? null,
+  };
+}
+
+export function encounterNpcToApiPayload(entry: EncounterNpcEntry): Record<string, unknown> {
+  return {
+    npc_id: entry.npcId,
+    attitude: entry.attitude,
+    agenda: entry.agenda,
+    secret: entry.secret,
+    leverage: entry.leverage,
+    rp_cues: entry.rpCues,
+    sort_order: entry.sortOrder,
   };
 }
 
@@ -969,43 +1156,6 @@ export function questToApiPayload(quest: Quest, campaignId: string): Record<stri
   };
 }
 
-// ---------------------------------------------------------------------
-// Random encounter tables
-// ---------------------------------------------------------------------
-
-function entriesFromJson(value: unknown): RandomEncounterTableEntry[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((raw) => {
-      const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-      return {
-        id: typeof o.id === 'string' ? o.id : crypto.randomUUID(),
-        encounterId: typeof o.encounter_id === 'string' ? o.encounter_id : '',
-      };
-    })
-    .filter((e) => e.encounterId);
-}
-
-export function apiRandomEncounterTableToRandomEncounterTable(t: ApiRandomEncounterTable): RandomEncounterTable {
-  return {
-    id: t.id,
-    campaignId: t.campaign_id,
-    name: t.name,
-    dieExpression: t.die_expression,
-    entries: entriesFromJson(t.entries),
-    createdAt: toEpochMs(t.created_at),
-    updatedAt: toEpochMs(t.updated_at),
-  };
-}
-
-export function randomEncounterTableToApiPayload(table: RandomEncounterTable, campaignId: string): Record<string, unknown> {
-  return {
-    campaign_id: campaignId,
-    name: table.name,
-    die_expression: table.dieExpression,
-    entries: table.entries.map((e) => ({ id: e.id, encounter_id: e.encounterId })),
-  };
-}
 
 // ---------------------------------------------------------------------
 // Bastions
@@ -1073,4 +1223,157 @@ export function bastionFacilityInstanceToApiPayload(instance: BastionFacilityIns
     notes: instance.notes || null,
     sort_order: instance.sortOrder,
   };
+}
+
+// ---------------------------------------------------------------------
+// Category / Tag / TableFormat / RandomTable / Generator
+// ---------------------------------------------------------------------
+
+export function apiCategoryNodeToNode(c: ApiCategoryNode): CategoryNode {
+  return {
+    id: c.id, slug: c.slug, name: c.name, parentId: c.parent_id, isSystem: c.is_system,
+    icon: c.icon, sortOrder: c.sort_order, children: c.children.map(apiCategoryNodeToNode),
+  };
+}
+
+export function apiCategoryToCategory(c: ApiCategory): Category {
+  return { id: c.id, slug: c.slug, name: c.name, parentId: c.parent_id, isSystem: c.is_system, icon: c.icon, sortOrder: c.sort_order };
+}
+
+export function categoryToApiPayload(c: { slug: string; name: string; parentId: string | null; icon?: string | null; sortOrder?: number }): Record<string, unknown> {
+  return { slug: c.slug, name: c.name, parent_id: c.parentId, icon: c.icon ?? null, sort_order: c.sortOrder ?? 0 };
+}
+
+export function apiTagToTag(t: ApiTag): Tag {
+  return { id: t.id, namespace: t.namespace, value: t.value, label: t.label, isSystem: t.is_system };
+}
+
+export function apiTableFormatToTableFormat(f: ApiTableFormat): TableFormat {
+  return { id: f.id, slug: f.slug, name: f.name, description: f.description, tier: f.tier, isSystem: f.is_system };
+}
+
+function apiTableEntryToEntry(e: ApiTableEntry): TableEntry {
+  return {
+    id: e.id, columnId: e.column_id, min: e.min, max: e.max, secondaryMin: e.secondary_min, secondaryMax: e.secondary_max,
+    weight: e.weight, kind: e.kind, text: e.text, encounterId: e.encounter_id, targetTableId: e.target_table_id,
+    creatureId: e.creature_id, npcId: e.npc_id, itemId: e.item_id, bundle: e.bundle, notes: e.notes,
+    sortOrder: e.sort_order, tagIds: e.tag_ids, refHydrated: e.ref_hydrated,
+  };
+}
+
+export function tableEntryToApiPayload(e: Partial<TableEntry> & { kind: TableEntryKind }): Record<string, unknown> {
+  return {
+    id: e.id, min: e.min ?? null, max: e.max ?? null, secondary_min: e.secondaryMin ?? null, secondary_max: e.secondaryMax ?? null,
+    weight: e.weight ?? null, kind: e.kind, text: e.text ?? null, encounter_id: e.encounterId ?? null,
+    target_table_id: e.targetTableId ?? null, creature_id: e.creatureId ?? null, npc_id: e.npcId ?? null,
+    item_id: e.itemId ?? null, bundle: e.bundle ?? null, notes: e.notes ?? null, sort_order: e.sortOrder ?? 0,
+    tag_ids: e.tagIds ?? [],
+  };
+}
+
+function apiTableColumnToColumn(c: ApiTableColumn): TableColumn {
+  return {
+    id: c.id, tableId: c.table_id, name: c.name, dieCount: c.die_count, dieSides: c.die_sides,
+    dieModifier: c.die_modifier, sortOrder: c.sort_order, entries: c.entries.map(apiTableEntryToEntry),
+  };
+}
+
+export function tableColumnToApiPayload(c: Partial<TableColumn> & { name: string; entries: TableEntry[] }): Record<string, unknown> {
+  return {
+    id: c.id, name: c.name, die_count: c.dieCount ?? 1, die_sides: c.dieSides ?? 20, die_modifier: c.dieModifier ?? 0,
+    sort_order: c.sortOrder ?? 0, entries: c.entries.map(tableEntryToApiPayload),
+  };
+}
+
+export function apiRandomTableToTable(t: ApiRandomTable): RandomTable {
+  return {
+    id: t.id, campaignId: t.campaign_id, name: t.name, description: t.description, categoryId: t.category_id,
+    formatId: t.format_id, triggerSituation: t.trigger_situation, imageUrl: t.image_url, combineTemplate: t.combine_template,
+    sourceBook: t.source_book, formatConfig: (t.format_config as Record<string, unknown> | null) ?? null,
+    isSystem: t.is_system, createdAt: toEpochMs(t.created_at), updatedAt: toEpochMs(t.updated_at), tagIds: t.tag_ids,
+  };
+}
+
+export function apiRandomTableDetailToDetail(t: ApiRandomTableDetail): RandomTableDetail {
+  return { ...apiRandomTableToTable(t), columns: t.columns.map(apiTableColumnToColumn) };
+}
+
+export function randomTableToApiPayload(
+  t: Pick<RandomTable, 'name' | 'description' | 'categoryId' | 'formatId' | 'triggerSituation' | 'imageUrl' | 'combineTemplate' | 'sourceBook' | 'formatConfig' | 'tagIds'> & { campaignId?: string | null },
+): Record<string, unknown> {
+  return {
+    campaign_id: t.campaignId ?? null, name: t.name, description: t.description || null, category_id: t.categoryId,
+    format_id: t.formatId, trigger_situation: t.triggerSituation || null, image_url: t.imageUrl || null,
+    combine_template: t.combineTemplate || null, source_book: t.sourceBook || null, format_config: t.formatConfig,
+    tag_ids: t.tagIds,
+  };
+}
+
+function apiRolledDieToDie(d: ApiRolledDie): RolledDie {
+  return { sides: d.sides, result: d.result };
+}
+
+function apiRollResultItemToItem(i: ApiRollResultItem): RollResultItem {
+  return {
+    columnName: i.column_name, dice: i.dice.map(apiRolledDieToDie), total: i.total, entryId: i.entry_id, kind: i.kind,
+    text: i.text, resolvedText: i.resolved_text, refId: i.ref_id, refHydrated: i.ref_hydrated, extra: i.extra,
+    tagIds: i.tag_ids ?? [],
+    nested: i.nested ? apiRollResultToResult(i.nested) : null,
+  };
+}
+
+export function apiRollResultToResult(r: ApiRollResult): RollResult {
+  return {
+    tableId: r.table_id, tableName: r.table_name, formatSlug: r.format_slug, items: r.items.map(apiRollResultItemToItem),
+    combinedText: r.combined_text, gatePassed: r.gate_passed,
+  };
+}
+
+export function apiGeneratorToGenerator(g: ApiGenerator): Generator {
+  return {
+    id: g.id, campaignId: g.campaign_id, slug: g.slug, name: g.name, categoryId: g.category_id, description: g.description,
+    combineTemplate: g.combine_template,
+    parameters: g.parameters.map((p) => ({ key: p.key, label: p.label, type: p.type, allowedTags: p.allowed_tags, required: p.required, default: p.default })),
+    isSystem: g.is_system, createdAt: toEpochMs(g.created_at), updatedAt: toEpochMs(g.updated_at), tagIds: g.tag_ids,
+  };
+}
+
+function apiGeneratorComponentToComponent(c: ApiGeneratorComponent): GeneratorComponent {
+  return {
+    id: c.id, generatorId: c.generator_id, tableId: c.table_id, outputSlot: c.output_slot,
+    filterParamKey: c.filter_param_key, rollCount: c.roll_count, optional: c.optional, sortOrder: c.sort_order,
+  };
+}
+
+export function apiGeneratorDetailToDetail(g: ApiGeneratorDetail): GeneratorDetail {
+  return { ...apiGeneratorToGenerator(g), components: g.components.map(apiGeneratorComponentToComponent) };
+}
+
+export function generatorToApiPayload(
+  g: Pick<Generator, 'slug' | 'name' | 'categoryId' | 'description' | 'combineTemplate' | 'parameters' | 'tagIds'> & { campaignId?: string | null },
+): Record<string, unknown> {
+  return {
+    campaign_id: g.campaignId ?? null, slug: g.slug, name: g.name, category_id: g.categoryId, description: g.description || null,
+    combine_template: g.combineTemplate,
+    parameters: g.parameters.map((p) => ({ key: p.key, label: p.label, type: p.type, allowed_tags: p.allowedTags, required: p.required, default: p.default })),
+    tag_ids: g.tagIds,
+  };
+}
+
+export function generatorComponentToApiPayload(c: Pick<GeneratorComponent, 'tableId' | 'outputSlot' | 'filterParamKey' | 'rollCount' | 'optional' | 'sortOrder'> & { id?: string }): Record<string, unknown> {
+  return {
+    id: c.id, table_id: c.tableId, output_slot: c.outputSlot, filter_param_key: c.filterParamKey,
+    roll_count: c.rollCount, optional: c.optional, sort_order: c.sortOrder,
+  };
+}
+
+function apiGeneratorRollSlotResultToResult(s: ApiGeneratorRollSlotResult): GeneratorRollSlotResult {
+  return {
+    slot: s.slot, tableId: s.table_id, tableName: s.table_name,
+    result: s.result ? apiRollResultItemToItem(s.result) : null, skipped: s.skipped,
+  };
+}
+
+export function apiGeneratorRollResultToResult(r: ApiGeneratorRollResult): GeneratorRollResult {
+  return { generatorId: r.generator_id, slots: r.slots.map(apiGeneratorRollSlotResultToResult), combinedText: r.combined_text };
 }

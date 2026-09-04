@@ -14,6 +14,7 @@ _parse_creatures() below for the pairing heuristic.
 """
 import json
 import re
+import hashlib
 
 from .. import db as db_mod
 from .. import sources as sources_mod
@@ -86,9 +87,47 @@ def _parse_tables(tables: list) -> list:
     return parsed
 
 
+def _encounter_title(prose: str) -> str:
+    """Imported encounter names are prose sentences; cards need scan-friendly titles."""
+    text = prose.lower()
+    rules = [
+        (("airship", "pirate"), "Raiders of the Open Sky"), (("pirate",), "The Black-Sail Ambush"),
+        (("dragon",), "Wings on the Horizon"), (("undead",), "The Restless Dead"),
+        (("skeleton",), "The Restless Dead"), (("zombie",), "The Restless Dead"),
+        (("fiend",), "A Bargain in Brimstone"), (("demon",), "A Bargain in Brimstone"),
+        (("celestial",), "Judgment from Above"), (("giant",), "Footfalls Like Thunder"),
+        (("goblin",), "Knives in the Brush"), (("bandit",), "The Roadside Reckoning"),
+        (("merchant",), "Terms on the Road"), (("storm",), "Under a Wrathful Sky"),
+        (("ruin",), "Secrets Beneath the Stones"), (("forest",), "Whispers Between the Trees"),
+        (("ship",), "Trouble on the Tide"), (("cavern",), "Echoes in the Deep"),
+    ]
+    title = None
+    for needles, candidate in rules:
+        if all(needle in text for needle in needles):
+            title = candidate
+            break
+    if title is None:
+        first_creature_match = _CREATURE_TAG_RE.search(prose)
+        first_creature = strip_tags(first_creature_match.group(1)).strip() if first_creature_match else None
+        title = f"An Encounter with {first_creature}" if first_creature else "Danger at the Crossroads"
+    # name+source is the importer's stable conflict key. A small prose hash
+    # prevents two encounters with the same recommended title from collapsing.
+    return f"{title} · {hashlib.sha1(prose.encode('utf-8')).hexdigest()[:4].upper()}"
+
+
+def _infer_pillar(prose: str) -> str:
+    text = prose.lower()
+    if any(word in text for word in ("parley", "negotiate", "merchant", "conversation", "diplomat")):
+        return "social"
+    if any(word in text for word in ("hazard", "trap", "clue", "trail", "weather", "ruin")):
+        return "exploration"
+    return "combat"
+
+
 def project_encounter(cur, encounter: dict, source_cache: dict):
     source_id = sources_mod.get_or_create_source(cur, source_cache, encounter.get("source"))
-    name = encounter.get("name") or "(unnamed)"
+    prose = encounter.get("name") or "(unnamed)"
+    pillar = _infer_pillar(prose)
 
     values = {
         "source_id": source_id,
@@ -97,12 +136,34 @@ def project_encounter(cur, encounter: dict, source_cache: dict):
         "page": encounter.get("page"),
         "resolution_type": "random_table",
         "tables": json.dumps(_parse_tables(encounter.get("tables"))),
-        "name": name,
-        "description": None,
+        "name": _encounter_title(prose),
+        "description": prose,
+        "primary_type": pillar,
+        "status": "ready",
+        "read_aloud": prose,
+        "objective": {
+            "combat": "Break the opposition's advantage and force it to retreat, surrender, or yield the objective.",
+            "social": "Discover what the other party truly wants and secure a workable agreement.",
+            "exploration": "Identify the danger, find a safe route through it, and preserve any useful clues.",
+        }[pillar],
+        "tags": ["imported", pillar],
         "raw_data": json.dumps(encounter),
     }
 
-    encounter_id, was_insert = db_mod.upsert(
-        cur, "encounters", ["name", "source_id"], values, conflict_where="source_id IS NOT NULL"
+    # Prefer the immutable upstream prose stored in raw_data when re-importing:
+    # the enrichment migration intentionally changes the display name, so name
+    # alone is no longer a safe idempotency key for an existing database.
+    cur.execute(
+        "SELECT id FROM encounters WHERE source_id = %s AND raw_data->>'name' = %s LIMIT 1",
+        (source_id, prose),
     )
+    existing = cur.fetchone()
+    if existing:
+        encounter_id, was_insert = existing[0], False
+        assignments = ", ".join(f"{column} = %s" for column in values)
+        cur.execute(f"UPDATE encounters SET {assignments} WHERE id = %s", [*values.values(), encounter_id])
+    else:
+        encounter_id, was_insert = db_mod.upsert(
+            cur, "encounters", ["name", "source_id"], values, conflict_where="source_id IS NOT NULL"
+        )
     return encounter_id, was_insert

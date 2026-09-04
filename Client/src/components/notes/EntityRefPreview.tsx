@@ -50,8 +50,7 @@ export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOp
 
   const layoutByCampaignId = usePlayLayoutStore((s) => s.byCampaignId);
   const ensureItemsPane = usePlayLayoutStore((s) => s.ensureItemsPane);
-  const openTab = usePlayItemsStore((s) => s.openTab);
-  const focusItem = usePlayItemsStore((s) => s.focusItem);
+  const focusItemInTab = usePlayItemsStore((s) => s.focusItemInTab);
 
   const creatures = getCreaturesForCampaign(useCreatureStore((s) => s.creaturesByCampaignId), campaignId);
   const spells = getSpellsForCampaign(useSpellStore((s) => s.spellsByCampaignId), campaignId);
@@ -105,8 +104,7 @@ export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOp
     const layoutState = getPlayLayoutState(layoutByCampaignId, campaignId);
     const slots = PLAY_LAYOUTS[layoutState.layoutId].slots;
     const slot = ensureItemsPane(campaignId, layoutState.layoutId, slots);
-    openTab(campaignId, slot, target.kind);
-    focusItem(campaignId, target.kind, target.itemId);
+    focusItemInTab(campaignId, slot, target.kind, target.itemId);
   };
 
   const refElementFromEvent = (e: React.SyntheticEvent): HTMLElement | null =>

@@ -26,12 +26,9 @@ export type LayoutNode = LeafNode | SplitNode;
 
 export type PlayLayoutId = 'single' | 'double-row' | 'double-col' | 'triple-even' | 'triple-half' | 'quad';
 
-export type PlayLayoutIconKey = PlayLayoutId;
-
 export interface PlayLayoutDef {
   id: PlayLayoutId;
   label: string;
-  iconKey: PlayLayoutIconKey;
   root: LayoutNode;
   /** Every pane slot present in this layout, left-to-right/top-to-bottom - drives default
    * window-kind assignment and the window-type-switcher menu. */
@@ -46,35 +43,30 @@ export const PLAY_LAYOUTS: Record<PlayLayoutId, PlayLayoutDef> = {
   single: {
     id: 'single',
     label: 'Single window',
-    iconKey: 'single',
     root: leaf('p1'),
     slots: ['p1'],
   },
   'double-row': {
     id: 'double-row',
     label: 'Two windows, side by side',
-    iconKey: 'double-row',
     root: { type: 'split', direction: 'row', path: '', children: [leaf('p1'), leaf('p2')] },
     slots: ['p1', 'p2'],
   },
   'double-col': {
     id: 'double-col',
     label: 'Two windows, stacked',
-    iconKey: 'double-col',
     root: { type: 'split', direction: 'column', path: '', children: [leaf('p1'), leaf('p2')] },
     slots: ['p1', 'p2'],
   },
   'triple-even': {
     id: 'triple-even',
     label: 'Three windows, evenly split',
-    iconKey: 'triple-even',
     root: { type: 'split', direction: 'row', path: '', children: [leaf('p1'), leaf('p2'), leaf('p3')] },
     slots: ['p1', 'p2', 'p3'],
   },
   'triple-half': {
     id: 'triple-half',
     label: 'Three windows, one half + two quarters',
-    iconKey: 'triple-half',
     root: {
       type: 'split',
       direction: 'row',
@@ -86,7 +78,6 @@ export const PLAY_LAYOUTS: Record<PlayLayoutId, PlayLayoutDef> = {
   quad: {
     id: 'quad',
     label: 'Four windows, one per corner',
-    iconKey: 'quad',
     root: {
       type: 'split',
       direction: 'row',

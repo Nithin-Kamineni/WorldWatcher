@@ -22,10 +22,8 @@ import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
 import { useEncounterStore, getEncountersForCampaign } from '../../../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../../../store/useCreatureStore';
-import {
-  useRandomEncounterTableStore,
-  getRandomEncounterTablesForCampaign,
-} from '../../../store/useRandomEncounterTableStore';
+import { EMPTY_RANDOM_TABLE_RESULTS, useRandomTableStore } from '../../../store/useRandomTableStore';
+import type { RollResultItem } from '../../../types/randomTable';
 import { useTokenManagerUiStore } from '../../../store/useTokenManagerUiStore';
 import {
   getEncounterFallbackImage,
@@ -336,10 +334,21 @@ function RandomTableRollFlow({
   );
 }
 
-/** Bugs.txt #4: shown above the search bar only when the campaign has at least one Random
- * Encounter Table (defined in the DM panel's Encounters -> Random Encounters view). Rolling
- * picks an encounter from the table; "Use This Encounter" hands it to the same
- * `onLockEncounter` callback the manual picker below already uses, so the entire
+/** Follows a roll result's `nested` chain (cascading/table_ref formats resolve into another
+ * table's roll) down to the first item that actually names an encounter. */
+function firstEncounterRef(item: RollResultItem | null): RollResultItem | null {
+  let current = item;
+  while (current) {
+    if (current.kind === 'encounter_ref' && current.refId) return current;
+    current = current.nested?.items[0] ?? null;
+  }
+  return null;
+}
+
+/** Rolls one of this campaign's own "Wandering / Random" random tables (Random Tables +
+ * Encounters overhaul - replaces the old campaign-only RandomEncounterTable). Rolling picks an
+ * encounter (following any cascading sub-table roll); "Use This Encounter" hands it to the
+ * same `onLockEncounter` callback the manual picker below already uses, so the entire
  * locked/roster view (including that encounter's own per-encounter random-table roll, if it
  * has one) works with no further changes - see EncountersTokenTab's locked-encounter branch. */
 function RandomEncounterRollBlock({
@@ -351,30 +360,31 @@ function RandomEncounterRollBlock({
   encounters: Encounter[];
   onLockEncounter: (encounterId: string | null) => void;
 }) {
-  const tablesByCampaignId = useRandomEncounterTableStore((s) => s.tablesByCampaignId);
-  const fetchTablesForCampaign = useRandomEncounterTableStore((s) => s.fetchTablesForCampaign);
+  const resultKey = `map-encounters:${campaignId}`;
+  const results = useRandomTableStore((s) => s.resultSets[resultKey]?.results ?? EMPTY_RANDOM_TABLE_RESULTS);
+  const search = useRandomTableStore((s) => s.search);
+  const roll = useRandomTableStore((s) => s.roll);
   useEffect(() => {
-    fetchTablesForCampaign(campaignId);
-  }, [campaignId, fetchTablesForCampaign]);
-  const campaignTables = useMemo(
-    () => getRandomEncounterTablesForCampaign(tablesByCampaignId, campaignId),
-    [tablesByCampaignId, campaignId],
-  );
+    // 'own' only - this campaign's own homebrew tables, same scope the old
+    // campaign-only RandomEncounterTable list used (not the global 5etools catalog,
+    // which would clutter this quick-pick panel with dozens of unrelated tables).
+    search({ campaignId, scope: 'own', limit: 200 }, resultKey);
+  }, [campaignId, search, resultKey]);
+  const campaignTables = useMemo(() => results.filter((t) => t.campaignId === campaignId), [results, campaignId]);
 
   // Remembers which random table the DM was last rolling against, per campaign, across
   // Manage Tokens popover close/reopen and page reload (client-side UI convenience only).
   const lastEncounterTableIdByCampaignId = useTokenManagerUiStore((s) => s.lastEncounterTableIdByCampaignId);
   const setLastEncounterTableId = useTokenManagerUiStore((s) => s.setLastEncounterTableId);
   const selectedTableId = lastEncounterTableIdByCampaignId[campaignId] ?? null;
-  const [roll, setRoll] = useState<DieRoll | null>(null);
-  const [pickedIndex, setPickedIndex] = useState<number | null>(null);
+  const [rolling, setRolling] = useState(false);
+  const [pickedItem, setPickedItem] = useState<RollResultItem | null>(null);
 
   useEffect(() => {
     if (campaignTables.length === 0) return;
     if (!campaignTables.some((t) => t.id === selectedTableId)) {
       setLastEncounterTableId(campaignId, campaignTables[0].id);
-      setRoll(null);
-      setPickedIndex(null);
+      setPickedItem(null);
     }
   }, [campaignTables, selectedTableId, campaignId, setLastEncounterTableId]);
 
@@ -382,16 +392,17 @@ function RandomEncounterRollBlock({
 
   const table = campaignTables.find((t) => t.id === selectedTableId) ?? campaignTables[0];
 
-  const doRoll = () => {
-    if (table.entries.length === 0) return;
-    const result = rollExpression(table.dieExpression);
-    const index = ((result.total - 1) % table.entries.length + table.entries.length) % table.entries.length;
-    setRoll(result);
-    setPickedIndex(index);
+  const doRoll = async () => {
+    setRolling(true);
+    try {
+      const result = await roll(table.id);
+      setPickedItem(firstEncounterRef(result?.items[0] ?? null));
+    } finally {
+      setRolling(false);
+    }
   };
 
-  const pickedEntry = pickedIndex !== null ? table.entries[pickedIndex] : null;
-  const pickedEncounter = pickedEntry ? encounters.find((e) => e.id === pickedEntry.encounterId) ?? null : null;
+  const pickedEncounter = pickedItem?.refId ? encounters.find((e) => e.id === pickedItem.refId) ?? null : null;
 
   return (
     <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
@@ -410,8 +421,7 @@ function RandomEncounterRollBlock({
             value={table.id}
             onChange={(e) => {
               setLastEncounterTableId(campaignId, e.target.value);
-              setRoll(null);
-              setPickedIndex(null);
+              setPickedItem(null);
             }}
             slotProps={{ select: { MenuProps: { disablePortal: true } } }}
           >
@@ -424,12 +434,12 @@ function RandomEncounterRollBlock({
         )}
 
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Button size="small" variant="outlined" startIcon={<CasinoIcon fontSize="small" />} onClick={doRoll}>
-            Roll {table.dieExpression}
+          <Button size="small" variant="outlined" startIcon={<CasinoIcon fontSize="small" />} onClick={doRoll} disabled={rolling}>
+            Roll
           </Button>
-          {roll && (
+          {pickedItem && (
             <Typography variant="caption" color="text.secondary">
-              rolled {roll.total}
+              rolled {pickedItem.total}
             </Typography>
           )}
         </Stack>
@@ -447,26 +457,8 @@ function RandomEncounterRollBlock({
               </Typography>
             </Stack>
 
-            {table.entries.length > 1 && (
-              <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                {table.entries.map((entry, i) => {
-                  const enc = encounters.find((e) => e.id === entry.encounterId);
-                  return (
-                    <Chip
-                      key={entry.id}
-                      label={enc?.name ?? 'Unknown'}
-                      size="small"
-                      color={i === pickedIndex ? 'primary' : 'default'}
-                      variant={i === pickedIndex ? 'filled' : 'outlined'}
-                      onClick={() => setPickedIndex(i)}
-                    />
-                  );
-                })}
-              </Stack>
-            )}
-
             <Stack direction="row" spacing={1}>
-              <Button size="small" startIcon={<ReplayIcon fontSize="small" />} onClick={doRoll}>
+              <Button size="small" startIcon={<ReplayIcon fontSize="small" />} onClick={doRoll} disabled={rolling}>
                 Reroll
               </Button>
               <Button size="small" variant="contained" onClick={() => onLockEncounter(pickedEncounter.id)}>

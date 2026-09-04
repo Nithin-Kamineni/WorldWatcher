@@ -115,6 +115,37 @@ at a local copy of the [5etools](https://github.com/5etools-mirror-3) data - see
 folder's own docs for the exact pipeline stages. This step is optional for just running
 the app; campaigns, maps, factions, quests, and bastions all work without it.
 
+To install or refresh the selectable tables used by the phased NPC Builder on an existing
+database, run:
+
+```bash
+python ../Database/Maintainance/scripts/seed_npc_quick_roll_generator.py
+```
+
+To install or refresh the four guided Place Builders, run:
+
+```bash
+python ../Database/Maintainance/scripts/seed_place_builders.py
+python ../Database/Maintainance/scripts/seed_encounter_builders.py
+```
+
+To refresh the entire random-table catalog (taxonomy, NPC/Place/Encounter builders,
+the original DM toolkit, SRD card reference, and legacy range repairs) in one
+transaction, run:
+
+```bash
+python ../Database/Maintainance/scripts/seed_random_tables_taxonomy.py
+```
+
+To perform a read-only integrity audit afterward, run:
+
+```bash
+python ../Database/Maintainance/scripts/audit_random_tables.py
+```
+
+The taxonomy seed is idempotent and includes all builders automatically. It replaces
+only system-owned seed tables; campaign-created random tables are not modified.
+
 ### 3. Frontend
 
 ```bash
