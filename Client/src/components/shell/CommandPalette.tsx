@@ -124,6 +124,7 @@ export function CommandPalette({ worldId, campaignId }: CommandPaletteProps) {
       list.push({ id: 'go-notes-folders', group: 'Go to', label: 'Notes - Folders', onSelect: () => go(`/w/${worldId}/c/${campaignId}/notes?tab=folders`) });
       list.push({ id: 'go-notes-plots', group: 'Go to', label: 'Notes - Plots', sublabel: 'Coming soon', onSelect: () => go(`/w/${worldId}/c/${campaignId}/notes?tab=plots`) });
       list.push({ id: 'go-notes-quests', group: 'Go to', label: 'Notes - Quests', onSelect: () => go(`/w/${worldId}/c/${campaignId}/notes?tab=quests`) });
+      list.push({ id: 'go-tables', group: 'Go to', label: 'Random Tables', onSelect: () => go(`/w/${worldId}/c/${campaignId}/tables`) });
       list.push({ id: 'go-encounters', group: 'Go to', label: 'Encounters', onSelect: () => go(`/w/${worldId}/c/${campaignId}/encounters`) });
       list.push({ id: 'go-maps', group: 'Go to', label: 'Maps', onSelect: () => go(`/w/${worldId}/c/${campaignId}/maps`) });
       list.push({ id: 'go-characters', group: 'Go to', label: 'Characters', onSelect: () => go(`/w/${worldId}/manager?folder=characters`) });
@@ -188,7 +189,9 @@ export function CommandPalette({ worldId, campaignId }: CommandPaletteProps) {
           group: 'Jump to',
           label: e.name,
           sublabel: 'Encounter',
-          onSelect: () => go(`/w/${worldId}/c/${campaignId}/encounters`),
+          // Deep-links to the row rather than the list: EncountersPage reads ?encounter= and
+          // opens it, which is the whole point of picking one by name in the palette.
+          onSelect: () => go(`/w/${worldId}/c/${campaignId}/encounters?encounter=${e.id}`),
         }),
       );
       (mapsByCampaignId[campaignId] ?? []).forEach((m) =>

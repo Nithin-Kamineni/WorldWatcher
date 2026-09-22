@@ -1,80 +1,44 @@
-import { useRef } from 'react';
+import { memo } from 'react';
 import { Layer, Group, Image as KonvaImage } from 'react-konva';
 import useImage from 'use-image';
+import type { BackgroundFit } from '../../utils/mapFit';
 import type { StagePoint } from '../../utils/tokenDrag';
 
 interface MapBackgroundLayerProps {
   src: string;
-  stageWidth: number;
-  stageHeight: number;
+  /** Where the image lands in stage-local space. Computed and frozen by
+   * MapCanvas, which owns it because fog and walls need the same transform -
+   * see utils/mapFit.ts. Null until the image has loaded and the container
+   * has been measured. */
+  fit: BackgroundFit | null;
   flipPivot: StagePoint;
   flippedHorizontal?: boolean;
   flippedVertical?: boolean;
   rotation?: number;
-  /** Bump to force the frozen fit to recompute against the current stageWidth/stageHeight
-   * and rotation even though `src` hasn't changed - used by "Reset View" to truly re-fit
-   * to the live viewport (including a rotation change) without affecting ordinary
-   * container resizes or single Rotate clicks, which must keep the frozen scale to avoid
-   * placed tokens drifting relative to the background. */
-  fitResetEpoch?: number;
 }
 
-interface BackgroundFit {
-  src: string;
-  epoch: number;
-  scale: number;
-  x: number;
-  y: number;
-}
-
-export function MapBackgroundLayer({
+/**
+ * Memoised: every prop here is a primitive or a frozen object (`fit`,
+ * `flipPivot`), and none of them change while a token is being moved. Without
+ * this, re-rendering MapCanvas re-applied the Group's props and Konva marked
+ * this layer dirty, so the full-size scaled background bitmap was redrawn on
+ * every unrelated state change on the page.
+ */
+export const MapBackgroundLayer = memo(function MapBackgroundLayer({
   src,
-  stageWidth,
-  stageHeight,
+  fit,
   flipPivot,
   flippedHorizontal,
   flippedVertical,
   rotation,
-  fitResetEpoch = 0,
 }: MapBackgroundLayerProps) {
+  // Shares use-image's cache with MapCanvas's own useImage(src) for the same
+  // URL, so this is not a second fetch.
   const [image] = useImage(src);
-  // Tokens/grid/shapes live in raw stage-pixel space and never move on their own, so the
-  // background's fit-to-container scale must be computed once per image and then frozen -
-  // otherwise every container resize (e.g. opening/closing the sidebar) re-fits the image
-  // to the new size while tokens stay put, making them appear to drift off their squares.
-  const fitRef = useRef<BackgroundFit | null>(null);
 
-  if (
-    image &&
-    stageWidth > 0 &&
-    stageHeight > 0 &&
-    (fitRef.current?.src !== src || fitRef.current?.epoch !== fitResetEpoch)
-  ) {
-    // The pre-rotation image is always centered on `flipPivot` (see the Group below), so
-    // rotating it in place keeps it centered - only the scale needs to account for the
-    // on-screen bounding box swapping width/height at 90/270.
-    const rotated = rotation === 90 || rotation === 270;
-    const effW = rotated ? image.height : image.width;
-    const effH = rotated ? image.width : image.height;
-    const scale = Math.min(stageWidth / effW, stageHeight / effH);
-    fitRef.current = {
-      src,
-      epoch: fitResetEpoch,
-      scale,
-      x: (stageWidth - image.width * scale) / 2,
-      y: (stageHeight - image.height * scale) / 2,
-    };
-  }
-
-  const fit = fitRef.current?.src === src && fitRef.current?.epoch === fitResetEpoch ? fitRef.current : null;
   if (!image || !fit) {
     return <Layer />;
   }
-
-  const width = image.width * fit.scale;
-  const height = image.height * fit.scale;
-  const x = fit.x;
-  const y = fit.y;
 
   return (
     <Layer listening={false}>
@@ -87,8 +51,14 @@ export function MapBackgroundLayer({
         scaleX={flippedHorizontal ? -1 : 1}
         scaleY={flippedVertical ? -1 : 1}
       >
-        <KonvaImage image={image} x={x} y={y} width={width} height={height} />
+        <KonvaImage
+          image={image}
+          x={fit.x}
+          y={fit.y}
+          width={image.width * fit.scale}
+          height={image.height * fit.scale}
+        />
       </Group>
     </Layer>
   );
-}
+});

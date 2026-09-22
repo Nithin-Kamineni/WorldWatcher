@@ -17,6 +17,7 @@ from app.schemas.article import (
     ArticleUpdate,
 )
 from app.schemas.common import Page, PageMeta
+from app.services import revisions
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 folders_router = APIRouter(prefix="/article-folders", tags=["articles"])
@@ -48,26 +49,38 @@ async def get_article(article_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 async def create_article(payload: ArticleCreate, db: AsyncSession = Depends(get_db)):
     obj = Article(**create_kwargs(payload))
     db.add(obj)
+    # Flushed before recording so the revision row can carry the id the history will need
+    # to restore it later.
+    await db.flush()
+    world_id = await revisions.record(db, obj, action="create")
     await db.commit()
     await db.refresh(obj)
+    await revisions.prune(db, world_id)
     return obj
 
 
 @router.patch("/{article_id}", response_model=ArticleRead)
 async def update_article(article_id: uuid.UUID, payload: ArticleUpdate, db: AsyncSession = Depends(get_db)):
     obj = await get_or_404(db, Article, article_id)
+    before = revisions.snapshot(obj)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, key, value)
+    world_id = await revisions.record(db, obj, action="update", before=before)
     await db.commit()
     await db.refresh(obj)
+    await revisions.prune(db, world_id)
     return obj
 
 
 @router.delete("/{article_id}", status_code=204)
 async def delete_article(article_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     obj = await get_or_404(db, Article, article_id)
+    # Snapshot first: after the delete the row is gone, and the snapshot is the only thing
+    # that can bring it back.
+    world_id = await revisions.record(db, obj, action="delete", before=revisions.snapshot(obj))
     await db.delete(obj)
     await db.commit()
+    await revisions.prune(db, world_id)
 
 
 @folders_router.get("", response_model=Page[ArticleFolderRead])

@@ -1,17 +1,22 @@
-import { useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Stage } from 'react-konva';
 import type Konva from 'konva';
 import Box from '@mui/material/Box';
+import useImage from 'use-image';
 import { useResponsiveStageSize } from '../../hooks/useResponsiveStageSize';
 import { useStagePanZoom } from '../../hooks/useStagePanZoom';
 import { MapBackgroundLayer } from './MapBackgroundLayer';
 import { MapObjectsLayer } from './MapObjectsLayer';
 import { MapOverlayLayer } from './MapOverlayLayer';
+import { MapFogLayer, type FogBrushStroke } from './MapFogLayer';
+import { MapWallsLayer } from './MapWallsLayer';
 import type { PlacedToken } from '../../types/token';
 import type { AoEShape, AoEShapeType } from '../../types/shape';
 import { CONE_ANGLE_DEGREES, DEFAULT_MARKER_WIDTH, THIN_LINE_WIDTH } from '../../types/shape';
 import type { GridType } from '../../types/map';
+import type { FogState, WallSegment } from '../../types/fog';
 import type { MapToolMode } from '../../types/tool';
+import { computeBackgroundFit, stagePointToImage, type BackgroundFit } from '../../utils/mapFit';
 import {
   ENCOUNTER_ENTRY_DRAG_MIME,
   FAVORITE_CREATURE_DRAG_MIME,
@@ -47,9 +52,31 @@ interface MapCanvasProps {
   flippedHorizontal?: boolean;
   flippedVertical?: boolean;
   rotation?: number;
-  /** See MapBackgroundLayer's fitResetEpoch - forces both the background's fit and this
-   * component's rotate/flip pivot to recompute against the live container size. */
+  /** Bump to re-frame the authored canvas in the current viewport, discarding whatever the
+   * DM has panned/zoomed to. Reset View uses it. It no longer recomputes the background fit
+   * - that is a pure function of the authored size now, so there is nothing to reset. */
   fitResetEpoch?: number;
+  // --- fog of war ---
+  fog: FogState;
+  walls: WallSegment[];
+  /** Line-of-sight polygons, flat [x,y,...] in image space, one per seeing token. */
+  visionPolygons: number[][];
+  showWalls: boolean;
+  playerPreview: boolean;
+  fogBrushRadius: number;
+  /** Fires once per completed brush stroke, with every point the pointer
+   * visited in image space - see the painting note in handleMouseUp. */
+  onFogPaint: (imagePoints: StagePoint[], radius: number, reveal: boolean) => void;
+  onWallComplete: (imagePoints: number[]) => void;
+  onEraseWall: (wallId: string) => void;
+  /** Reports the background fit upward; MapPage needs it to run line-of-sight and to
+   * place auto-detected walls. */
+  onFitChange: (fit: BackgroundFit | null) => void;
+  /** The canvas size this floor's tokens/shapes were authored against - see
+   * MapFloor.authoredStage. Undefined on a floor that predates it. */
+  authoredStage?: { width: number; height: number };
+  /** Fired once for a floor that has no authored size yet, with the size to adopt. */
+  onAuthoredStageResolved: (size: { width: number; height: number }) => void;
 }
 
 const MIN_DRAFT_SIZE = 6;
@@ -179,15 +206,30 @@ export function MapCanvas({
   flippedVertical,
   rotation,
   fitResetEpoch = 0,
+  fog,
+  walls,
+  visionPolygons,
+  showWalls,
+  playerPreview,
+  fogBrushRadius,
+  onFogPaint,
+  onWallComplete,
+  onEraseWall,
+  onFitChange,
+  authoredStage,
+  onAuthoredStageResolved,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { width, height } = useResponsiveStageSize(containerRef);
   const { onWheel, onTouchMove, onTouchEnd } = useStagePanZoom();
+  const [image] = useImage(backgroundImageSrc);
 
   const isRulerTool = activeTool === 'ruler';
   const isMarkerTool = activeTool === 'marker';
   const isAoEDrawTool = activeTool in AOE_TOOL_TO_SHAPE;
   const isDrawingTool = isAoEDrawTool || isMarkerTool;
+  const isFogBrush = activeTool === 'fog-reveal' || activeTool === 'fog-hide';
+  const isWallDraw = activeTool === 'wall-draw';
 
   const draftStart = useRef<StagePoint | null>(null);
   const [draftShape, setDraftShape] = useState<AoEShape | null>(null);
@@ -195,24 +237,62 @@ export function MapCanvas({
   const rulerStart = useRef<StagePoint | null>(null);
   const [rulerLine, setRulerLine] = useState<{ start: StagePoint; end: StagePoint } | null>(null);
 
-  // The rotate/flip pivot must stay fixed relative to the floor's content, not the live
-  // container size - otherwise resizing the container (e.g. opening/closing the sidebar)
-  // while flipped/rotated shifts the pivot and visibly drags the whole floor (background,
-  // tokens, grid, shapes) with it. Freeze it to the first valid measurement per floor.
-  const pivotSizeRef = useRef<{ src: string; epoch: number; width: number; height: number } | null>(null);
-  if (
-    width > 0 &&
-    height > 0 &&
-    (pivotSizeRef.current?.src !== backgroundImageSrc || pivotSizeRef.current?.epoch !== fitResetEpoch)
-  ) {
-    pivotSizeRef.current = { src: backgroundImageSrc, epoch: fitResetEpoch, width, height };
-  }
-  const pivotSize =
-    pivotSizeRef.current?.src === backgroundImageSrc && pivotSizeRef.current?.epoch === fitResetEpoch
-      ? pivotSizeRef.current
-      : { width, height };
-  const flipPivot = { x: pivotSize.width / 2, y: pivotSize.height / 2 };
+  const fogStroke = useRef<StagePoint[] | null>(null);
+  const [fogPreview, setFogPreview] = useState<FogBrushStroke | null>(null);
+  const wallStart = useRef<StagePoint | null>(null);
+  const [draftWall, setDraftWall] = useState<number[] | null>(null);
+
+  // EVERYTHING below is laid out against the AUTHORED canvas size, never the live one.
+  //
+  // Tokens, shapes and the grid are stored in raw stage pixels. If the background's fit were
+  // computed from the live canvas, opening the map at any other window size would re-fit the
+  // background while the tokens kept their old numbers - which is exactly the bug where a
+  // token reappears somewhere else. Pinning the authored size makes the fit a pure function
+  // of stored data, so a token's coordinates mean the same thing forever, and adapting to
+  // the window that is actually open becomes one transform on the Stage (below) that moves
+  // the background and the tokens together.
+  const authoredW = authoredStage?.width ?? (width > 0 ? width : 0);
+  const authoredH = authoredStage?.height ?? (height > 0 ? height : 0);
+  const hasAuthored = authoredW > 0 && authoredH > 0;
+
+  // A floor with no authored size yet is being opened for the first time since this became
+  // viewport-independent: adopt the current canvas, which pins every existing token exactly
+  // where it renders right now, and persist it so it never shifts again.
+  useEffect(() => {
+    if (!authoredStage && authoredW > 0 && authoredH > 0) {
+      onAuthoredStageResolved({ width: authoredW, height: authoredH });
+    }
+  }, [authoredStage, authoredW, authoredH, onAuthoredStageResolved]);
+
+  // Memoised because it is a prop on EVERY layer. As a fresh object literal it changed
+  // identity on each render, so react-konva re-applied it to all five Groups and Konva
+  // marked all five layers dirty - including a full redraw of the scaled background bitmap -
+  // every time anything on the page changed, e.g. a token moving.
+  const flipPivot = useMemo(() => ({ x: authoredW / 2, y: authoredH / 2 }), [authoredW, authoredH]);
   const transform: FloorTransform = { pivot: flipPivot, flippedHorizontal, flippedVertical, rotation };
+
+  const fit = useMemo(
+    () => (image && hasAuthored ? computeBackgroundFit(authoredW, authoredH, image.width, image.height, rotation) : null),
+    [image, hasAuthored, authoredW, authoredH, rotation],
+  );
+
+  useEffect(() => {
+    onFitChange(fit);
+  }, [fit, onFitChange]);
+
+  // Contain-fit the authored canvas into whatever the window actually gives us. This is a
+  // Stage transform, so it scales background, tokens, grid and fog as one - nothing moves
+  // relative to anything else. Reapplied when the container resizes or Reset View bumps the
+  // epoch, which does mean a resize re-frames the map; that is the same thing every map
+  // viewer does, and the alternative is content drifting out of view.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !hasAuthored || width <= 0 || height <= 0) return;
+    const scale = Math.min(width / authoredW, height / authoredH);
+    stage.scale({ x: scale, y: scale });
+    stage.position({ x: (width - authoredW * scale) / 2, y: (height - authoredH * scale) / 2 });
+    stage.batchDraw();
+  }, [stageRef, hasAuthored, authoredW, authoredH, width, height, fitResetEpoch]);
 
   const getStagePoint = (): StagePoint | null => {
     const stage = stageRef.current;
@@ -223,7 +303,32 @@ export function MapCanvas({
     return { x: (pointer.x - stage.x()) / scale, y: (pointer.y - stage.y()) / scale };
   };
 
+  /** Visual stage point -> image-pixel space, the space walls and fog live in. */
+  const getImagePoint = (): StagePoint | null => {
+    if (!fit) return null;
+    const visual = getStagePoint();
+    if (!visual) return null;
+    const local = toLocalPoint(visual, transform);
+    return stagePointToImage(local.x, local.y, fit);
+  };
+
   const handleMouseDown = () => {
+    if (isFogBrush) {
+      const point = getImagePoint();
+      if (!point) return;
+      fogStroke.current = [point];
+      setFogPreview({ points: [point], radius: fogBrushRadius, reveal: activeTool === 'fog-reveal' });
+      return;
+    }
+
+    if (isWallDraw) {
+      const point = getImagePoint();
+      if (!point) return;
+      wallStart.current = point;
+      setDraftWall([point.x, point.y, point.x, point.y]);
+      return;
+    }
+
     const point = getStagePoint();
     if (!point) return;
 
@@ -269,6 +374,27 @@ export function MapCanvas({
   };
 
   const handleMouseMove = () => {
+    if (isFogBrush) {
+      if (!fogStroke.current) return;
+      const point = getImagePoint();
+      if (!point) return;
+      fogStroke.current.push(point);
+      setFogPreview({
+        points: [...fogStroke.current],
+        radius: fogBrushRadius,
+        reveal: activeTool === 'fog-reveal',
+      });
+      return;
+    }
+
+    if (isWallDraw) {
+      if (!wallStart.current) return;
+      const point = getImagePoint();
+      if (!point) return;
+      setDraftWall([wallStart.current.x, wallStart.current.y, point.x, point.y]);
+      return;
+    }
+
     if (isRulerTool) {
       if (!rulerStart.current) return;
       const point = getStagePoint();
@@ -311,6 +437,31 @@ export function MapCanvas({
   };
 
   const handleMouseUp = () => {
+    // A brush stroke is applied to the stored mask ONCE, on release, rather than per
+    // pointer-move: every floor mutation round-trips a PATCH through mapSync, and a single
+    // drag across the map is easily 200 moves. The live feedback during the drag comes from
+    // fogPreview, which the fog layer paints on top of the committed mask.
+    if (isFogBrush) {
+      const stroke = fogStroke.current;
+      fogStroke.current = null;
+      setFogPreview(null);
+      if (stroke && stroke.length > 0) {
+        onFogPaint(stroke, fogBrushRadius, activeTool === 'fog-reveal');
+      }
+      return;
+    }
+
+    if (isWallDraw) {
+      const start = wallStart.current;
+      wallStart.current = null;
+      const draft = draftWall;
+      setDraftWall(null);
+      if (start && draft && Math.hypot(draft[2] - draft[0], draft[3] - draft[1]) > MIN_DRAFT_SIZE) {
+        onWallComplete(draft);
+      }
+      return;
+    }
+
     if (isRulerTool) {
       rulerStart.current = null;
       setRulerLine(null);
@@ -400,13 +551,11 @@ export function MapCanvas({
       >
         <MapBackgroundLayer
           src={backgroundImageSrc}
-          stageWidth={width}
-          stageHeight={height}
+          fit={fit}
           flipPivot={flipPivot}
           flippedHorizontal={flippedHorizontal}
           flippedVertical={flippedVertical}
           rotation={rotation}
-          fitResetEpoch={fitResetEpoch}
         />
         <MapObjectsLayer
           tokens={tokens}
@@ -420,9 +569,11 @@ export function MapCanvas({
           flippedVertical={flippedVertical}
           rotation={rotation}
         />
+        {/* The grid is sized to the AUTHORED canvas, not the live one: it is content, and
+            has to line up with the tokens standing on it whatever the window size. */}
         <MapOverlayLayer
-          stageWidth={width}
-          stageHeight={height}
+          stageWidth={authoredW}
+          stageHeight={authoredH}
           gridEnabled={gridEnabled}
           gridSize={gridSize}
           gridColor={gridColor}
@@ -438,6 +589,36 @@ export function MapCanvas({
           flippedVertical={flippedVertical}
           rotation={rotation}
         />
+        {/* Fog sits above the grid and the tokens so that "preview as players see it" is
+            honest. In the DM's own view the whole layer is translucent, so tokens and
+            terrain stay readable underneath it. */}
+        {fit && (
+          <MapFogLayer
+            fog={fog}
+            fit={fit}
+            visionPolygons={visionPolygons}
+            brushPreview={fogPreview}
+            playerPreview={playerPreview}
+            flipPivot={flipPivot}
+            flippedHorizontal={flippedHorizontal}
+            flippedVertical={flippedVertical}
+            rotation={rotation}
+          />
+        )}
+        {fit && (
+          <MapWallsLayer
+            walls={walls}
+            fit={fit}
+            visible={showWalls}
+            interactive={activeTool === 'wall-erase'}
+            onEraseWall={onEraseWall}
+            draftWall={draftWall}
+            flipPivot={flipPivot}
+            flippedHorizontal={flippedHorizontal}
+            flippedVertical={flippedVertical}
+            rotation={rotation}
+          />
+        )}
       </Stage>
     </Box>
   );

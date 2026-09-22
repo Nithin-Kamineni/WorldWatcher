@@ -36,9 +36,22 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import { DiceRollerPopover } from './DiceRollerPopover';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
+import Button from '@mui/material/Button';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import CircularProgress from '@mui/material/CircularProgress';
+import CloudIcon from '@mui/icons-material/Cloud';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import BrushIcon from '@mui/icons-material/Brush';
+import FormatColorResetIcon from '@mui/icons-material/FormatColorReset';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import type { MapToolMode } from '../../../types/tool';
 import { AOE_COLOR_PRESETS, MAX_MARKER_WIDTH, MIN_MARKER_WIDTH } from '../../../types/shape';
 import type { GridType } from '../../../types/map';
+import type { WallDetectMode } from '../../../types/fog';
+import { FOG_BRUSH_MAX, FOG_BRUSH_MIN, WALL_DETECT_MODES } from '../../../types/fog';
 
 interface MapToolbarProps {
   gridEnabled: boolean;
@@ -70,6 +83,27 @@ interface MapToolbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onOpenTokenManager: (anchorEl: HTMLElement) => void;
+  // --- fog of war ---
+  fogEnabled: boolean;
+  onToggleFog: () => void;
+  playerPreview: boolean;
+  onTogglePlayerPreview: () => void;
+  fogBrushRadius: number;
+  onFogBrushRadiusChange: (radius: number) => void;
+  onRevealAll: () => void;
+  onHideAll: () => void;
+  /** Default sight range for party tokens, in grid squares. */
+  visionSquares: number;
+  onVisionSquaresChange: (squares: number) => void;
+  selectedTokenCount: number;
+  onGrantSight: () => void;
+  onRemoveSight: () => void;
+  showWalls: boolean;
+  onToggleShowWalls: () => void;
+  wallCount: number;
+  onClearWalls: () => void;
+  onDetectWalls: (mode: WallDetectMode, sensitivity: number) => void;
+  detectingWalls: boolean;
 }
 
 const SHAPE_TOOLS: { tool: MapToolMode; label: string; icon: ReactNode }[] = [
@@ -134,11 +168,33 @@ export function MapToolbar({
   onUndo,
   onRedo,
   onOpenTokenManager,
+  fogEnabled,
+  onToggleFog,
+  playerPreview,
+  onTogglePlayerPreview,
+  fogBrushRadius,
+  onFogBrushRadiusChange,
+  onRevealAll,
+  onHideAll,
+  visionSquares,
+  onVisionSquaresChange,
+  selectedTokenCount,
+  onGrantSight,
+  onRemoveSight,
+  showWalls,
+  onToggleShowWalls,
+  wallCount,
+  onClearWalls,
+  onDetectWalls,
+  detectingWalls,
 }: MapToolbarProps) {
   const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
   const [shapesAnchor, setShapesAnchor] = useState<HTMLElement | null>(null);
   const [gridAnchor, setGridAnchor] = useState<HTMLElement | null>(null);
   const [diceAnchor, setDiceAnchor] = useState<HTMLElement | null>(null);
+  const [fogAnchor, setFogAnchor] = useState<HTMLElement | null>(null);
+  const [detectMode, setDetectMode] = useState<WallDetectMode>('painted');
+  const [detectSensitivity, setDetectSensitivity] = useState(50);
   const [collapsed, setCollapsed] = useState(false);
   const tokenManagerButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -151,10 +207,16 @@ export function MapToolbar({
     setShapesAnchor(null);
     setGridAnchor(null);
     setDiceAnchor(null);
+    setFogAnchor(null);
     setCollapsed((c) => !c);
   };
 
   const isShapeToolActive = SHAPE_TOOLS.some((s) => s.tool === activeTool);
+  const isFogToolActive =
+    activeTool === 'fog-reveal' ||
+    activeTool === 'fog-hide' ||
+    activeTool === 'wall-draw' ||
+    activeTool === 'wall-erase';
 
   if (collapsed) {
     return (
@@ -256,6 +318,15 @@ export function MapToolbar({
           onClick={() => handleToolClick('ruler')}
         >
           <StraightenIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+      <Tooltip title="Fog of war & walls">
+        <IconButton
+          size="small"
+          color={fogEnabled || isFogToolActive ? 'primary' : 'default'}
+          onClick={(e) => setFogAnchor(e.currentTarget)}
+        >
+          <CloudIcon fontSize="small" />
         </IconButton>
       </Tooltip>
       <Tooltip title="Shape / marker color">
@@ -454,6 +525,206 @@ export function MapToolbar({
             step={1}
             onChange={(_e, value) => onGridThicknessChange(value as number)}
           />
+        </Box>
+      </Popover>
+
+      <Popover
+        open={!!fogAnchor}
+        anchorEl={fogAnchor}
+        onClose={() => setFogAnchor(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Box sx={{ p: 1.5, width: 288 }}>
+          <FormControlLabel
+            control={<Switch size="small" checked={fogEnabled} onChange={onToggleFog} />}
+            label="Fog of war"
+            slotProps={{ typography: { variant: 'body2' } }}
+          />
+          <FormControlLabel
+            control={<Switch size="small" checked={playerPreview} onChange={onTogglePlayerPreview} />}
+            label="Preview as players see it"
+            disabled={!fogEnabled}
+            slotProps={{ typography: { variant: 'body2' } }}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            Your own view keeps the fog translucent so you can still read the map underneath.
+          </Typography>
+
+          <Divider sx={{ my: 1 }} />
+
+          <Typography variant="caption" color="text.secondary">
+            Reveal by hand
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+            <Button
+              size="small"
+              fullWidth
+              startIcon={<BrushIcon fontSize="small" />}
+              variant={activeTool === 'fog-reveal' ? 'contained' : 'outlined'}
+              disabled={!fogEnabled}
+              onClick={() => onSelectTool(activeTool === 'fog-reveal' ? 'select' : 'fog-reveal')}
+            >
+              Reveal
+            </Button>
+            <Button
+              size="small"
+              fullWidth
+              startIcon={<FormatColorResetIcon fontSize="small" />}
+              variant={activeTool === 'fog-hide' ? 'contained' : 'outlined'}
+              disabled={!fogEnabled}
+              onClick={() => onSelectTool(activeTool === 'fog-hide' ? 'select' : 'fog-hide')}
+            >
+              Hide
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            Brush size: {fogBrushRadius}px
+          </Typography>
+          <Slider
+            size="small"
+            value={fogBrushRadius}
+            min={FOG_BRUSH_MIN}
+            max={FOG_BRUSH_MAX}
+            step={10}
+            disabled={!fogEnabled}
+            onChange={(_e, value) => onFogBrushRadiusChange(value as number)}
+          />
+          <Stack direction="row" spacing={1}>
+            <Button size="small" fullWidth disabled={!fogEnabled} onClick={onRevealAll}>
+              Reveal all
+            </Button>
+            <Button size="small" fullWidth disabled={!fogEnabled} onClick={onHideAll}>
+              Hide all
+            </Button>
+          </Stack>
+
+          <Divider sx={{ my: 1 }} />
+
+          <Typography variant="caption" color="text.secondary">
+            Sight range: {visionSquares} squares ({visionSquares * 5} ft)
+          </Typography>
+          <Slider
+            size="small"
+            value={visionSquares}
+            min={0}
+            max={40}
+            step={1}
+            disabled={!fogEnabled}
+            onChange={(_e, value) => onVisionSquaresChange(value as number)}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            Every token sees this far. Select tokens to override, or Blind them.
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button
+              size="small"
+              fullWidth
+              startIcon={<VisibilityIcon fontSize="small" />}
+              disabled={!fogEnabled || selectedTokenCount === 0}
+              onClick={onGrantSight}
+            >
+              Grant sight
+            </Button>
+            <Button
+              size="small"
+              fullWidth
+              disabled={!fogEnabled || selectedTokenCount === 0}
+              onClick={onRemoveSight}
+            >
+              Blind
+            </Button>
+          </Stack>
+
+          <Divider sx={{ my: 1 }} />
+
+          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography variant="caption" color="text.secondary">
+              Walls ({wallCount})
+            </Typography>
+            <FormControlLabel
+              control={<Switch size="small" checked={showWalls} onChange={onToggleShowWalls} />}
+              label="Show"
+              slotProps={{ typography: { variant: 'caption' } }}
+              sx={{ mr: 0 }}
+            />
+          </Stack>
+          <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+            <Button
+              size="small"
+              fullWidth
+              startIcon={<TimelineIcon fontSize="small" />}
+              variant={activeTool === 'wall-draw' ? 'contained' : 'outlined'}
+              onClick={() => onSelectTool(activeTool === 'wall-draw' ? 'select' : 'wall-draw')}
+            >
+              Draw
+            </Button>
+            <Button
+              size="small"
+              fullWidth
+              startIcon={<AutoFixNormalIcon fontSize="small" />}
+              variant={activeTool === 'wall-erase' ? 'contained' : 'outlined'}
+              onClick={() => onSelectTool(activeTool === 'wall-erase' ? 'select' : 'wall-erase')}
+            >
+              Erase
+            </Button>
+          </Stack>
+
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+            Detect walls from the image
+          </Typography>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={detectMode}
+            onChange={(_e, value) => value && setDetectMode(value as WallDetectMode)}
+            fullWidth
+            sx={{ mt: 0.5 }}
+          >
+            {WALL_DETECT_MODES.map((mode) => (
+              <ToggleButton key={mode.value} value={mode.value} title={mode.hint}>
+                {mode.label}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            Sensitivity: {detectSensitivity}
+          </Typography>
+          <Slider
+            size="small"
+            value={detectSensitivity}
+            min={5}
+            max={95}
+            step={5}
+            onChange={(_e, value) => setDetectSensitivity(value as number)}
+          />
+          <Button
+            size="small"
+            fullWidth
+            variant="outlined"
+            startIcon={
+              detectingWalls ? <CircularProgress size={14} /> : <AutoAwesomeIcon fontSize="small" />
+            }
+            disabled={detectingWalls}
+            onClick={() => onDetectWalls(detectMode, detectSensitivity)}
+          >
+            {detectingWalls ? 'Detecting…' : 'Detect walls'}
+          </Button>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            Adds to the existing walls, and expects cleanup — trace anything it misses with
+            Draw, and remove its mistakes with Erase.
+          </Typography>
+          <Button
+            size="small"
+            fullWidth
+            color="error"
+            startIcon={<DeleteSweepIcon fontSize="small" />}
+            disabled={wallCount === 0}
+            onClick={onClearWalls}
+            sx={{ mt: 0.5 }}
+          >
+            Clear all walls
+          </Button>
         </Box>
       </Popover>
 

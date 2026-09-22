@@ -17,6 +17,7 @@ from app.schemas.campaign import (
     FactionUpdate,
 )
 from app.schemas.common import Page, PageMeta
+from app.services import revisions
 
 router = APIRouter(prefix="/factions", tags=["factions"])
 
@@ -84,23 +85,31 @@ async def get_faction(faction_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 async def create_faction(payload: FactionCreate, db: AsyncSession = Depends(get_db)):
     obj = Faction(**payload.model_dump())
     db.add(obj)
+    await db.flush()
+    world_id = await revisions.record(db, obj, action="create")
     await db.commit()
     await db.refresh(obj)
+    await revisions.prune(db, world_id)
     return obj
 
 
 @router.patch("/{faction_id}", response_model=FactionRead)
 async def update_faction(faction_id: uuid.UUID, payload: FactionUpdate, db: AsyncSession = Depends(get_db)):
     obj = await get_or_404(db, Faction, faction_id)
+    before = revisions.snapshot(obj)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, key, value)
+    world_id = await revisions.record(db, obj, action="update", before=before)
     await db.commit()
     await db.refresh(obj)
+    await revisions.prune(db, world_id)
     return obj
 
 
 @router.delete("/{faction_id}", status_code=204)
 async def delete_faction(faction_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     obj = await get_or_404(db, Faction, faction_id)
+    world_id = await revisions.record(db, obj, action="delete", before=revisions.snapshot(obj))
     await db.delete(obj)
     await db.commit()
+    await revisions.prune(db, world_id)

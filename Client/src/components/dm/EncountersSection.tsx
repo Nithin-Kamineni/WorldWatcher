@@ -1,83 +1,72 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import ButtonBase from '@mui/material/ButtonBase';
 import Tooltip from '@mui/material/Tooltip';
-import IconButton from '@mui/material/IconButton';
+import Paper from '@mui/material/Paper';
+import Chip from '@mui/material/Chip';
+import Collapse from '@mui/material/Collapse';
+import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import InputAdornment from '@mui/material/InputAdornment';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
 import CasinoIcon from '@mui/icons-material/Casino';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import ListAltIcon from '@mui/icons-material/ListAlt';
+import ShieldIcon from '@mui/icons-material/Shield';
+import SportsKabaddiIcon from '@mui/icons-material/SportsKabaddi';
+import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined';
+import ExploreOutlinedIcon from '@mui/icons-material/ExploreOutlined';
+import TuneIcon from '@mui/icons-material/Tune';
 import { EncountersTable } from './EncountersTable';
 import { EncounterFormDialog } from './EncounterFormDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
-import { FilterBar } from './FilterBar';
 import { FilterChipGroup } from './FilterChipGroup';
-import { RandomTablesBrowseView } from './randomTables/RandomTablesBrowseView';
 import { EncounterDetailDialog } from './EncounterDetailDialog';
-import { NpcFormDialog, type NpcRollPrefill } from './NpcFormDialog';
-import { QuickNpcRollDialog } from './npc/QuickNpcRollDialog';
-import { PlaceBuilderDialog, type PlaceType } from '../world/PlaceBuilderDialog';
 import { EncounterBuilderDialog } from './encounter/EncounterBuilderDialog';
 import { useEncounterStore, getEncountersForCampaign } from '../../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatureStore';
 import { useEncounterDifficultySettingsStore } from '../../store/useEncounterDifficultySettingsStore';
 import type { Encounter, EncounterPrimaryType } from '../../types/encounter';
-import type { Creature } from '../../types/creature';
 import { PageTitle } from '../shell/PageTitle';
-
-/** The Encounters page's two screens.
- *
- * There used to be a third, 'menu': a landing screen of two cards making the DM choose between
- * "Random Tables" and "Encounters" before seeing anything. That choice was already false -
- * Task 11.3 had made the browse view cover BOTH kinds through one category tree, one tag facet
- * set and one search box - so the menu's second card led to a second, duplicate browse of the
- * same encounters (checklist I-U2). The browser is now the page itself; 'management' is the
- * CRUD/admin table behind it, for the things the browser deliberately does not do (per-row
- * edit and delete, and live difficulty against the assumed party). */
-export type EncounterView = 'management' | 'random_tables';
+import { su } from '../../theme/uiScale';
 
 interface EncountersSectionProps {
   campaignId: string;
-  worldId?: string;
-  /** Optional controlled view - lets a page-level owner (e.g. EncountersPage, via the
-   * `?view=` query param) drive which sub-view is shown. Falls back to internal state
-   * when omitted. */
-  view?: EncounterView;
-  onViewChange?: (view: EncounterView) => void;
-  /** Deep-link support (e.g. from the Play page's Items window "open in new tab") - opens this
-   * encounter's edit dialog once, as soon as it's loaded. */
+  /** Deep link from the Play page's Items window ("open in new tab" on an encounter row) -
+   * opens that encounter's edit dialog once, as soon as it has loaded. */
   openEncounterId?: string;
-  /** Same, for a single random table - opens its roll view in the Random Tables view. */
-  openTableId?: string;
+  /** `?new=1`, which both the top bar's New menu and the command palette's "New encounter"
+   * already send. Nothing read it before this page existed, so both were silently landing the
+   * DM on a list instead of an open form. */
+  openNew?: boolean;
+  /** Crossing to the Random Tables page - the other half of what used to be one rail button. */
+  onGoToTables?: () => void;
 }
 
-export function EncountersSection({ campaignId, worldId, view: controlledView, onViewChange, openEncounterId, openTableId }: EncountersSectionProps) {
-  const [internalView, setInternalView] = useState<EncounterView>('random_tables');
-  const view = controlledView ?? internalView;
-  const setView = (next: EncounterView) => {
-    if (onViewChange) onViewChange(next);
-    else setInternalView(next);
-  };
+/** The Encounters page: the library of encounters this campaign has actually built.
+ *
+ * It was `view === 'management'`, a sub-screen behind a back arrow on the Random Tables page,
+ * reachable only by finding a button labelled "Encounter table view" (checklist R4). It is a
+ * page in its own right now, with its own rail button, because it answers a different question
+ * than the table browser does: you arrive here knowing exactly which encounter you want - the
+ * ambush you built for session 12 - rather than asking to be handed something at random.
+ *
+ * Browsing encounters by category/tag alongside tables still exists and is still good; it
+ * lives on the Random Tables page's kind toggle (Task 11.3), one click away via "Random
+ * Tables" in the header. */
+export function EncountersSection({ campaignId, openEncounterId, openNew, onGoToTables }: EncountersSectionProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEncounter, setEditingEncounter] = useState<Encounter | undefined>(undefined);
   const [viewingEncounter, setViewingEncounter] = useState<Encounter | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Encounter | null>(null);
   const [allCampaigns, setAllCampaigns] = useState(false);
-  const [npcBuilderOpen, setNpcBuilderOpen] = useState(false);
-  const [placeBuilderOpen, setPlaceBuilderOpen] = useState(false);
-  const [placeBuilderType, setPlaceBuilderType] = useState<PlaceType | undefined>();
   const [encounterBuilderOpen, setEncounterBuilderOpen] = useState(false);
   const [encounterBuilderType, setEncounterBuilderType] = useState<EncounterPrimaryType | undefined>();
-  const [npcFormOpen, setNpcFormOpen] = useState(false);
-  const [npcPrefill, setNpcPrefill] = useState<NpcRollPrefill | undefined>();
-  const [editingNpc, setEditingNpc] = useState<Creature | undefined>();
 
   const party = useEncounterDifficultySettingsStore((s) => s.getParty(campaignId));
   const setPartySize = useEncounterDifficultySettingsStore((s) => s.setPartySize);
@@ -88,11 +77,8 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
   const updateEncounterInCampaign = useEncounterStore((s) => s.updateEncounterInCampaign);
   const deleteEncounterFromCampaign = useEncounterStore((s) => s.deleteEncounterFromCampaign);
   const fetchEncountersForCampaign = useEncounterStore((s) => s.fetchEncountersForCampaign);
-  const fetchEncounterById = useEncounterStore((s) => s.fetchEncounterById);
   const creaturesByCampaignId = useCreatureStore((s) => s.creaturesByCampaignId);
   const fetchCreaturesForCampaign = useCreatureStore((s) => s.fetchCreaturesForCampaign);
-  const addCreatureToCampaign = useCreatureStore((s) => s.addCreatureToCampaign);
-  const updateCreatureInCampaign = useCreatureStore((s) => s.updateCreatureInCampaign);
 
   const encounters = getEncountersForCampaign(encountersByCampaignId, campaignId);
   const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
@@ -112,8 +98,19 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
     setDialogOpen(true);
   }, [openEncounterId, encounters]);
 
+  // `?new=1` fires once per mount, not once per render - reopening the form every time the
+  // encounter list refetches would trap the DM in a dialog they just closed.
+  const openedNewRef = useRef(false);
+  useEffect(() => {
+    if (!openNew || openedNewRef.current) return;
+    openedNewRef.current = true;
+    setEditingEncounter(undefined);
+    setDialogOpen(true);
+  }, [openNew]);
+
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [typeCard, setTypeCard] = useState<EncounterPrimaryType | null>(null);
   const [themeFilter, setThemeFilter] = useState<string[]>([]);
   const [crFilter, setCrFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
@@ -133,9 +130,20 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
   const crOptions = Array.from(new Set(encounters.map((e) => e.challengeRating).filter(Boolean))).sort();
   const typeOptions = Array.from(new Set(encounters.flatMap(mobTypesFor))).sort();
 
+  // The four summary cards count the whole loaded set, NOT the filtered one - a card that
+  // restated the filter you just applied through it would always read 0 for the other three.
+  const counts = useMemo(() => {
+    const byType = { combat: 0, social: 0, exploration: 0 };
+    encounters.forEach((encounter) => {
+      if (encounter.primaryType) byType[encounter.primaryType] += 1;
+    });
+    return { total: encounters.length, ...byType, untyped: encounters.length - byType.combat - byType.social - byType.exploration };
+  }, [encounters]);
+
   const filteredEncounters = encounters.filter((encounter) => {
     const query = search.trim().toLowerCase();
     if (query && !encounter.name.toLowerCase().includes(query)) return false;
+    if (typeCard && encounter.primaryType !== typeCard) return false;
     if (themeFilter.length > 0 && !themeFilter.includes(encounter.theme)) return false;
     if (crFilter.length > 0 && !crFilter.includes(encounter.challengeRating)) return false;
     if (typeFilter.length > 0 && !mobTypesFor(encounter).some((t) => typeFilter.includes(t))) return false;
@@ -146,120 +154,152 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
   const toggle = (setter: Dispatch<SetStateAction<string[]>>, value: string) => {
     setter((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
   };
-  const hasActiveFilters =
-    themeFilter.length > 0 || crFilter.length > 0 || typeFilter.length > 0 || resolutionFilter.length > 0;
+  const activeFilterCount =
+    themeFilter.length + crFilter.length + typeFilter.length + resolutionFilter.length;
   const clearFilters = () => {
     setThemeFilter([]);
     setCrFilter([]);
     setTypeFilter([]);
     setResolutionFilter([]);
   };
+  const narrowed = activeFilterCount > 0 || !!typeCard || search.trim().length > 0;
+  const clearEverything = () => {
+    clearFilters();
+    setTypeCard(null);
+    setSearch('');
+  };
 
-  if (view === 'random_tables') {
-    return (
-      <Box sx={{ width: '100%', height: '100%', minHeight: 0 }}>
-        <RandomTablesBrowseView
-          campaignId={campaignId}
-          openTableId={openTableId}
-          onGoToEncounters={() => setView('management')}
-          onOpenEncounter={(id) => { void fetchEncounterById(campaignId, id).then((encounter) => setViewingEncounter(encounter)); }}
-          onOpenNpcBuilder={() => setNpcBuilderOpen(true)}
-          onOpenPlaceBuilder={worldId ? (type) => { setPlaceBuilderType(type); setPlaceBuilderOpen(true); } : undefined}
-          onOpenEncounterBuilder={(type) => { setEncounterBuilderType(type); setEncounterBuilderOpen(true); }}
-          // Task 11.3: encounters browse through the SAME category tree, tag facets and
-          // full-text search as random tables rather than through a screen of their own.
-          // This section stays the owner of encounter state and dialogs; the browse view
-          // only presents them.
-          encounters={encounters}
-          onEditEncounter={(encounter) => { setEditingEncounter(encounter); setDialogOpen(true); }}
-          onDeleteEncounter={(encounter) => setDeleteTarget(encounter)}
-          onCreateEncounter={() => { setEditingEncounter(undefined); setDialogOpen(true); }}
-        />
-        <EncounterDetailDialog encounter={viewingEncounter} creatures={creatures} campaignId={campaignId} onClose={() => setViewingEncounter(null)} />
-        <QuickNpcRollDialog
-          open={npcBuilderOpen}
-          onClose={() => setNpcBuilderOpen(false)}
-          campaignId={campaignId}
-          onAddToNew={(prefill) => { setEditingNpc(undefined); setNpcPrefill(prefill); setNpcBuilderOpen(false); setNpcFormOpen(true); }}
-          onAddToExisting={(creature, prefill) => { setEditingNpc(creature); setNpcPrefill(prefill); setNpcBuilderOpen(false); setNpcFormOpen(true); }}
-        />
-        {worldId && (
-          <PlaceBuilderDialog
-            open={placeBuilderOpen}
-            worldId={worldId}
-            campaignId={campaignId}
-            initialType={placeBuilderType}
-            onClose={() => setPlaceBuilderOpen(false)}
-            onCreated={() => setPlaceBuilderOpen(false)}
-          />
-        )}
-        <NpcFormDialog
-          open={npcFormOpen}
-          onClose={() => { setNpcFormOpen(false); setNpcPrefill(undefined); setEditingNpc(undefined); }}
-          campaignId={campaignId}
-          worldId={worldId}
-          initialCreature={editingNpc}
-          prefill={npcPrefill}
-          onSubmit={(creature) => {
-            if (editingNpc) updateCreatureInCampaign(campaignId, creature);
-            else addCreatureToCampaign(campaignId, creature);
-            setNpcFormOpen(false);
-            setNpcPrefill(undefined);
-            setEditingNpc(undefined);
-          }}
-        />
-        <EncounterBuilderDialog
-          open={encounterBuilderOpen}
-          campaignId={campaignId}
-          initialType={encounterBuilderType}
-          partySize={party.partySize}
-          partyLevel={party.partyLevel}
-          onClose={() => setEncounterBuilderOpen(false)}
-          onAdd={(encounter) => { addEncounterToCampaign(campaignId, encounter); setEncounterBuilderOpen(false); setView('management'); }}
-        />
-        {/* Editing and deleting an encounter has to work from the unified browse too, not only
-            from the table view - otherwise its encounter rows would be read-only. */}
-        <EncounterFormDialog
-          open={dialogOpen}
-          onClose={() => { setDialogOpen(false); setEditingEncounter(undefined); }}
-          campaignId={campaignId}
-          creatures={creatures}
-          initialEncounter={editingEncounter}
-          onSubmit={(encounter) => {
-            if (editingEncounter) updateEncounterInCampaign(campaignId, encounter);
-            else addEncounterToCampaign(campaignId, encounter);
-            setDialogOpen(false);
-            setEditingEncounter(undefined);
-          }}
-        />
-        <ConfirmDeleteDialog
-          open={!!deleteTarget}
-          itemName={deleteTarget?.name ?? ''}
-          itemType="encounter"
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={() => {
-            if (deleteTarget) deleteEncounterFromCampaign(campaignId, deleteTarget.id);
-            setDeleteTarget(null);
-          }}
-        />
-      </Box>
-    );
-  }
+  const openCreate = () => {
+    setEditingEncounter(undefined);
+    setDialogOpen(true);
+  };
 
   return (
-    <Box>
-      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Tooltip title="Back to browsing tables and encounters">
-            <IconButton size="small" aria-label="Back to browsing tables and encounters" onClick={() => setView('random_tables')}>
-              <ArrowBackIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <PageTitle component="h2">Encounter Management</PageTitle>
+    <Stack spacing={2.5}>
+      {/* ---- Page header ---------------------------------------------------------------- */}
+      <Stack
+        direction={{ xs: 'column', md: 'row' }}
+        spacing={2}
+        sx={{ alignItems: { md: 'center' }, justifyContent: 'space-between' }}
+      >
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', minWidth: 0 }}>
+          <Box
+            sx={{
+              width: su(48),
+              height: su(48),
+              borderRadius: 2.5,
+              display: 'grid',
+              placeItems: 'center',
+              bgcolor: 'primary.main',
+              color: 'primary.contrastText',
+              flexShrink: 0,
+              '& .MuiSvgIcon-root': { fontSize: su(28) },
+            }}
+          >
+            <ShieldIcon />
+          </Box>
+          <Box sx={{ minWidth: 0 }}>
+            <PageTitle noWrap>Encounters</PageTitle>
+            <Typography variant="body2" color="text.secondary">
+              The fights, scenes and obstacles you have built for this campaign, scored against your party.
+            </Typography>
+          </Box>
         </Stack>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Tooltip title="Assumed party used to compute each encounter's live difficulty badge">
-            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', mr: 0.5 }}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', flexShrink: 0 }}>
+          {onGoToTables && (
+            <Tooltip title="Browse the random table library - and search encounters by category and tag alongside it">
+              <Button variant="outlined" startIcon={<CasinoIcon />} onClick={onGoToTables}>
+                Random Tables
+              </Button>
+            </Tooltip>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={<AutoAwesomeIcon />}
+            onClick={() => {
+              setEncounterBuilderType(undefined);
+              setEncounterBuilderOpen(true);
+            }}
+          >
+            Generate
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+            New Encounter
+          </Button>
+        </Stack>
+      </Stack>
+
+      {/* ---- Summary cards, which double as the primary-type filter ----------------------- */}
+      <Stack direction="row" spacing={1.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
+        <SummaryCard
+          icon={<ShieldIcon />}
+          label="All encounters"
+          value={counts.total}
+          color="primary"
+          selected={typeCard === null}
+          onClick={() => setTypeCard(null)}
+          hint={counts.untyped > 0 ? `${counts.untyped} have no type set yet` : undefined}
+        />
+        <SummaryCard
+          icon={<SportsKabaddiIcon />}
+          label="Combat"
+          value={counts.combat}
+          color="error"
+          selected={typeCard === 'combat'}
+          onClick={() => setTypeCard((current) => (current === 'combat' ? null : 'combat'))}
+        />
+        <SummaryCard
+          icon={<ForumOutlinedIcon />}
+          label="Social"
+          value={counts.social}
+          color="info"
+          selected={typeCard === 'social'}
+          onClick={() => setTypeCard((current) => (current === 'social' ? null : 'social'))}
+        />
+        <SummaryCard
+          icon={<ExploreOutlinedIcon />}
+          label="Exploration"
+          value={counts.exploration}
+          color="success"
+          selected={typeCard === 'exploration'}
+          onClick={() => setTypeCard((current) => (current === 'exploration' ? null : 'exploration'))}
+        />
+      </Stack>
+
+      {/* ---- Control bar ------------------------------------------------------------------
+          Search sits in the open rather than behind the magnifier it used to hide behind: on
+          this page finding one encounter you already know the name of IS the primary job, so
+          it should not cost a click to start typing. That is why this bar is hand-rolled
+          instead of reusing FilterBar, whose search is part of the collapsed panel. */}
+      <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 3 }}>
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} sx={{ alignItems: { lg: 'center' } }}>
+          <TextField
+            size="small"
+            placeholder="Search encounters by name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            sx={{ flexGrow: 1, minWidth: 220 }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+
+          <Divider flexItem orientation="vertical" sx={{ display: { xs: 'none', lg: 'block' } }} />
+
+          <Tooltip title="The assumed party every encounter's difficulty badge is scored against">
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexShrink: 0 }}>
+              <Typography
+                variant="caption"
+                sx={{ fontWeight: 850, letterSpacing: 0.4, color: 'text.secondary', textTransform: 'uppercase' }}
+              >
+                Party
+              </Typography>
               <TextField
                 size="small"
                 type="number"
@@ -267,7 +307,7 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
                 value={party.partySize}
                 onChange={(e) => setPartySize(campaignId, Number(e.target.value) || 1)}
                 slotProps={{ htmlInput: { min: 1, max: 20 } }}
-                sx={{ width: 88 }}
+                sx={{ width: su(104) }}
               />
               <TextField
                 size="small"
@@ -276,89 +316,132 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
                 value={party.partyLevel}
                 onChange={(e) => setPartyLevel(campaignId, Number(e.target.value) || 1)}
                 slotProps={{ htmlInput: { min: 1, max: 20 } }}
-                sx={{ width: 88 }}
+                sx={{ width: su(104) }}
               />
             </Stack>
           </Tooltip>
-          <Tooltip title="This campaign's own encounters and the shared reference library (imported random-encounter tables) are always shown. Turn this on to also include every other campaign's encounters.">
+
+          <Divider flexItem orientation="vertical" sx={{ display: { xs: 'none', lg: 'block' } }} />
+
+          <Tooltip title="This campaign's own encounters and the shared reference library are always shown. Turn this on to also include every other campaign's encounters.">
             <FormControlLabel
-              sx={{ mr: 0.5 }}
+              sx={{ mr: 0, flexShrink: 0 }}
               control={<Switch size="small" checked={allCampaigns} onChange={(e) => setAllCampaigns(e.target.checked)} />}
               label={<Typography variant="body2">All campaigns</Typography>}
             />
           </Tooltip>
-          <Tooltip title="Search & filter">
-            <IconButton color={filterOpen ? 'primary' : 'default'} onClick={() => setFilterOpen((v) => !v)}>
-              <SearchIcon />
-            </IconButton>
-          </Tooltip>
-          <Button variant="outlined" startIcon={<CasinoIcon />} onClick={() => setView('random_tables')}>Random Tables</Button>
-          <Button variant="outlined" startIcon={<AutoAwesomeIcon />} onClick={() => { setEncounterBuilderType(undefined); setEncounterBuilderOpen(true); }}>Generate Encounter</Button>
+
           <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => {
-              setEditingEncounter(undefined);
-              setDialogOpen(true);
-            }}
+            variant={filterOpen || activeFilterCount > 0 ? 'contained' : 'outlined'}
+            startIcon={<TuneIcon />}
+            onClick={() => setFilterOpen((v) => !v)}
+            sx={{ flexShrink: 0 }}
           >
-            Add Encounter
+            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
           </Button>
         </Stack>
-      </Stack>
 
-      {filterOpen && (
-        <FilterBar
-          search={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="Search encounters by name…"
-          hasActiveFilters={hasActiveFilters}
-          onClearFilters={clearFilters}
-        >
-          <FilterChipGroup
-            label="Theme"
-            options={themeOptions.map((t) => ({ value: t, label: t }))}
-            selected={themeFilter}
-            onToggle={(v) => toggle(setThemeFilter, v)}
+        <Collapse in={filterOpen}>
+          <Divider sx={{ my: 1.5 }} />
+          <Stack direction="row" spacing={3} useFlexGap sx={{ flexWrap: 'wrap' }}>
+            <FilterChipGroup
+              label="Theme"
+              options={themeOptions.map((t) => ({ value: t, label: t }))}
+              selected={themeFilter}
+              onToggle={(v) => toggle(setThemeFilter, v)}
+            />
+            <FilterChipGroup
+              label="Challenge rating"
+              options={crOptions.map((c) => ({ value: c, label: c }))}
+              selected={crFilter}
+              onToggle={(v) => toggle(setCrFilter, v)}
+            />
+            <FilterChipGroup
+              label="Creature type"
+              options={typeOptions.map((t) => ({ value: t, label: t }))}
+              selected={typeFilter}
+              onToggle={(v) => toggle(setTypeFilter, v)}
+            />
+            <FilterChipGroup
+              label="Resolution"
+              options={[
+                { value: 'fixed', label: 'Fixed roster' },
+                { value: 'random_table', label: 'Random table' },
+              ]}
+              selected={resolutionFilter}
+              onToggle={(v) => toggle(setResolutionFilter, v)}
+            />
+          </Stack>
+          {activeFilterCount > 0 && (
+            <Button size="small" onClick={clearFilters} sx={{ mt: 1.5 }}>
+              Clear filters
+            </Button>
+          )}
+        </Collapse>
+      </Paper>
+
+      {/* ---- Result count, so a narrowed list never looks like an empty library ----------- */}
+      {encounters.length > 0 && (
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }} useFlexGap>
+          <Chip
+            size="small"
+            label={`${filteredEncounters.length} of ${counts.total} shown`}
+            variant={narrowed ? 'filled' : 'outlined'}
+            color={narrowed ? 'primary' : 'default'}
           />
-          <FilterChipGroup
-            label="Challenge rating"
-            options={crOptions.map((c) => ({ value: c, label: c }))}
-            selected={crFilter}
-            onToggle={(v) => toggle(setCrFilter, v)}
-          />
-          <FilterChipGroup
-            label="Creature type"
-            options={typeOptions.map((t) => ({ value: t, label: t }))}
-            selected={typeFilter}
-            onToggle={(v) => toggle(setTypeFilter, v)}
-          />
-          <FilterChipGroup
-            label="Type"
-            options={[
-              { value: 'fixed', label: 'Fixed roster' },
-              { value: 'random_table', label: 'Random table' },
-            ]}
-            selected={resolutionFilter}
-            onToggle={(v) => toggle(setResolutionFilter, v)}
-          />
-        </FilterBar>
+          {typeCard && <Chip size="small" label={TYPE_LABELS[typeCard]} onDelete={() => setTypeCard(null)} />}
+          {search.trim() && <Chip size="small" label={`“${search.trim()}”`} onDelete={() => setSearch('')} />}
+          {narrowed && (
+            <Button size="small" color="inherit" onClick={clearEverything}>
+              Reset
+            </Button>
+          )}
+        </Stack>
       )}
 
+      {/* ---- Results ---------------------------------------------------------------------- */}
       {encounters.length === 0 ? (
         <Box sx={{ textAlign: 'center', py: 8, px: 3, borderRadius: 4, border: '1px dashed', borderColor: 'divider' }}>
-          <ListAltIcon sx={{ fontSize: 56, mb: 1, color: 'text.disabled' }} />
+          <ShieldIcon sx={{ fontSize: su(56), mb: 1, color: 'text.disabled' }} />
           <Typography variant="h6" sx={{ mb: 0.5 }}>
             No encounters yet
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Add an encounter to get started.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+            Build one by hand, roll one up from a generator, or pull one out of the random table library.
           </Typography>
+          <Stack direction="row" spacing={1} sx={{ justifyContent: 'center', flexWrap: 'wrap' }} useFlexGap>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+              New Encounter
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<AutoAwesomeIcon />}
+              onClick={() => {
+                setEncounterBuilderType(undefined);
+                setEncounterBuilderOpen(true);
+              }}
+            >
+              Generate
+            </Button>
+            {onGoToTables && (
+              <Button variant="outlined" startIcon={<CasinoIcon />} onClick={onGoToTables}>
+                Random Tables
+              </Button>
+            )}
+          </Stack>
         </Box>
       ) : filteredEncounters.length === 0 ? (
-        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
-          No encounters match your search/filters.
-        </Typography>
+        <Box sx={{ textAlign: 'center', py: 6, px: 3, borderRadius: 4, border: '1px dashed', borderColor: 'divider' }}>
+          <Typography variant="body1" sx={{ mb: 0.5 }}>
+            Nothing matches those filters.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {counts.total} encounters are loaded — widen the search to see them.
+          </Typography>
+          <Button variant="outlined" onClick={clearEverything}>
+            Reset filters
+          </Button>
+        </Box>
       ) : (
         <EncountersTable
           encounters={filteredEncounters}
@@ -379,12 +462,19 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
         creatures={creatures}
         campaignId={campaignId}
         onClose={() => setViewingEncounter(null)}
-        onEdit={(encounter) => { setViewingEncounter(null); setEditingEncounter(encounter); setDialogOpen(true); }}
+        onEdit={(encounter) => {
+          setViewingEncounter(null);
+          setEditingEncounter(encounter);
+          setDialogOpen(true);
+        }}
       />
 
       <EncounterFormDialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => {
+          setDialogOpen(false);
+          setEditingEncounter(undefined);
+        }}
         campaignId={campaignId}
         creatures={creatures}
         initialEncounter={editingEncounter}
@@ -403,7 +493,10 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
         partySize={party.partySize}
         partyLevel={party.partyLevel}
         onClose={() => setEncounterBuilderOpen(false)}
-        onAdd={(encounter) => { addEncounterToCampaign(campaignId, encounter); setEncounterBuilderOpen(false); }}
+        onAdd={(encounter) => {
+          addEncounterToCampaign(campaignId, encounter);
+          setEncounterBuilderOpen(false);
+        }}
       />
 
       <ConfirmDeleteDialog
@@ -416,6 +509,103 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
           setDeleteTarget(null);
         }}
       />
-    </Box>
+    </Stack>
+  );
+}
+
+const TYPE_LABELS: Record<EncounterPrimaryType, string> = {
+  combat: 'Combat',
+  social: 'Social',
+  exploration: 'Exploration',
+};
+
+type SummaryColor = 'primary' | 'error' | 'info' | 'success';
+
+/** One card in the summary strip. It is a button, not a statistic: the count and the filter for
+ * that count are the same affordance, so a DM who reads "12 combat" can act on it where they
+ * read it instead of hunting for Combat in a filter panel. */
+function SummaryCard({
+  icon,
+  label,
+  value,
+  color,
+  selected,
+  onClick,
+  hint,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  color: SummaryColor;
+  selected: boolean;
+  onClick: () => void;
+  hint?: string;
+}) {
+  // A count of 0 is worth showing - "you have no social encounters" is information - but it is
+  // not worth clicking, since filtering to it can only produce the empty state.
+  const dead = value === 0 && !selected;
+
+  const card = (
+    <ButtonBase
+      onClick={onClick}
+      disabled={dead}
+      aria-pressed={selected}
+      sx={{
+        // Capped, not free-growing: four cards splitting a wide window gave each one ~370px of
+        // near-empty card for a two-digit number and one word.
+        flex: '1 1 auto',
+        minWidth: su(150),
+        maxWidth: su(240),
+        justifyContent: 'flex-start',
+        textAlign: 'left',
+        p: 1.5,
+        borderRadius: 3,
+        border: '1px solid',
+        borderColor: selected ? `${color}.main` : 'divider',
+        bgcolor: selected ? `${color}.main` : 'background.paper',
+        color: selected ? `${color}.contrastText` : 'text.primary',
+        opacity: dead ? 0.55 : 1,
+        transition: 'border-color 120ms, background-color 120ms, opacity 120ms',
+        '&:hover': { borderColor: `${color}.main`, bgcolor: selected ? `${color}.dark` : 'action.hover' },
+      }}
+    >
+      <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', width: '100%', minWidth: 0 }}>
+        <Box
+          sx={{
+            width: su(36),
+            height: su(36),
+            borderRadius: 2,
+            display: 'grid',
+            placeItems: 'center',
+            flexShrink: 0,
+            bgcolor: selected ? 'transparent' : `${color}.main`,
+            color: selected ? 'inherit' : `${color}.contrastText`,
+            border: selected ? '1px solid' : 'none',
+            borderColor: 'currentColor',
+            '& .MuiSvgIcon-root': { fontSize: su(20) },
+          }}
+        >
+          {icon}
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h6" sx={{ fontWeight: 850, lineHeight: 1.1 }}>
+            {value}
+          </Typography>
+          <Typography variant="caption" noWrap sx={{ opacity: selected ? 0.9 : 0.7, display: 'block' }}>
+            {label}
+          </Typography>
+        </Box>
+      </Stack>
+    </ButtonBase>
+  );
+
+  // The <span>-style wrapper is what lets a DISABLED card still raise its tooltip - a disabled
+  // element fires no pointer events of its own (same trick as IconRail's rail buttons).
+  return hint || dead ? (
+    <Tooltip title={hint ?? `No ${label.toLowerCase()} encounters`}>
+      <Box sx={{ display: 'flex', flex: '1 1 auto', minWidth: su(150), maxWidth: su(240) }}>{card}</Box>
+    </Tooltip>
+  ) : (
+    card
   );
 }

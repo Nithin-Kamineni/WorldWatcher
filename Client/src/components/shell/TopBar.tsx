@@ -26,6 +26,7 @@ import { WorldBrand, CampaignSwitcher } from './WorldCampaignSwitcher';
 import { NameDescriptionDialog } from './NameDescriptionDialog';
 import { PlayLayoutControls } from '../play/layout/PlayLayoutControls';
 import type { PaneSlot } from '../play/layout/playLayoutTrees';
+import { D20RollButton } from '../dice/D20RollButton';
 import { useThemeMode } from '../../theme/ThemeModeContext';
 import { useTutorialStore } from '../../store/useTutorialStore';
 import { useShellStore } from '../../store/useShellStore';
@@ -67,7 +68,8 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
   const clearCampaignItems = usePlayItemsStore((s) => s.clearCampaignSlots);
   const restoreDismissedPanes = usePlayLayoutStore((s) => s.restoreDismissedPanes);
 
-  const inPlaySession = !!campaignId && location.pathname.endsWith('/play') && !!getPlayState(playByCampaignId, campaignId).sessionNoteId;
+  const onPlayPage = location.pathname.endsWith('/play');
+  const inPlaySession = !!campaignId && onPlayPage && !!getPlayState(playByCampaignId, campaignId).sessionNoteId;
   const layoutState = campaignId ? getPlayLayoutState(layoutByCampaignId, campaignId) : null;
 
   // Which panes the DM has closed in the layout that is actually on screen - the layout
@@ -166,6 +168,11 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
               Ctrl K
             </Box>
           </ButtonBase>
+
+          {/* Play-page only, right of the search box. Every other page's top bar is about
+              getting somewhere; the Play page's is the one you sit on while actually running
+              a session, which is the only time a die is what you want from a toolbar. */}
+          {onPlayPage && <D20RollButton />}
 
           <Box sx={{ flexGrow: 1 }} />
 

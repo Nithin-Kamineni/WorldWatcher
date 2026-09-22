@@ -37,6 +37,11 @@ interface CreatureStoreState {
   creaturesByCampaignId: Record<string, Creature[]>;
   loadedByCampaignId: Record<string, boolean>;
   fetchCreaturesForCampaign: (campaignId: string) => Promise<void>;
+  /** Re-reads a campaign's creatures, ignoring the once-only guard on
+   * `fetchCreaturesForCampaign`. Restoring an edit from the World Manager's history
+   * rewrites rows server-side (or brings a deleted one back) without this store ever
+   * seeing it, so that is the one path that has to be able to force a reload. */
+  reloadCreaturesForCampaign: (campaignId: string) => Promise<void>;
   addCreatureToCampaign: (campaignId: string, creature: Creature) => void;
   updateCreatureInCampaign: (campaignId: string, creature: Creature) => void;
   deleteCreatureFromCampaign: (campaignId: string, creatureId: string) => void;
@@ -82,6 +87,18 @@ export const useCreatureStore = create<CreatureStoreState>((set, get) => ({
       }));
     } catch (err) {
       console.error(`Failed to load creatures for campaign ${campaignId}`, err);
+    }
+  },
+
+  reloadCreaturesForCampaign: async (campaignId) => {
+    try {
+      const page = await creaturesApi.listCreatures({ campaign_id: campaignId, limit: 200 });
+      set((state) => ({
+        creaturesByCampaignId: { ...state.creaturesByCampaignId, [campaignId]: page.items.map(apiCreatureToCreature) },
+        loadedByCampaignId: { ...state.loadedByCampaignId, [campaignId]: true },
+      }));
+    } catch (err) {
+      console.error(`Failed to reload creatures for campaign ${campaignId}`, err);
     }
   },
 

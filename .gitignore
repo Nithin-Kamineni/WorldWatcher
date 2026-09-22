@@ -35,3 +35,6 @@ Thumbs.db
 Database/external-data/
 Database/Maintainance/assets/
 Prompt Images
+
+# Playwright MCP scratch output (page snapshots, console logs, screenshots)
+.playwright-mcp/

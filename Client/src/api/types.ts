@@ -613,6 +613,14 @@ export interface ApiMapFloor {
   updated_at: string;
 }
 
+/** Response of POST /map-floors/{id}/detect-walls. `polylines` are flat
+ * [x,y,x,y,...] runs in the background image's own pixel space. */
+export interface ApiWallDetectResult {
+  image_width: number;
+  image_height: number;
+  polylines: number[][];
+}
+
 export interface ApiTokenLibraryEntry {
   id: string;
   campaign_id: string | null;
@@ -1078,4 +1086,43 @@ export interface ApiCombat {
 
 export interface ApiCombatDetail extends ApiCombat {
   combatants: ApiCombatant[];
+}
+
+/** One field that moved in a recorded edit. `kind` says which of the extra fields are
+ * present: `delta` on prose, the two counts on a list. */
+export interface ApiRevisionChange {
+  field: string;
+  label: string;
+  kind: 'text' | 'long' | 'list' | 'value';
+  before: string;
+  after: string;
+  delta: number | null;
+  before_count: number | null;
+  after_count: number | null;
+}
+
+export interface ApiEntityRevision {
+  id: string;
+  world_id: string;
+  entity_type: 'article' | 'npc' | 'creature' | 'faction';
+  entity_id: string;
+  entity_name: string;
+  action: 'create' | 'update' | 'delete' | 'restore';
+  summary: string;
+  changes: ApiRevisionChange[];
+  created_at: string;
+  can_restore: boolean;
+}
+
+export interface ApiRestoreResult {
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  recreated: boolean;
+  revision: ApiEntityRevision | null;
+}
+
+export interface ApiRetentionPolicy {
+  window_hours: number;
+  min_rows: number;
 }

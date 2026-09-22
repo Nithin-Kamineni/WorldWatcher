@@ -1507,13 +1507,70 @@ and against a hand-injected pre-field nav-memory record.
         all gone - hover names the icon and nothing else. Those
         destinations are still reachable on the pages themselves.
 
-❌  R4  Random Tables shares the Encounters page and has no rail entry
-        of its own. The page already opens ON the unified table browser
-        (?view=management is the encounter half), so one button is
-        honest today and the tooltip names both - but if random tables
-        are to be a first-class standalone feature they want their own
-        route and rail icon, with Encounters kept as the second one.
-        Open question, deliberately not decided here.
+✅  R4  Random Tables shared the Encounters page and had no rail entry
+        of its own. DECIDED AND DONE (2026-09-22): split into two rail
+        buttons and two routes. The deciding argument was not the code
+        but the Play page - usePlayItemsStore's ITEMS_TAB_KINDS already
+        lists 'random-tables' and 'encounters' as separate tabs with
+        separate glyphs, so mid-session the app taught the DM they were
+        two things while the rail said one, behind a shield that named
+        the narrower half and left random tables unnamed in the nav.
+        They are also opposite retrieval jobs: a table is "surprise me
+        from a category, in seconds", an encounter is "find the ambush
+        I built for session 12".
+          - /tables -> TablesPage -> RandomTablesSection (new, the old
+            `view === 'random_tables'` branch of EncountersSection, with
+            its builders and dialogs). Rail: "Tables", CasinoIcon.
+          - /encounters -> EncountersPage -> EncountersSection, which is
+            now ONLY the old 'management' half, promoted from a
+            sub-screen behind a back arrow to a page. Rail: "Encounters",
+            ShieldIcon. Same two glyphs the Play tabs use.
+          - Task 11.3's unified browse is RETIRED, in two steps. First
+            RandomTablesBrowseView took a `defaultEntityKinds` prop and
+            /tables passed ['table'], keeping the Tables/Encounters kind
+            toggle beside the search to widen it. On review that toggle
+            was the wrong thing to keep: with encounters on their own
+            page its only job was pushing a second entity kind into this
+            page's tree, counts and drawer. Gone now, along with the
+            encounter search pipeline, the merged category counts, the
+            encounter rows and their edit/delete/create plumbing, and
+            the `encounters`/`onEditEncounter`/`onDeleteEncounter`/
+            `onCreateEncounter`/`defaultEntityKinds` props. The category
+            graph's per-branch numbers are a table count again.
+          - Two encounter links are kept on /tables on purpose, because
+            neither is browsing: a roll result carrying an
+            `encounter_ref` opens that encounter READ-ONLY (no edit -
+            that is the Encounters page's job), and an encounter
+            category offers its generator, which files the result and
+            navigates to Encounters. `onOpenEncounter` resolves one
+            encounter through `fetchEncounterById`.
+          - Side effect worth having: RandomTablesSection no longer
+            calls `fetchEncountersForCampaign`, which issues 200
+            individual detail requests (it maps every list row through
+            `getEncounter(id)`). The Random Tables page made all of them
+            on load to populate a list it no longer shows.
+          - Old link shapes forward instead of 404ing or silently
+            showing the wrong screen: ?view=random_tables|generators on
+            /encounters -> /tables (carrying ?table=), ?view=management
+            on /tables -> /encounters.
+          - Fixed in passing: ?new=1 (sent by BOTH the top bar's New
+            menu and the palette's "New encounter") was read by nothing
+            and silently landed the DM on a list; EncountersPage reads
+            it now. The palette's per-encounter "Jump to" rows went to
+            the bare list, and now deep-link via ?encounter=. And
+            SessionRunnerWorkspace's openTableFromRef had a TODO saying
+            no ?table= deep link existed - it does (openTableId), so a
+            table mention in a session note opens that table's roll view
+            instead of dumping the DM on the browse screen.
+          - Encounters page redesign, since it is a real page now: a
+            header with icon/title/subtitle, four summary cards that
+            double as the primary-type filter (All/Combat/Social/
+            Exploration, counted over the loaded set, not the filtered
+            one), a control bar with search in the open rather than
+            behind a magnifier, the party-size/level inputs labelled as
+            what they are (what difficulty badges score against), an
+            active-narrowing chip row with Reset, and real empty states
+            for "no encounters at all" vs "none match the filters".
 
 --- I-S. UI SCALE ROUND (2026-09-22) ---------------------------------
 
@@ -1586,6 +1643,148 @@ that density the app's own default.
           - The short labels under the icons were a fixed 10px, so
             "Encounters" clipped at small scales. Now
             RAIL_ITEM_LABEL_FONT_SIZE, same floor.
+
+--- I-D. D20 ROLLER (2026-09-22) -------------------------------------
+
+Asked for on 2026-09-22: a d20 button right of the search box in the
+Play page top bar, throwing a big die across the screen that reads as a
+physical roll rather than a random number with an animation over it.
+
+✅  D1  DONE: TopBar renders D20RollButton (components/dice/) right of
+        the search ButtonBase, on the /play route only. The icon is
+        drawn from d20Shape.ts, which computes a real icosahedron's
+        face-on projection rather than tracing one by eye - the inner
+        triangle is 1/phi of the hexagon, which falls out of the solid.
+
+✅  D2  DONE: the roll itself is @3d-dice/dice-box (BabylonJS + ammo.js
+        in a web worker) - a real d20 mesh with the real numbering,
+        thrown, tumbled and left to settle, then raycast straight up
+        against a collider-face map to read whichever face landed on
+        top. THE SIMULATION DECIDES THE NUMBER. Assets live in
+        Client/public/assets/dice-box (copied out of the package's
+        dist/assets - re-copy them on upgrade); they are fetched at
+        runtime, not bundled.
+
+✅  D3  DONE, and this is the part to not regress: the FIRST attempt
+        drew a 2D SVG d20, picked the result with rollDie(20) and
+        played a hand-written keyframe throw over it. It was rejected
+        on sight, correctly - the rim numerals were fixed decoration,
+        so a die could land showing 18 while a neighbouring face also
+        read 18, and the number could not be read mid-tumble because
+        there was nothing real to read. Nothing in the dice code may
+        pre-decide a value again; see the comment at the top of
+        useDiceRollStore.ts.
+
+✅  D4  DONE: presses queue. useDiceRollStore counts presses and the
+        overlay throws the difference - the first onto an empty table
+        (box.roll, which clears) and each later one onto the dice
+        already there (box.add), with a 260ms floor between throws so a
+        burst of taps reads as a burst of throws. Verified: 3 presses
+        gave 3 dice reading 3/5/14, matching the faces on screen.
+
+✅  D5  DONE: dice clear 10s after they SETTLE (not after they are
+        thrown, so a long tumble never eats the time you have to read
+        them). Settings > "Dice on screen" offers 3/5/10/20/30s on both
+        the world and campaign Settings pages, persisted through the
+        store and clamped to 1-120s on read. Any pointerdown anywhere,
+        or Escape, sweeps the table early; the button itself is exempt
+        via [data-dice-roll-trigger], or the second tap of a burst
+        would clear the first tap's die.
+
+✅  D6  DONE: cost. BabylonJS is dynamically imported on the FIRST
+        roll, so it lands in its own lazy chunk and pages that never
+        roll never load it - the entry chunk stays at ~200 kB.
+        Mounted once at the app root, so there is exactly one engine
+        dice-box stops its own render loop and suspends the physics
+        worker the moment every die is asleep, so an idle table costs
+        only a retained WebGL context, and rendering runs on an
+        OffscreenCanvas in a worker (confirmed: Babylon logs from a
+        blob: worker URL), which keeps it off the Play page's main
+        thread. The canvas is pointer-events: none throughout.
+
+✅  D9  DONE (bug, reported same day): after one roll, EVERY later
+        page navigation threw a die by itself. The overlay was mounted
+        in SectionLayout, which every page renders its own copy of, so
+        navigating remounted it - and its "throws already served"
+        watermark is a useRef starting at 0 while the store's press
+        counter is monotonic and session-long, so a fresh overlay
+        "caught up" by re-throwing the whole session's history. The
+        same reset rebuilt the BabylonJS engine, physics worker and
+        WebGL context on every navigation, which leaks contexts until
+        the browser starts dropping the oldest. Fixed BOTH ways: the
+        overlay is now mounted once in App.tsx, outside BrowserRouter,
+        so navigation cannot unmount it; and the watermarks seed from
+        the store's CURRENT counts, so a fresh overlay can never replay
+        history wherever it is mounted. Verified across Play -> Home ->
+        Maps -> Notes -> Play: no phantom dice, and exactly one canvas
+        throughout.
+
+🈶  D11 MOOT - tried twice, measured, reverted on request. The ask was
+        "launch from any screen edge but land near the centre". It is not
+        achievable with dice-box 1.1.4, and the reasons are in a long
+        comment at the top of DiceRollOverlay.tsx so nobody re-derives
+        them. The short version, read out of the physics worker inlined
+        as base64 in dist/dice-box.es.js:
+          - a die SPAWNS ON A WALL of the physics table, so the table
+            edge IS the entry point.
+          - `size` moves the physics walls but NOT the camera - the
+            visual box has its own hardcoded 9.5 and the camera is built
+            from the aspect ratio alone. So the walls are either at the
+            screen edges (enter from the edge, rest anywhere), inside it
+            (rest centrally, but visibly spawn mid-screen), or outside it
+            (spawn off-screen, but can also REST off-screen, invisible).
+          - launch speed is `random(0.5, throwForce) x distance from
+            centre` with the 0.5 floor HARDCODED, so a weakly thrown die
+            stops near its wall at any setting.
+          - friction is Coulomb, so travel grows with the square of
+            launch speed while the distance needed is linear in spawn
+            offset; on a 16:9 table the x half-extent is 8.45 world units
+            against 4.75 for z, so one axis can be tuned, never both.
+        Attempt 1 shrank the canvas to a centred box; attempt 2 squared
+        it and dropped throwForce to 2.5. Attempt 2 did work numerically
+        - median distance from centre 0.91 -> 0.46 and 6/10 dice in the
+        middle half of the screen instead of 1/8, measured at 1537x864 by
+        diffing screenshots against a dice-free baseline - but it bought
+        that only by moving the walls inward, which is exactly what made
+        dice start mid-screen. Both reverted; dice are back to the
+        library's own throw, entering from the screen edges and resting
+        wherever the physics puts them. Doing better means patching the
+        worker's throw, i.e. vendoring a fork.
+✅  D12 DONE (bug found while tuning D11, and it invalidated the first
+        round of measurements): the dice canvas was rendering at its
+        300x150 default drawing buffer stretched across the container -
+        blurry and vertically squashed - and, worse, dice-box derives the
+        physics table's aspect from the same clientWidth/clientHeight, so
+        the table was pinned at 2:1 no matter what the container did.
+        Cause: when the overlay was stripped of MUI for D10, the canvas
+        sizing moved from a stylesheet rule to an imperative style set
+        AFTER `box.init()` - which is exactly when dice-box measures the
+        canvas. Fixed with a real `#ww-dice-box canvas` rule rendered in
+        the portal, so it applies the instant the canvas is inserted.
+        Do not replace it with an inline style: the element does not
+        exist when the component renders.
+✅  D10 DONE, caught while fixing D9 and worth knowing generally:
+        mounting ANYTHING in App.tsx puts it in the eager entry chunk,
+        so its static imports are downloaded before first paint. The
+        overlay's single `useTheme` from @mui/material/styles took the
+        entry chunk from 198 kB to 399 kB - MUI's whole styles runtime,
+        pulled forward. (@mui/material/Box was the first suspect and was
+        NOT the cause; measured both ways.) Fixed by giving the overlay
+        no MUI at all: two plain divs with inline styles, and the die's
+        colour from the new theme/brandColors.ts - plain strings, zero
+        imports, now also the single source the MUI palette in theme.ts
+        builds from. Entry chunk back to 200.63 kB.
+
+⚠️  D7  The button is on the Play page only, which is where it was
+        asked for. The overlay is mounted app-wide (App.tsx) and works
+        from anywhere, so showing it on other pages is a one-line
+        change to the `onPlayPage` guard in TopBar.tsx if wanted.
+
+⚠️  D8  Only d20 is wired up. dice-box takes any simple notation
+        ("2d6+3"), so d4/d6/d8/d10/d12/d100 and modifiers are a
+        notation string away - the map toolbar still has its own
+        separate 2D DiceRollerPopover for multi-die rolls, and the two
+        should probably converge on this one.
 
 #####################################################################
 PART F - CLIENT / MAP / APP-WIDE KNOWN GAPS
@@ -1786,6 +1985,274 @@ is the only record of the founding intent.
           looks and works well on both phone and PC.
           STATUS: it is a single React web app, but mobile has never been
           tested for any of the newer interactions - see F6.3.
-❌  G6   Line-of-sight (optional) - optionally drive fog of war with
+✅  G6   Line-of-sight (optional) - optionally drive fog of war with
           line-of-sight physics so vision is blocked by walls. Marked
-          optional in the original goal, and never built.
+          optional in the original goal.
+          DONE 2026-09-22 - see Part I-FOG below. Fog of war, hand-drawn
+          and auto-detected walls, and an angular-sweep visibility
+          polygon per seeing token, all verified in a real browser.
+
+#####################################################################
+PART I-FOG - FOG OF WAR + LINE OF SIGHT (2026-09-22)
+#####################################################################
+Closes G6, which had been open since the original To-Do. Built as three
+layers, each usable without the one after it.
+
+✅  FOG1  Coordinate groundwork. The background's contain-fit was a
+          private useRef inside MapBackgroundLayer, so nothing else could
+          convert between image pixels and stage pixels. Lifted into
+          utils/mapFit.ts (computeBackgroundFit / imagePointToStage /
+          stagePointToImage) and hoisted to MapCanvas, which now owns and
+          freezes it and passes it down. MapBackgroundLayer is a pure
+          renderer taking `fit` as a prop.
+          The freeze rule is UNCHANGED and still load-bearing - see the
+          comment there. What matters now is that background, fog and
+          walls all read the SAME fit, so they cannot drift apart.
+
+✅  FOG2  Manual fog. types/fog.ts + utils/fogMask.ts hold a bit-packed
+          boolean grid over the image (~120 cells on the long edge, about
+          1.8kB of base64), persisted in map_floors.raw_data next to
+          initiative. Reveal/hide brushes, Reveal all / Hide all.
+          A grid, not a polygon union, on purpose: a union grows without
+          bound as the party walks and has to be re-simplified; a grid is
+          a few kB no matter how long the session runs.
+          Stored in IMAGE space, so it survives a re-fit - unlike tokens.
+
+✅  FOG3  Walls + line of sight. utils/visibility.ts is a classic angular
+          sweep (ray per wall endpoint plus a hair either side, uniform
+          filler rays so the max-range edge reads as a circle). Walls are
+          polylines in map_floors.walls - a JSONB column that has existed
+          since the schema was written and had never been used. Wall
+          draw/erase tools; PlacedToken.visionRadius drives who sees.
+          Measured: 3.0ms per sweep against 1310 wall segments. Only
+          recomputed when a token moves or a wall changes, never per
+          frame - Konva moves the node during a drag and only commits to
+          the store on drop.
+
+✅  FOG4  Auto-detect walls from the image. POST /map-floors/{id}/detect-
+          walls runs OpenCV server-side (the asset file is already on the
+          server's disk) and returns candidate polylines for the DM to
+          correct - it APPENDS, never overwrites. Two modes because the
+          two kinds of battlemap need different treatment: `painted`
+          (bilateral filter -> Canny -> close) and `lineart` (threshold
+          the dark ink). New dep: opencv-python-headless.
+          Tuning note worth keeping: volume is controlled by DROPPING
+          short contours, not by simplifying harder. approxPolyDP at
+          0.012 of the perimeter straightens contours into chords that
+          cut across open floor, i.e. it invents sight blockers where the
+          map has none. It is 0.005 now. Verified by rendering the traced
+          walls back over the map and looking at them.
+
+⚠️  FOG5  No player-facing view exists anywhere in the app, so fog is a
+          DM-side tool: the fog layer renders translucent (0.72) so the
+          DM can still read the map they are running, with a "preview as
+          players see it" toggle for the opaque version. A real second-
+          screen/player route is the obvious follow-up and is what would
+          make fog fully worth it.
+
+⚠️  FOG6  Fog reveals from party tokens (linked creature relation
+          'player') at the toolbar's sight range, or from any token given
+          an explicit radius via Grant sight / Blind. Doors are NOT
+          implemented - map_floors.doors is still unused. A door is just
+          a wall segment you can toggle; it was left out to keep this
+          round shippable.
+
+⚠️  FOG7  Touch input for the fog/wall tools is untested, same gap as
+          F6.3 - they hang off onMouseDown/Move/Up like every other
+          drawing tool here, so they inherit that limitation rather than
+          adding a new one.
+
+✅  FOG9  PERFORMANCE. First cut was unusable - dragging a token froze the
+          page. Measured with PerformanceObserver longtask + a patched
+          fetch, 5 token moves, fog on with 52 auto-detected walls:
+          BEFORE 265ms blocked per move, 24kB PATCHed per move.
+          AFTER   215ms blocked per move, ~0-2kB per move.
+          Fog's own share of that went from +85ms to +35ms over the
+          fog-off baseline. Five separate causes, all real:
+          1. The explored mask drew one Konva Rect per merged cell run -
+             ~346 nodes, each with its own destination-out, rebuilt on
+             every move. Now painted into one 90x120 canvas and drawn as
+             a single Image. Also looks better: scaling interpolates, so
+             the blocky cell edges are gone.
+          2. REST writes broadcast floor:updated into the floor's own WS
+             room with NO sender to exclude, so the client got an echo of
+             its own every save - and applyApiFloorMetaPatch rebuilt
+             `walls`/`fog` from JSON each time, i.e. a new identity, which
+             invalidated the line-of-sight memo and re-ran the whole
+             sweep+mask+render for an unchanged payload. It now keeps the
+             previous reference when the content is equal.
+          3. syncFloorContentChange sent the entire walls array on EVERY
+             floor PATCH, including fog-only ones - 25kB per token step.
+             The payload is now built from only the changed fields (the
+             server PATCH is exclude_unset).
+          4. The explored-mask write was a SECOND store update per move,
+             i.e. a second full MapPage render. Reveals now accumulate in
+             a ref and the store write is debounced (400ms). Nothing
+             visible waits on it - the currently-visible tier is drawn
+             from visionPolygons directly.
+          5. The visibility sweep emitted a vertex per ray, ~1390 of them
+             on a wall-dense map, most landing on the same point. Dedupe
+             at 0.75px cut it to ~209 with an identical silhouette.
+
+✅  FOG11 THE DEV SERVER IS THE LAG. The single most useful measurement of
+          this whole round. Same 5 token moves, fog on, 52 walls:
+            dev server (vite dev)  : 224ms blocked per move
+            production (vite build): ZERO long tasks; median 21.8ms per
+                                     move, worst 51.7ms
+          ~10x, and it is not the feature. React's dev build is far
+          slower than production AND main.tsx wraps the app in
+          <StrictMode>, which double-renders every component in dev. So
+          "the map is unusably laggy" is a dev-server artifact. Run a
+          real session off `npm run build` + `npm run preview` (or
+          Docker), not off `npm run dev`.
+          Konva is not the bottleneck either way: patching Layer.draw
+          showed canvas raster at 7ms out of 1120ms, i.e. 1%. It is all
+          React reconciliation.
+
+✅  FOG12 Defaults changed on request 2026-09-22: fog stays OFF by
+          default (it already was), but EVERY token is now a sight source
+          at the map's default range rather than only party tokens. An
+          explicit per-token radius still wins, including an explicit 0,
+          which is what Blind sets.
+          Because that multiplies the number of sweeps, visibility
+          polygons are now memoised PER TOKEN (keyed on position, radius,
+          walls and fit) so moving one of eight tokens re-sweeps one, not
+          eight. This also removed the per-render creature lookup that
+          classified party tokens.
+
+✅  FOG13 TOKENS NO LONGER DRIFT. This is the bug FOG10 predicted and the
+          DM then hit for real: "I leave a token on the map and it is in
+          a completely different place when I reopen it."
+          CAUSE: tokens/shapes/grid are stored in raw stage pixels, and
+          the background was laid out by contain-fitting the image into
+          the LIVE canvas. Open the map at any other size - other
+          monitor, sidebar open, fullscreen - and the background re-fits
+          while the tokens keep their old numbers, so everything appears
+          to have moved.
+          FIX: MapFloor.authoredStage pins the canvas size the floor's
+          contents were authored against (persisted in raw_data). The
+          background fit is now a pure function of stored data, so a
+          token's coordinates mean the same thing forever, and adapting
+          to whatever window is open is one transform on the Konva Stage
+          - which moves background, tokens, grid and fog together. The
+          frozen-fit/frozen-pivot refs are gone; they existed only to
+          paper over this and are no longer needed.
+          VERIFIED: same floor loaded at 4800x3000 and then 3300x4200 -
+          the token's position ON THE IMAGE was identical (-71, 336) both
+          times, with the Stage transform absorbing the difference
+          (scale 1 -> 0.68).
+          MIGRATION: a floor with no authoredStage adopts the canvas it
+          is first opened at, which pins existing tokens exactly where
+          they render at that moment. So open each map once at your
+          normal window size - that is the layout it locks in. Tokens
+          that were already drifted will need one last reposition.
+
+❗  FOG10 PRE-EXISTING, found while profiling FOG9 and NOT caused by fog:
+          a token move costs ~180ms of blocked main thread with fog
+          switched off entirely. That is MapPage re-rendering the whole
+          page - sidebar, toolbar, initiative bar - on every token move.
+          One contributing cause is already fixed because it was cheap
+          and it also hurt fog: `flipPivot` was a fresh object literal on
+          every MapCanvas render and is a prop on EVERY layer, so Konva
+          marked all five layers dirty - including a full redraw of the
+          scaled background bitmap - on any unrelated state change.
+          Memoised, and MapBackgroundLayer is now React.memo'd.
+          The rest is still open: MapOverlayLayer/MapObjectsLayer take
+          inline-lambda props from MapPage so memo cannot help them
+          without useCallback, and the grid redraws ~100 Lines per render
+          when it is enabled. Fixing it properly means either memoising
+          MapPage's handler surface or keeping token drag state out of
+          the global store until drop.
+          NOTE: measured in the Playwright browser, which is slow and odd
+          (see the memory note on its 33% zoom / 4693px logical stage), so
+          treat the absolute ms as pessimistic and the ratios as real.
+
+❗  FOG8  NOT a fog bug, but it surfaced during fog verification and is
+          worth writing down: placed tokens are stored in raw STAGE
+          pixels, so a token only lines up with the background at the
+          viewport size it was placed at. Verifying in a browser whose
+          logical stage was 3x the usual size put an existing token at
+          image x = -108, i.e. off the left edge of its own map. The
+          background re-fits, the tokens do not. Fog and walls are stored
+          in IMAGE space specifically so they do not inherit this, but
+          the token->image conversion still goes through the fit, so
+          token vision is only as correct as the token position is.
+          Fixing it properly means migrating placedTokens to image space.
+
+
+#####################################################################
+PART I-HIST - EDIT HISTORY + RESTORE (2026-09-22)
+#####################################################################
+The World Manager's "Recently edited" view answered only WHICH entity was
+touched, by sorting entities on updated_at. That is the one question a DM
+never has to ask. It is now a record of CHANGES: what moved, in one line,
+and a button that puts it back.
+
+✅  HIST1  entity_revisions table. One generic table, not one per entity:
+           the view interleaves articles, NPCs, homebrew creatures and
+           factions on a single timeline, so per-entity tables would mean
+           three queries and a merge sort per render, plus a fourth the
+           day a fifth kind of content becomes editable.
+           entity_id is deliberately NOT a foreign key. It points at one
+           of three tables depending on entity_type, and - unlike
+           item_usage.item_id, the other loose id in this schema - the row
+           has to OUTLIVE its entity, because a delete whose history row
+           cascaded away with it would be the one change you could never
+           undo.
+           Migration d2a9f6c4e8b1; 001_schema.sql section 3e kept in step.
+
+✅  HIST2  Recording. Server/app/services/revisions.py, called from the
+           three routers that own world content (articles, creatures,
+           factions) on create/update/delete. Opt-in per call site rather
+           than an ORM event hook: a hook would also fire for the importer
+           seeding ten thousand compendium creatures, and history that is
+           mostly the seed script is not history.
+           Diffed BY VALUE, not by which keys were sent - all three client
+           stores PATCH a full payload on every save, so exclude_unset
+           says "all of them" every time. Diffing values is also what
+           makes a save that changed nothing record nothing.
+           Campaign-less creatures (the global compendium library) are
+           shared reference data, not one world's content, and are skipped.
+
+✅  HIST3  Retention: keep every change from the last 6 HOURS, and the
+           last 500 changes however old - a row must fall outside BOTH to
+           be dropped. Scoped per world, so a busy world cannot age out a
+           quiet one's undo history. Pruning runs only once a world drifts
+           500+100 rows past the floor, and in its own transaction AFTER
+           the edit commits, so a failure there can never roll back the
+           DM's actual save. GET /entity-revisions/policy serves the two
+           numbers so the UI states the live rule rather than a copy.
+
+✅  HIST4  Restore. POST /entity-revisions/{id}/restore re-applies the
+           row's before_state - a full column snapshot, which is why it
+           can also RECREATE an entity that was deleted, at its original
+           id, so anything that linked to it points at a live row again.
+           A restore is itself recorded, so undoing an undo is one more
+           click. Restoring a `create` row is refused with a readable
+           reason (nothing came before it); the UI shows "Oldest version"
+           instead of a button there.
+           A restore rewinds the WHOLE entry to that moment, so later
+           edits to it are undone too - the confirm dialog says so and
+           deliberately does not promise a field count it cannot know.
+
+✅  HIST5  UI: components/world/RecentChangesTimeline.tsx. Day-grouped
+           timeline on a rail, colour-coded per action, one-line summary
+           under each title, expandable field-by-field diff, Restore /
+           "Bring back" per row, search + kind/action filter chips.
+           Article rows show their own category icon and label by looking
+           the article up live; a deleted one has nothing to look up and
+           falls back to "Article", which is also what it should say.
+
+❗  HIST6  NOT tracked yet, and worth knowing before someone assumes it
+           is: notes, maps, encounters, random tables, quests and bastions
+           write through their own routers and record nothing. Adding one
+           is a two-line change in that router plus an entity_type entry
+           in services/revisions.py `_TRACKED` and the router's MODELS
+           map - the table and the UI need nothing.
+
+❗  HIST7  The FIRST save of an article whose body predates TipTap records
+           a "Body" change with an identical before/after preview. That is
+           real, not a bug: the body was stored as bare text and the
+           editor's legacy conversion wraps it in <p> on open. It is
+           self-limiting - the second save records only what you actually
+           edited - but it does mean one noisy row per legacy article.

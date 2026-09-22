@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { ThemeModeProvider } from './theme/ThemeModeContext';
 import { AppRoutes } from './routes/routes';
+import { DiceRollOverlay } from './components/dice/DiceRollOverlay';
 import { FLOATING_SCROLLBAR_CLASS } from './theme/scrollbarSx';
 
 const SCROLL_IDLE_MS = 650;
@@ -37,6 +38,14 @@ function App() {
       <BrowserRouter>
         <AppRoutes />
       </BrowserRouter>
+      {/* OUTSIDE the router, deliberately. The dice table owns a BabylonJS engine, a physics
+          worker and a WebGL context, and it keeps a running count of how many throws it has
+          already served. Mounted inside a page (it used to live in SectionLayout) all three
+          are rebuilt on every navigation - which leaked a WebGL context per page change and,
+          because the throw-count watermark restarted at zero, made the overlay "catch up" by
+          re-throwing every die rolled that session. Here it mounts once and stays. It still
+          portals to <body>, so this position decides its lifetime, not where it draws. */}
+      <DiceRollOverlay />
     </ThemeModeProvider>
   );
 }

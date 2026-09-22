@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import type Konva from 'konva';
 import useImage from 'use-image';
@@ -32,6 +32,7 @@ import { useEncounterStore, getEncountersForCampaign } from '../store/useEncount
 import { useCreatureStore, getCreaturesForCampaign } from '../store/useCreatureStore';
 import { useShortcutStore, getEffectiveCombo } from '../store/useShortcutStore';
 import { apiMapShapeToAoEShape, apiMapTokenToPlacedToken, applyApiFloorMetaPatch } from '../api/adapters';
+import * as mapsApi from '../api/resources/maps';
 import { connectRoom, floorRoom } from '../api/ws';
 import type { ApiMapFloor, ApiMapShape, ApiMapToken } from '../api/types';
 import { getPrimaryFloor, type GridType, type MapFloor } from '../types/map';
@@ -48,8 +49,14 @@ import { DEFAULT_INITIATIVE_STATE, type InitiativeEntry } from '../types/initiat
 import { abilityModifier, getCreatureRelationOption, type Creature } from '../types/creature';
 import type { Encounter, EncounterCreatureEntry } from '../types/encounter';
 import type { MapToolMode } from '../types/tool';
+import type { WallDetectMode, WallSegment } from '../types/fog';
+import { DEFAULT_VISION_SQUARES, FOG_BRUSH_RADIUS, FOG_PERSIST_DEBOUNCE_MS, createFogState } from '../types/fog';
 import type { StagePoint } from '../utils/tokenDrag';
-import { computeBestFitRotation, type MapRotation } from '../utils/mapFit';
+import { computeBestFitRotation, stagePointToImage, type BackgroundFit, type MapRotation } from '../utils/mapFit';
+import type { FogGrid } from '../utils/fogMask';
+import { cloneFogGrid, decodeFogGrid, encodeFogGrid, markCircle, markPolygon, setAllCells } from '../utils/fogMask';
+import type { VisibilitySegment } from '../utils/visibility';
+import { computeVisibilityPolygon, wallsToSegments } from '../utils/visibility';
 import { SHORTCUT_ACTIONS, comboFromKeyboardEvent, formatCombo } from '../types/shortcut';
 
 const ZOOM_STEP = 1.2;
@@ -65,6 +72,28 @@ type QuickInputPopoverState =
 /** Fixed, viewport-relative anchor for the hotkey-triggered quick-action popovers - there's no
  * meaningful click point to anchor to when a popover is opened from a keyboard shortcut. */
 const QUICK_POPOVER_ANCHOR = () => ({ top: Math.round(window.innerHeight * 0.3), left: Math.round(window.innerWidth / 2) });
+
+/** Finds the creature stat block linked to a placed token - directly via token.creatureId
+ * (favorites drop, encounter drop) or, for older placements that predate that field, via its
+ * encounter entry. Module scope because the fog-of-war memos need it before MapPage's early
+ * returns, where component-local helpers are not yet in scope. */
+function findLinkedCreature(token: PlacedToken, creatures: Creature[], encounters: Encounter[]): Creature | undefined {
+  if (token.creatureId) return creatures.find((c) => c.id === token.creatureId);
+  if (!token.encounterEntryId) return undefined;
+  for (const enc of encounters) {
+    const entry = enc.creatures.find((c) => c.id === token.encounterEntryId);
+    if (entry) return entry.creatureId ? creatures.find((c) => c.id === entry.creatureId) : undefined;
+  }
+  return undefined;
+}
+
+/** How far a token actually sees, in stage px. An explicit per-token radius always wins -
+ * including an explicit 0, which is how "this character is blinded" is expressed. Every
+ * other token falls back to the map's default sight range: a token on the board can see,
+ * without the DM having to grant it first. Use Blind to take it away. */
+function effectiveVisionRadius(token: PlacedToken, defaultRadius: number): number {
+  return token.visionRadius ?? defaultRadius;
+}
 
 export function MapPage() {
   const { worldId, campaignId, mapId } = useParams<{ worldId: string; campaignId: string; mapId: string }>();
@@ -107,10 +136,33 @@ export function MapPage() {
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
   const [quickInputPopover, setQuickInputPopover] = useState<QuickInputPopoverState>(null);
+  /** Where the background image lands in stage space, reported up by MapCanvas. Walls and
+   * the fog mask are stored in image-pixel space, so every conversion runs through this. */
+  const [fit, setFit] = useState<BackgroundFit | null>(null);
+  const [fogBrushRadius, setFogBrushRadius] = useState(FOG_BRUSH_RADIUS);
+  const [visionSquares, setVisionSquares] = useState(DEFAULT_VISION_SQUARES);
+  const [playerPreview, setPlayerPreview] = useState(false);
+  const [showWalls, setShowWalls] = useState(false);
+  const [detectingWalls, setDetectingWalls] = useState(false);
+  const [fogToast, setFogToast] = useState<string | null>(null);
 
   const shortcutOverrides = useShortcutStore((state) => state.overrides);
 
   const stageRef = useRef<Konva.Stage>(null);
+  /** Accumulated line-of-sight reveals awaiting a debounced store write - see the effect
+   * that fills it, and FOG_PERSIST_DEBOUNCE_MS for why it is debounced at all. */
+  const fogAccum = useRef<{ floorId: string | null; grid: FogGrid | null; timer: number | null }>({
+    floorId: null,
+    grid: null,
+    timer: null,
+  });
+  /** Per-token visibility polygons, so moving one token does not re-sweep the others.
+   * Invalidated wholesale when the wall set changes - see the visionPolygons memo. */
+  const visionCache = useRef<{
+    walls: WallSegment[] | undefined;
+    segments: VisibilitySegment[];
+    byToken: Map<string, { key: string; polygon: number[] }>;
+  }>({ walls: undefined, segments: [], byToken: new Map() });
   const keyHandlersRef = useRef<{ undo: () => void; redo: () => void; blocked: boolean; shortcuts: Record<string, () => void> }>(
     { undo: () => {}, redo: () => {}, blocked: false, shortcuts: {} },
   );
@@ -260,6 +312,140 @@ export function MapPage() {
     return unsubscribe;
   }, [campaignId, map?.id, activeFloor?.id, applyRemoteFloorPatch]);
 
+  // ---------------------------------------------------------------------
+  // Fog of war. These have to sit above MapPage's early returns, which is why
+  // they read straight off the store rather than through the mutate* helpers
+  // defined further down.
+  // ---------------------------------------------------------------------
+
+  // MapCanvas calls this from an effect, so it must be referentially stable or
+  // the two components ping-pong renders forever.
+  const handleFitChange = useCallback((next: BackgroundFit | null) => setFit(next), []);
+
+  /** One-time migration for a floor placed before token coordinates were made
+   * viewport-independent: adopt the canvas it is being opened at, which pins every existing
+   * token exactly where it renders right now and stops it ever drifting again. Deliberately
+   * not a history step, and it only ever fires for a floor with no authoredStage. */
+  const handleAuthoredStageResolved = useCallback(
+    (size: { width: number; height: number }) => {
+      if (!campaignId || !map?.id || !activeFloor?.id || activeFloor.authoredStage) return;
+      updateFloorInMap(campaignId, map.id, activeFloor.id, (floor) =>
+        floor.authoredStage ? floor : { ...floor, authoredStage: size },
+      );
+    },
+    [campaignId, map?.id, activeFloor?.id, activeFloor?.authoredStage, updateFloorInMap],
+  );
+
+  const floorTokens = activeFloor?.placedTokens;
+  const floorWalls = activeFloor?.walls;
+  const fogEnabled = !!activeFloor?.fog.enabled;
+  const defaultVisionRadius = visionSquares * (map?.gridSize ?? 0);
+
+  /** One line-of-sight polygon per seeing token, in image space.
+   *
+   * Memoised PER TOKEN, not just per render. Every token on the board is a sight source
+   * now, so moving one of eight tokens would otherwise re-sweep all eight - and the sweep
+   * is the single most expensive thing this feature does. A token whose position, radius,
+   * walls and fit are all unchanged reuses its previous polygon, including its array
+   * identity, so downstream memos see it as unchanged too.
+   *
+   * Never runs mid-drag either: Konva moves the token node itself while dragging and only
+   * commits to the store on drop, so this runs once per move rather than once per frame. */
+  const visionPolygons = useMemo(() => {
+    if (!fit || !fogEnabled || !floorTokens) return [];
+
+    const cache = visionCache.current;
+    if (cache.walls !== floorWalls) {
+      cache.walls = floorWalls;
+      cache.segments = wallsToSegments(floorWalls ?? []);
+      cache.byToken.clear();
+    }
+
+    const live = new Set<string>();
+    const polygons: number[][] = [];
+    for (const token of floorTokens) {
+      const radiusStage = effectiveVisionRadius(token, defaultVisionRadius);
+      if (!(radiusStage > 0)) continue;
+      live.add(token.id);
+
+      const key = `${token.x}:${token.y}:${radiusStage}:${fit.scale}:${fit.x}:${fit.y}`;
+      const cached = cache.byToken.get(token.id);
+      if (cached && cached.key === key) {
+        if (cached.polygon.length >= 6) polygons.push(cached.polygon);
+        continue;
+      }
+
+      const origin = stagePointToImage(token.x, token.y, fit);
+      const polygon = computeVisibilityPolygon(origin.x, origin.y, radiusStage / fit.scale, cache.segments);
+      cache.byToken.set(token.id, { key, polygon });
+      if (polygon.length >= 6) polygons.push(polygon);
+    }
+
+    for (const id of cache.byToken.keys()) {
+      if (!live.has(id)) cache.byToken.delete(id);
+    }
+    return polygons;
+  }, [fit, fogEnabled, floorTokens, floorWalls, defaultVisionRadius]);
+
+  // Repairs a fog record whose grid was never sized - fog switched on before the background
+  // image finished loading, or a floor whose image was swapped for one of a different shape.
+  // Without this the mask silently stays zero-sized and every reveal is a no-op.
+  const activeFloorFogCols = activeFloor?.fog.cols ?? 0;
+  const activeFloorFogEnabled = activeFloor?.fog.enabled ?? false;
+  useEffect(() => {
+    if (!campaignId || !map?.id || !activeFloor?.id || !fit) return;
+    if (!activeFloorFogEnabled || activeFloorFogCols > 0) return;
+    const sized = createFogState(fit.imageWidth, fit.imageHeight, true);
+    if (!(sized.cols > 0)) return;
+    updateFloorInMap(campaignId, map.id, activeFloor.id, (floor) => ({ ...floor, fog: sized }));
+  }, [campaignId, map?.id, activeFloor?.id, fit, activeFloorFogEnabled, activeFloorFogCols, updateFloorInMap]);
+
+  // "Once revealed, it stays revealed": union what is visible right now into the persisted
+  // explored mask. Deliberately NOT a history step - a party crossing a room would otherwise
+  // bury every undoable edit under a hundred fog frames.
+  //
+  // The union accumulates into a ref and the STORE write is debounced, because each store
+  // write re-renders the whole map page. Reveals are therefore never lost between moves even
+  // though only the last one in a burst reaches the store. `fogAccum` is reset by every
+  // handler that writes the mask by other means (brush, Reveal/Hide all) so it can never
+  // resurrect cells the DM just hid - see resetFogAccumulator.
+  const activeFogState = activeFloor?.fog;
+  const activeFloorId2 = activeFloor?.id;
+  useEffect(() => {
+    if (!campaignId || !map?.id || !activeFloorId2 || !activeFogState?.enabled || !fit) return;
+    if (visionPolygons.length === 0) return;
+
+    const accum = fogAccum.current;
+    if (accum.floorId !== activeFloorId2 || !accum.grid || accum.grid.cols !== activeFogState.cols) {
+      const seeded = decodeFogGrid(activeFogState);
+      if (!seeded) return;
+      accum.grid = seeded;
+      accum.floorId = activeFloorId2;
+    }
+
+    let changed = false;
+    for (const polygon of visionPolygons) {
+      if (markPolygon(accum.grid, fit.imageWidth, fit.imageHeight, polygon, 1)) changed = true;
+    }
+    if (!changed) return;
+
+    const explored = encodeFogGrid(accum.grid);
+    if (accum.timer !== null) window.clearTimeout(accum.timer);
+    accum.timer = window.setTimeout(() => {
+      accum.timer = null;
+      updateFloorInMap(campaignId, map.id, activeFloorId2, (floor) => ({
+        ...floor,
+        fog: { ...floor.fog, explored },
+      }));
+    }, FOG_PERSIST_DEBOUNCE_MS);
+  }, [visionPolygons, activeFogState, fit, campaignId, map?.id, activeFloorId2, updateFloorInMap]);
+
+  // Drop the pending write when the page goes away, so a queued reveal cannot land on a
+  // floor the DM has already navigated off.
+  useEffect(() => () => {
+    if (fogAccum.current.timer !== null) window.clearTimeout(fogAccum.current.timer);
+  }, []);
+
   if (!worldId || !campaignId) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -294,6 +480,8 @@ export function MapPage() {
   };
 
   const handleUndo = () => {
+    // An undo restores an older fog mask; a queued reveal landing after it would undo the undo.
+    resetFogAccumulator();
     if (!activeFloor || undoStack.length === 0) return;
     const previous = undoStack[undoStack.length - 1];
     setUndoStack((stack) => stack.slice(0, -1));
@@ -302,6 +490,8 @@ export function MapPage() {
   };
 
   const handleRedo = () => {
+    // An undo restores an older fog mask; a queued reveal landing after it would undo the undo.
+    resetFogAccumulator();
     if (!activeFloor || redoStack.length === 0) return;
     const next = redoStack[redoStack.length - 1];
     setRedoStack((stack) => stack.slice(0, -1));
@@ -317,19 +507,6 @@ export function MapPage() {
       ...floor!,
       placedTokens: floor!.placedTokens.map((t) => (t.id === tokenId ? { ...t, x, y } : t)),
     }));
-  };
-
-  /** Finds the creature stat block linked to a placed token - directly via token.creatureId
-   * (favorites drop, encounter drop) or, for older placements that predate that field, via its
-   * encounter entry. */
-  const findLinkedCreature = (token: PlacedToken, creatures: Creature[], encounters: Encounter[]): Creature | undefined => {
-    if (token.creatureId) return creatures.find((c) => c.id === token.creatureId);
-    if (!token.encounterEntryId) return undefined;
-    for (const enc of encounters) {
-      const entry = enc.creatures.find((c) => c.id === token.encounterEntryId);
-      if (entry) return entry.creatureId ? creatures.find((c) => c.id === entry.creatureId) : undefined;
-    }
-    return undefined;
   };
 
   /** Rolls a fresh initiative entry (d20 + DEX mod when linked to a creature) for one token. */
@@ -657,6 +834,114 @@ export function MapPage() {
     mutateActiveFloorWithHistory((floor) => ({ ...floor!, shapes: floor!.shapes.filter((s) => s.id !== shapeId) }));
   };
 
+  // --- fog of war ------------------------------------------------------
+
+  /** Turning fog on for the first time sizes its grid to the background image. Turning it
+   * off and on again keeps whatever was already explored. If the image has not finished
+   * loading the grid comes out zero-sized, which the repair effect above then fixes. */
+  const handleToggleFog = () => {
+    resetFogAccumulator();
+    const imageW = fit?.imageWidth ?? backgroundImage?.width ?? 0;
+    const imageH = fit?.imageHeight ?? backgroundImage?.height ?? 0;
+    mutateActiveFloor((floor) => {
+      const base = floor!.fog.cols > 0 ? floor!.fog : createFogState(imageW, imageH);
+      return { ...floor!, fog: { ...base, enabled: !floor!.fog.enabled } };
+    });
+  };
+
+  /** Drops any line-of-sight reveal queued by the debounced effect. Every handler that
+   * writes the explored mask by another route has to call this first: otherwise a reveal
+   * computed a moment ago lands afterwards and re-reveals what the DM just hid. */
+  const resetFogAccumulator = () => {
+    if (fogAccum.current.timer !== null) window.clearTimeout(fogAccum.current.timer);
+    fogAccum.current = { floorId: null, grid: null, timer: null };
+  };
+
+  /** Applies one completed brush stroke. MapCanvas batches the whole drag into a single
+   * call - see its handleMouseUp - so this is one history step and one PATCH per stroke. */
+  const handleFogPaint = (points: StagePoint[], radius: number, reveal: boolean) => {
+    if (!fit) return;
+    resetFogAccumulator();
+    mutateActiveFloorWithHistory((floor) => {
+      const grid = decodeFogGrid(floor!.fog);
+      if (!grid) return floor!;
+      const next = cloneFogGrid(grid);
+      let changed = false;
+      for (const point of points) {
+        if (markCircle(next, fit.imageWidth, fit.imageHeight, point.x, point.y, radius, reveal ? 1 : 0)) {
+          changed = true;
+        }
+      }
+      if (!changed) return floor!;
+      return { ...floor!, fog: { ...floor!.fog, explored: encodeFogGrid(next) } };
+    });
+  };
+
+  const handleSetAllFog = (explored: boolean) => {
+    resetFogAccumulator();
+    mutateActiveFloorWithHistory((floor) => {
+      const grid = decodeFogGrid(floor!.fog);
+      if (!grid) return floor!;
+      return {
+        ...floor!,
+        fog: { ...floor!.fog, explored: encodeFogGrid(setAllCells(grid, explored ? 1 : 0)) },
+      };
+    });
+  };
+
+  const handleSetSelectedVision = (radius: number | undefined) => {
+    if (selectedTokenIds.length === 0) return;
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      placedTokens: floor!.placedTokens.map((t) =>
+        selectedTokenIds.includes(t.id) ? { ...t, visionRadius: radius } : t,
+      ),
+    }));
+  };
+
+  const handleWallComplete = (points: number[]) => {
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      walls: [...floor!.walls, { id: crypto.randomUUID(), points }],
+    }));
+  };
+
+  const handleEraseWall = (wallId: string) => {
+    mutateActiveFloorWithHistory((floor) => ({
+      ...floor!,
+      walls: floor!.walls.filter((w) => w.id !== wallId),
+    }));
+  };
+
+  const handleClearWalls = () => {
+    mutateActiveFloorWithHistory((floor) => ({ ...floor!, walls: [] }));
+  };
+
+  /** Asks the backend to trace sight-blocking geometry out of the background image. The
+   * result is a FIRST DRAFT - it is appended to the existing walls rather than replacing
+   * them, and it is expected to need cleanup with the Draw/Erase tools. */
+  const handleDetectWalls = async (mode: WallDetectMode, sensitivity: number) => {
+    if (!activeFloor) return;
+    setDetectingWalls(true);
+    try {
+      const result = await mapsApi.detectMapFloorWalls(activeFloor.id, { mode, sensitivity });
+      const detected = result.polylines
+        .filter((points) => points.length >= 4)
+        .map((points) => ({ id: crypto.randomUUID(), points }));
+      if (detected.length === 0) {
+        setFogToast('No walls found - try raising the sensitivity, or the other map style.');
+        return;
+      }
+      mutateActiveFloorWithHistory((floor) => ({ ...floor!, walls: [...floor!.walls, ...detected] }));
+      setShowWalls(true);
+      setFogToast(`Traced ${detected.length} walls - check them over and fix what it got wrong.`);
+    } catch (err) {
+      setFogToast(err instanceof Error ? `Wall detection failed: ${err.message}` : 'Wall detection failed.');
+    } finally {
+      setDetectingWalls(false);
+    }
+  };
+
   const handleToggleGrid = () => {
     updateMapInCampaign(campaignId, { ...map, gridEnabled: !map.gridEnabled });
   };
@@ -876,15 +1161,11 @@ export function MapPage() {
     if (rotation !== ((activeFloor.rotation ?? 0) as MapRotation)) {
       mutateActiveFloorWithHistory((floor) => ({ ...floor!, rotation }));
     }
-    // Force MapBackgroundLayer/MapCanvas's frozen fit + rotate pivot to recompute against
-    // the current viewport and the (possibly just-changed) rotation above - see
-    // MapBackgroundLayer's fitResetEpoch doc comment for why this doesn't happen on every
-    // render/resize. Once that recompute lands, the background layer itself best-fits the
-    // viewport, so the Stage-level transform just resets to identity on top of it.
+    // Re-frame the authored canvas in the current viewport. MapCanvas owns that transform
+    // now (the background fit is a pure function of the authored size, so there is nothing
+    // to "recompute" any more); bumping the epoch just asks it to reapply, which also undoes
+    // whatever the DM had panned/zoomed to.
     setFitResetEpoch((e) => e + 1);
-    stage.scale({ x: 1, y: 1 });
-    stage.position({ x: 0, y: 0 });
-    stage.batchDraw();
   };
 
   /** Placed tokens enriched with render-only fields the map/initiative bar need but that are
@@ -999,6 +1280,18 @@ export function MapPage() {
               flippedVertical={activeFloor.flippedVertical}
               rotation={activeFloor.rotation}
               fitResetEpoch={fitResetEpoch}
+              fog={activeFloor.fog}
+              walls={activeFloor.walls}
+              visionPolygons={visionPolygons}
+              showWalls={showWalls || activeTool === 'wall-draw' || activeTool === 'wall-erase'}
+              playerPreview={playerPreview}
+              fogBrushRadius={fogBrushRadius}
+              onFogPaint={handleFogPaint}
+              onWallComplete={handleWallComplete}
+              onEraseWall={handleEraseWall}
+              onFitChange={handleFitChange}
+              authoredStage={activeFloor.authoredStage}
+              onAuthoredStageResolved={handleAuthoredStageResolved}
             />
           )}
           {activeFloor && (
@@ -1071,6 +1364,25 @@ export function MapPage() {
               onUndo={handleUndo}
               onRedo={handleRedo}
               onOpenTokenManager={handleOpenTokenManager}
+              fogEnabled={fogEnabled}
+              onToggleFog={handleToggleFog}
+              playerPreview={playerPreview}
+              onTogglePlayerPreview={() => setPlayerPreview((p) => !p)}
+              fogBrushRadius={fogBrushRadius}
+              onFogBrushRadiusChange={setFogBrushRadius}
+              onRevealAll={() => handleSetAllFog(true)}
+              onHideAll={() => handleSetAllFog(false)}
+              visionSquares={visionSquares}
+              onVisionSquaresChange={setVisionSquares}
+              selectedTokenCount={selectedTokenIds.length}
+              onGrantSight={() => handleSetSelectedVision(defaultVisionRadius)}
+              onRemoveSight={() => handleSetSelectedVision(0)}
+              showWalls={showWalls}
+              onToggleShowWalls={() => setShowWalls((s) => !s)}
+              wallCount={activeFloor?.walls.length ?? 0}
+              onClearWalls={handleClearWalls}
+              onDetectWalls={handleDetectWalls}
+              detectingWalls={detectingWalls}
             />
           </Box>
         </Stack>
@@ -1139,6 +1451,12 @@ export function MapPage() {
       <Snackbar open={savedToast} autoHideDuration={2000} onClose={() => setSavedToast(false)}>
         <Alert severity="success" onClose={() => setSavedToast(false)} sx={{ width: '100%' }}>
           Encounter saved.
+        </Alert>
+      </Snackbar>
+
+      <Snackbar open={!!fogToast} autoHideDuration={6000} onClose={() => setFogToast(null)}>
+        <Alert severity="info" onClose={() => setFogToast(null)} sx={{ width: '100%' }}>
+          {fogToast}
         </Alert>
       </Snackbar>
 

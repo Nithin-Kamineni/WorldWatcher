@@ -24,6 +24,10 @@ import type {
   ApiEncounterNpc,
   ApiEncounterSocialBlock,
   ApiEncounterTableCreature,
+  ApiEntityRevision,
+  ApiRestoreResult,
+  ApiRetentionPolicy,
+  ApiRevisionChange,
   ApiFaction,
   ApiFactionRelation,
   ApiGenerator,
@@ -82,7 +86,15 @@ import type { Faction, FactionInfluence } from '../types/faction';
 import type { FactionRelation, FactionRelationImportance, FactionRelationType } from '../types/factionRelation';
 import type { MagicItem, MagicItemRarity } from '../types/magicItem';
 import type { MapFloor } from '../types/map';
+import type { FogState, WallSegment } from '../types/fog';
+import { DEFAULT_FOG_STATE } from '../types/fog';
 import type { Quest, QuestObjective, QuestStatus } from '../types/quest';
+import type {
+  EntityRevision,
+  RevisionChange,
+  RevisionRestoreResult,
+  RevisionRetentionPolicy,
+} from '../types/revision';
 import type { Category, CategoryNode } from '../types/category';
 import type { Tag } from '../types/tag';
 import type { TableFormat } from '../types/tableFormat';
@@ -625,12 +637,17 @@ export async function tokenDefinitionToApiPayload(token: TokenDefinition): Promi
 /** MapToken.raw_data has no other use yet - same JSONB-overflow-column convention as
  * floor.raw_data (initiative) and quest.raw_data, used here so tempHp/reactionSpent don't
  * need their own migration/columns. */
-function tokenExtrasFromRawData(rawData: unknown): { tempHp?: number; reactionSpent?: boolean } {
+function tokenExtrasFromRawData(rawData: unknown): {
+  tempHp?: number;
+  reactionSpent?: boolean;
+  visionRadius?: number;
+} {
   if (!rawData || typeof rawData !== 'object') return {};
   const o = rawData as Record<string, unknown>;
   return {
     tempHp: typeof o.tempHp === 'number' ? o.tempHp : undefined,
     reactionSpent: typeof o.reactionSpent === 'boolean' ? o.reactionSpent : undefined,
+    visionRadius: typeof o.visionRadius === 'number' ? o.visionRadius : undefined,
   };
 }
 
@@ -729,6 +746,58 @@ function initiativeFromRawData(rawData: unknown): MapFloor['initiative'] {
   return { ...DEFAULT_INITIATIVE_STATE, entries: [] };
 }
 
+/** Reads the fog mask back out of the floor's raw_data. Every floor saved
+ * before fog existed has no `fog` key at all, and one whose background image
+ * was swapped has a mask sized for the old image - both have to come back as
+ * "fog off, nothing explored" rather than as a half-valid state. */
+function fogFromRawData(rawData: unknown): FogState {
+  if (rawData && typeof rawData === 'object' && 'fog' in (rawData as Record<string, unknown>)) {
+    const stored = (rawData as Record<string, unknown>).fog;
+    if (stored && typeof stored === 'object') {
+      const o = stored as Partial<FogState>;
+      return {
+        enabled: typeof o.enabled === 'boolean' ? o.enabled : false,
+        cols: typeof o.cols === 'number' ? o.cols : 0,
+        rows: typeof o.rows === 'number' ? o.rows : 0,
+        explored: typeof o.explored === 'string' ? o.explored : '',
+      };
+    }
+  }
+  return { ...DEFAULT_FOG_STATE };
+}
+
+/** The canvas size this floor's contents were authored against - see MapFloor.authoredStage.
+ * Absent on every floor saved before token positions were made viewport-independent; those
+ * get one migrated in on first load. */
+function authoredStageFromRawData(rawData: unknown): { width: number; height: number } | undefined {
+  if (rawData && typeof rawData === 'object' && 'authoredStage' in (rawData as Record<string, unknown>)) {
+    const stored = (rawData as Record<string, unknown>).authoredStage;
+    if (stored && typeof stored === 'object') {
+      const o = stored as Partial<{ width: number; height: number }>;
+      if (typeof o.width === 'number' && o.width > 0 && typeof o.height === 'number' && o.height > 0) {
+        return { width: o.width, height: o.height };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** map_floors.walls is a JSONB column that predates this feature and has
+ * always been null in practice, so anything that is not a well-formed array
+ * of polylines degrades to "no walls". */
+function wallsFromApi(walls: unknown): WallSegment[] {
+  if (!Array.isArray(walls)) return [];
+  const result: WallSegment[] = [];
+  for (const entry of walls) {
+    if (!entry || typeof entry !== 'object') continue;
+    const o = entry as Partial<WallSegment>;
+    if (!Array.isArray(o.points) || o.points.length < 4) continue;
+    if (o.points.some((n) => typeof n !== 'number' || !Number.isFinite(n))) continue;
+    result.push({ id: typeof o.id === 'string' ? o.id : crypto.randomUUID(), points: o.points });
+  }
+  return result;
+}
+
 function resolvedRosterFromRawData(rawData: unknown): EncounterCreatureEntry[] | null {
   if (rawData && typeof rawData === 'object' && 'resolvedEncounterRoster' in (rawData as Record<string, unknown>)) {
     const stored = (rawData as Record<string, unknown>).resolvedEncounterRoster;
@@ -750,6 +819,9 @@ export function assembleMapFloor(floor: ApiMapFloor, tokens: ApiMapToken[], shap
     lockedEncounterId: floor.locked_encounter_id,
     resolvedEncounterRoster: resolvedRosterFromRawData(floor.raw_data),
     initiative: initiativeFromRawData(floor.raw_data),
+    walls: wallsFromApi(floor.walls),
+    fog: fogFromRawData(floor.raw_data),
+    authoredStage: authoredStageFromRawData(floor.raw_data),
   };
 }
 
@@ -757,6 +829,18 @@ export function assembleMapFloor(floor: ApiMapFloor, tokens: ApiMapToken[], shap
  * local floor state, leaving placedTokens/shapes untouched - those broadcast separately via
  * their own token/shape messages. See MapPage's floorRoom WS handler. */
 export function applyApiFloorMetaPatch(floor: MapFloor, data: ApiMapFloor): MapFloor {
+  // Walls and fog keep their PREVIOUS references when the incoming content is
+  // identical. REST writes broadcast into the floor's WS room with no sender to
+  // exclude, so the client receives an echo of its own every save - and a
+  // freshly-parsed walls array or fog object would be a new identity each time,
+  // invalidating MapPage's line-of-sight memo and re-running the whole sweep,
+  // mask and render pass for a payload that did not actually change. That echo
+  // is most of what made dragging a token stutter.
+  const nextWalls = wallsFromApi(data.walls);
+  const nextFog = fogFromRawData(data.raw_data);
+  const wallsUnchanged = JSON.stringify(nextWalls) === JSON.stringify(floor.walls);
+  const fogUnchanged = JSON.stringify(nextFog) === JSON.stringify(floor.fog);
+
   return {
     ...floor,
     flippedHorizontal: data.flipped_horizontal,
@@ -765,6 +849,9 @@ export function applyApiFloorMetaPatch(floor: MapFloor, data: ApiMapFloor): MapF
     lockedEncounterId: data.locked_encounter_id,
     resolvedEncounterRoster: resolvedRosterFromRawData(data.raw_data),
     initiative: initiativeFromRawData(data.raw_data),
+    walls: wallsUnchanged ? floor.walls : nextWalls,
+    fog: fogUnchanged ? floor.fog : nextFog,
+    authoredStage: authoredStageFromRawData(data.raw_data) ?? floor.authoredStage,
   };
 }
 
@@ -1401,4 +1488,53 @@ function apiGeneratorRollSlotResultToResult(s: ApiGeneratorRollSlotResult): Gene
 
 export function apiGeneratorRollResultToResult(r: ApiGeneratorRollResult): GeneratorRollResult {
   return { generatorId: r.generator_id, slots: r.slots.map(apiGeneratorRollSlotResultToResult), combinedText: r.combined_text };
+}
+
+// ---------------------------------------------------------------------------
+// Entity revisions (World Manager edit history)
+// ---------------------------------------------------------------------------
+
+/** The server sends `delta` / `before_count` / `after_count` as null on the change kinds
+ * that do not use them. They become absent rather than null here so the domain type can say
+ * "present only on `long`" with an optional field instead of a nullable one. */
+function apiRevisionChangeToChange(c: ApiRevisionChange): RevisionChange {
+  return {
+    field: c.field,
+    label: c.label,
+    kind: c.kind,
+    before: c.before,
+    after: c.after,
+    ...(c.delta != null ? { delta: c.delta } : {}),
+    ...(c.before_count != null ? { beforeCount: c.before_count } : {}),
+    ...(c.after_count != null ? { afterCount: c.after_count } : {}),
+  };
+}
+
+export function apiEntityRevisionToRevision(r: ApiEntityRevision): EntityRevision {
+  return {
+    id: r.id,
+    worldId: r.world_id,
+    entityType: r.entity_type,
+    entityId: r.entity_id,
+    entityName: r.entity_name,
+    action: r.action,
+    summary: r.summary,
+    changes: (r.changes ?? []).map(apiRevisionChangeToChange),
+    createdAt: toEpochMs(r.created_at),
+    canRestore: r.can_restore,
+  };
+}
+
+export function apiRestoreResultToResult(r: ApiRestoreResult): RevisionRestoreResult {
+  return {
+    entityType: r.entity_type,
+    entityId: r.entity_id,
+    entityName: r.entity_name,
+    recreated: r.recreated,
+    revision: r.revision ? apiEntityRevisionToRevision(r.revision) : null,
+  };
+}
+
+export function apiRetentionPolicyToPolicy(p: ApiRetentionPolicy): RevisionRetentionPolicy {
+  return { windowHours: p.window_hours, minRows: p.min_rows };
 }

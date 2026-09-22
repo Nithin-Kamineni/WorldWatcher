@@ -15,6 +15,11 @@ interface FactionStoreState {
   relationsByCampaignId: Record<string, FactionRelation[]>;
   relationsLoadedByCampaignId: Record<string, boolean>;
   fetchFactionsForCampaign: (campaignId: string) => Promise<void>;
+  /** Re-reads a campaign's factions, ignoring the once-only guard on
+   * `fetchFactionsForCampaign`. Restoring an edit from the World Manager's history
+   * rewrites rows server-side (or brings a deleted one back) without this store ever
+   * seeing it, so that is the one path that has to be able to force a reload. */
+  reloadFactionsForCampaign: (campaignId: string) => Promise<void>;
   addFactionToCampaign: (campaignId: string, faction: Faction) => void;
   updateFactionInCampaign: (campaignId: string, faction: Faction) => void;
   deleteFactionFromCampaign: (campaignId: string, factionId: string) => void;
@@ -40,6 +45,18 @@ export const useFactionStore = create<FactionStoreState>((set, get) => ({
       }));
     } catch (err) {
       console.error(`Failed to load factions for campaign ${campaignId}`, err);
+    }
+  },
+
+  reloadFactionsForCampaign: async (campaignId) => {
+    try {
+      const page = await factionsApi.listFactions({ campaign_id: campaignId, limit: 200 });
+      set((state) => ({
+        factionsByCampaignId: { ...state.factionsByCampaignId, [campaignId]: page.items.map(apiFactionToFaction) },
+        loadedByCampaignId: { ...state.loadedByCampaignId, [campaignId]: true },
+      }));
+    } catch (err) {
+      console.error(`Failed to reload factions for campaign ${campaignId}`, err);
     }
   },
 

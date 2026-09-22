@@ -66,6 +66,11 @@ export interface PlacedToken {
   deathSaves?: { successes: number; failures: number };
   /** freeform notes - spell slots, abilities, whatever the DM wants to track while in combat */
   notes?: string;
+  /** How far this token sees, in stage px (the same unit as `size`), for
+   * fog-of-war line of sight. Undefined or 0 means this token reveals
+   * nothing - the default, so dropping a monster on the map never lights it
+   * up for the party. See types/fog.ts and MapPage's visionPolygons. */
+  visionRadius?: number;
   /** Derived at render time only (see MapPage's mapTokens) - never persisted. */
   relationTint?: string;
   /** Derived at render time only (see MapPage's mapTokens) - never persisted. */

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 Setting = Literal["indoor", "outdoor", "both"]
 GridType = Literal["square", "hex"]
@@ -128,6 +128,23 @@ class MapFloorUpdate(BaseModel):
     lighting: Optional[Any] = None
     terrain: Optional[Any] = None
     raw_data: Optional[Any] = None
+
+
+class WallDetectRequest(BaseModel):
+    """`mode` picks the image-processing pipeline - see services/wall_detect.py.
+    `sensitivity` is a single 5-95 dial rather than the underlying Canny /
+    threshold numbers, because the DM tuning it is looking at the traced
+    result, not at a histogram."""
+
+    mode: Literal["painted", "lineart"] = "painted"
+    sensitivity: int = Field(default=50, ge=5, le=95)
+
+
+class WallDetectResponse(BaseModel):
+    image_width: int
+    image_height: int
+    #: Flat [x, y, x, y, ...] runs in the image's own pixel space.
+    polylines: list[list[float]]
 
 
 class TokenLibraryRead(BaseModel):

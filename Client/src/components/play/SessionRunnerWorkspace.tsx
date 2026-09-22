@@ -81,15 +81,13 @@ export function SessionRunnerWorkspace({ worldId, campaignId, sessionNote, switc
   const [displayedNoteId, setDisplayedNoteId] = useState<string>(sessionNote.id);
   const displayedNote = switchableNotes.find((n) => n.id === displayedNoteId) ?? sessionNote;
 
-  const openTableFromRef = (_tableId: string) => {
-    // Session/Narrative notes render situational-table mentions inline via EntityRefPreview.
-    // The old dedicated "Roleplay & Exploration" view is gone - situational tables are now
-    // just random tables (unified system), browsed from the "Random Tables" tile. There's no
-    // scroll-to-this-table deep link into that browse view yet (the old `?table=` support was
-    // specific to the now-removed SituationalTablesView), so this just lands on the browse
-    // screen rather than the specific table - a TODO for whoever wires up random-table mention
-    // deep-linking end to end.
-    window.open(`/w/${worldId}/c/${campaignId}/encounters?view=random_tables`, '_blank');
+  const openTableFromRef = (tableId: string) => {
+    // Session/Narrative notes render random-table mentions inline via EntityRefPreview. This
+    // used to land on the browse screen and make the DM find the table again, because the old
+    // `?table=` support belonged to the since-removed SituationalTablesView. The browse view
+    // carries its own `openTableId` now (it opens that table's roll view directly), and random
+    // tables have their own page since checklist R4 - so the mention can open the actual table.
+    window.open(`/w/${worldId}/c/${campaignId}/tables?table=${tableId}`, '_blank');
   };
 
   // Collapse used to be chat-only. It applies to every window kind now (checklist I-P11), but

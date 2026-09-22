@@ -45,6 +45,7 @@ import { BastionsSection } from '../../components/dm/BastionsSection';
 import { FilterChipGroup } from '../../components/dm/FilterChipGroup';
 import { ArticleGridStage, type ArticleGridStageHandle } from '../../components/world/ArticleGridStage';
 import { ArticleTable } from '../../components/world/ArticleTable';
+import { RecentChangesTimeline } from '../../components/world/RecentChangesTimeline';
 import { PlaceBuilderDialog, type PlaceType } from '../../components/world/PlaceBuilderDialog';
 import { getArticleCategoryIcon } from '../../components/world/articleIcons';
 import { useWorldStore, getWorldById, getPrimaryCampaignForWorld } from '../../store/useWorldStore';
@@ -57,7 +58,9 @@ import {
   getArticlesForWorld,
   getFoldersForWorld,
 } from '../../store/useArticleStore';
+import { useRevisionStore, getRevisionsForWorld } from '../../store/useRevisionStore';
 import { ARTICLE_TEMPLATES, type ArticleCategory } from '../../types/article';
+import type { EntityRevision } from '../../types/revision';
 
 type Folder =
   | 'people'
@@ -276,6 +279,17 @@ export function WorldManagerPage() {
   const factionsByCampaignId = useFactionStore((s) => s.factionsByCampaignId);
   const fetchFactionsForCampaign = useFactionStore((s) => s.fetchFactionsForCampaign);
 
+  const revisionsByWorldId = useRevisionStore((s) => s.revisionsByWorldId);
+  const revisionsLoading = useRevisionStore((s) => s.loadingWorldIds);
+  const revisionPolicy = useRevisionStore((s) => s.policy);
+  const restoringRevisionId = useRevisionStore((s) => s.restoringId);
+  const fetchRevisions = useRevisionStore((s) => s.fetchRevisions);
+  const fetchRevisionPolicy = useRevisionStore((s) => s.fetchPolicy);
+  const restoreRevision = useRevisionStore((s) => s.restoreRevision);
+  const reloadWorldArticles = useArticleStore((s) => s.reloadWorld);
+  const reloadCreatures = useCreatureStore((s) => s.reloadCreaturesForCampaign);
+  const reloadFactions = useFactionStore((s) => s.reloadFactionsForCampaign);
+
   const allArticles = useArticleStore((s) => s.articles);
   const allFolders = useArticleStore((s) => s.folders);
   const ensureSeeded = useArticleStore((s) => s.ensureSeeded);
@@ -293,6 +307,15 @@ export function WorldManagerPage() {
     fetchCreaturesForCampaign(primaryCampaign.id);
     fetchFactionsForCampaign(primaryCampaign.id);
   }, [primaryCampaign, fetchCreaturesForCampaign, fetchFactionsForCampaign]);
+
+  /** History is written server-side as a side effect of every other store's writes, so the
+   * copy held here is stale the moment anything else saves - it is refetched on every entry
+   * into the view rather than cached like the content stores. */
+  useEffect(() => {
+    if (folder !== 'recent' || !worldId) return;
+    fetchRevisions(worldId);
+    fetchRevisionPolicy();
+  }, [folder, worldId, fetchRevisions, fetchRevisionPolicy]);
 
   const npcs = primaryCampaign ? getCreaturesForCampaign(creaturesByCampaignId, primaryCampaign.id).filter((c) => c.category === 'npc') : [];
   const factions = primaryCampaign ? getFactionsForCampaign(factionsByCampaignId, primaryCampaign.id) : [];
@@ -394,6 +417,34 @@ export function WorldManagerPage() {
           ? 'Recently edited'
           : getFolderLabel(folder) ?? folder;
   const entryHref = (id: string) => `/w/${worldId}/manager/entry/${id}?from=${folder}&fromLabel=${encodeURIComponent(crumbLabel)}`;
+
+  /** Opens whatever a history row is about. Factions and NPCs have no detail route of their
+   * own yet - the sidebar section IS their view - so they navigate the same way
+   * `openSavedViewEntry` has always sent them. */
+  const openRevisionEntity = (revision: EntityRevision) => {
+    if (revision.entityType === 'article') navigate(entryHref(revision.entityId));
+    else if (revision.entityType === 'faction') setFolder('factions');
+    else setFolder('npcs');
+  };
+
+  /** Restores server-side, then re-reads whichever store owns that entity. The reload is not
+   * optional: the row was rewritten (or recreated) without the content stores ever seeing it,
+   * and their caches load once by design. Returns the line for the confirmation toast, or
+   * null if the restore failed. */
+  const handleRestoreRevision = async (revision: EntityRevision): Promise<string | null> => {
+    if (!worldId) return null;
+    const result = await restoreRevision(worldId, revision.id);
+    if (!result) return null;
+
+    if (revision.entityType === 'article') await reloadWorldArticles(worldId);
+    else if (primaryCampaign && revision.entityType === 'faction') await reloadFactions(primaryCampaign.id);
+    else if (primaryCampaign) await reloadCreatures(primaryCampaign.id);
+
+    const name = result.entityName || 'That entry';
+    if (!result.revision) return `${name} already matched that version - nothing changed.`;
+    if (result.recreated) return `${name} is back, at its original id.`;
+    return `${name} restored. The restore is in this list too, so you can undo it.`;
+  };
 
   return (
     <SectionLayout
@@ -712,9 +763,21 @@ export function WorldManagerPage() {
         />
       ) : folder === 'places-bastions' ? (
         <BastionsSection campaignId={primaryCampaign!.id} worldId={worldId} />
-      ) : folder === 'all' || folder === 'recent' ? (
+      ) : folder === 'recent' ? (
+        <RecentChangesTimeline
+          worldId={worldId!}
+          revisions={getRevisionsForWorld(revisionsByWorldId, worldId)}
+          articles={worldArticles}
+          policy={revisionPolicy}
+          loading={revisionsLoading[worldId ?? ''] === true}
+          restoringId={restoringRevisionId}
+          onRefresh={() => worldId && fetchRevisions(worldId)}
+          onRestore={handleRestoreRevision}
+          onOpenEntity={openRevisionEntity}
+        />
+      ) : folder === 'all' ? (
         <SavedView
-          entries={folder === 'recent' ? [...savedViewEntries].sort((a, b) => b.updatedAt - a.updatedAt) : [...savedViewEntries].sort((a, b) => a.name.localeCompare(b.name))}
+          entries={[...savedViewEntries].sort((a, b) => a.name.localeCompare(b.name))}
           onOpen={openSavedViewEntry}
         />
       ) : (

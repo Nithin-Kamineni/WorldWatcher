@@ -82,6 +82,127 @@ requirement — look those numbers up in `checklist.txt`'s **git history** (the
 commit before the 2026-09-03 strip). Numbers that are still open resolve
 against **Part A** (issues.txt numbering) and **Part B** (task numbering).
 
+### Map coordinates — read this before touching MapCanvas
+
+Tokens, AoE shapes and the grid are stored in **raw stage pixels**. That only
+means anything relative to a fixed canvas size, so each floor pins the size its
+contents were authored against in `MapFloor.authoredStage` (persisted in
+`raw_data`). The background's contain-fit is computed from **that**, never from
+the live canvas, which makes it a pure function of stored data — a token's
+coordinates mean the same thing forever.
+
+Adapting to whatever window is actually open is a single transform on the Konva
+**Stage**, so background, tokens, grid, fog and walls all move together.
+
+- This is why a token used to reappear somewhere else after reopening a map at
+  a different window size (`FOG13`). Don't reintroduce a fit derived from the
+  live canvas; there is no longer any frozen-fit or frozen-pivot ref, because
+  those existed only to paper over this.
+- A floor with no `authoredStage` adopts the canvas it is first opened at.
+- Walls and the fog mask are stored in **image pixels** instead, and convert
+  through the fit — see below.
+
+**Run a real session off the production build.** `npm run dev` is ~10× slower
+per token move than `npm run build` + `npm run preview` (224 ms vs a 21.8 ms
+median), because React's dev build is slow and `main.tsx` wraps the app in
+`<StrictMode>`, which double-renders everything. Profile perf complaints
+against the production build before believing them. Konva is rarely the
+culprit — canvas raster measured at 1% of blocked time; it is React
+reconciliation.
+
+### Fog of war (map page)
+
+Built 2026-09-22, closing `G6`. Three layers, each usable without the next:
+manual reveal brushes, then walls + line of sight, then OpenCV wall detection.
+See `I-FOG` in `checklist.txt`.
+
+- **Two coordinate spaces, and the split is the whole design.** Tokens, AoE
+  shapes and the grid live in raw **stage** pixels. Walls (`types/fog.ts`) and
+  the fog mask live in **image** pixels. Image space is what makes them survive
+  a re-fit — a wall traced onto a boulder has to stay on that boulder. Convert
+  with `utils/mapFit.ts` (`imagePointToStage` / `stagePointToImage`).
+- **`MapCanvas` owns the background fit** and passes it to
+  `MapBackgroundLayer`, `MapFogLayer` and `MapWallsLayer`, so all of them read
+  *the same* one. It derives from `authoredStage` (see the section above), not
+  from the live canvas, which is what stops any of it drifting.
+- `utils/fogMask.ts` — the explored mask is a **bit-packed boolean grid** over
+  the image (~120 cells on the long edge), base64'd into `map_floors.raw_data`
+  beside initiative. Not a polygon union: a union grows without bound as the
+  party walks. `decodeFogGrid` returns an all-hidden grid for any record that
+  is missing, malformed, or sized for a different image — a floor saved before
+  fog existed must degrade to "nothing explored", not to garbage.
+- `utils/visibility.ts` — angular-sweep visibility polygon. Recomputed only
+  when a token moves or a wall changes, never per frame. ~3ms against 1300
+  segments.
+- `MapFogLayer` gets its own Konva layer so `destination-out` erases *fog* and
+  nothing else. Explored areas are punched partially (dim), live line-of-sight
+  fully (clear); order matters.
+- Fog defaults OFF; every token is a sight source at the map default range
+  (an explicit `visionRadius` wins, including an explicit 0 = Blind). Vision
+  polygons are memoised PER TOKEN so moving one does not re-sweep the rest.
+- **There is no player-facing view in this app**, so fog renders translucent
+  for the DM, with a "preview as players see it" toggle. Don't assume a player
+  route exists.
+- Walls persist to `map_floors.walls` — a JSONB column that predated the
+  feature by a long way. `doors` and `terrain` are still unused.
+- `Server/app/services/wall_detect.py` — OpenCV, server-side because the asset
+  file is already on the server's disk. It **appends** candidates for the DM to
+  correct, never overwrites. Control output volume by dropping short contours,
+  **not** by raising the `approxPolyDP` epsilon: a heavily simplified contour
+  straightens into chords that cut across open floor, inventing sight blockers.
+
+**Performance rules this feature is built around** (it was unusable before —
+see `FOG9`, and keep these when touching it):
+
+- **Every store write re-renders the whole map page**, so anything that fires
+  per token move must not write. Line-of-sight reveals accumulate into a ref
+  and the store write is debounced (`FOG_PERSIST_DEBOUNCE_MS`). Nothing visible
+  waits on it — the currently-visible tier draws from `visionPolygons` directly.
+- **REST writes echo back to the sender over WS** (`manager.broadcast` has no
+  sender to exclude on the REST path), so `applyApiFloorMetaPatch` keeps the
+  previous `walls` / `fog` references when the content is unchanged. Rebuilding
+  them from JSON gives a new identity, which invalidates the LOS memo and
+  re-runs the whole sweep for a payload that did not change.
+- **`syncFloorContentChange` sends only changed fields.** `walls` on an
+  auto-detected map is ~25 kB; it must not ride along on fog-only PATCHes.
+- **Prefer one Konva node over many.** The explored mask is painted into a
+  90×120 canvas and drawn as a single `Image`, not one `Rect` per cell run.
+- **Watch for object literals passed to layers.** `flipPivot` is a prop on
+  every layer; as a fresh literal per render it marked all five layers dirty,
+  redrawing the full-size background bitmap on any unrelated page change.
+
+### Edit history (World Manager > "Recently edited")
+
+Built 2026-09-22; see `I-HIST` in `checklist.txt`. That view lists **changes**,
+not entities - `entity_revisions` holds one row per create/update/delete/restore
+of an article, NPC, homebrew creature or faction.
+
+- **One generic table, and `entity_id` is not an FK.** It points at one of three
+  tables depending on `entity_type`, and the row must *outlive* its entity: a
+  delete whose history row cascaded away with it is the one change that could
+  never be undone. Same looseness as `item_usage.item_id`, different reason.
+- **`Server/app/services/revisions.py` is the whole engine** - snapshot, diff,
+  summary, retention - and it is called explicitly from the three routers that
+  own world content, never from an ORM event hook. A hook would also fire for
+  the importer seeding ten thousand compendium creatures.
+- **Diff by value, not by which keys were sent.** All three client stores PATCH
+  a *full* payload on every save, so `exclude_unset` says "all of them" every
+  time. Diffing values is also what makes a no-op save record nothing.
+- `before_state` is a full column snapshot and is the only thing Restore reads;
+  `changes` is display data (long text truncated, HTML stripped) and is the only
+  thing the timeline reads. Restore rewinds the **whole** entry to that moment,
+  so later edits to it are undone too - and it can recreate a deleted entity at
+  its original id, which is why references to it survive.
+- **Retention is 6 hours OR 500 rows per world, whichever is larger** - a row
+  must fall outside *both* to be dropped. Pruning runs in its own transaction
+  *after* the edit commits, so a failure there can never roll back the save.
+  `GET /entity-revisions/policy` serves the numbers so the UI cannot state a
+  stale rule.
+- Campaign-less creatures are the shared compendium library, not one world's
+  content, and are not recorded. Notes, maps, encounters and random tables are
+  not tracked yet - adding one is a two-line router change plus an entry in
+  `_TRACKED` and the router's `MODELS` map.
+
 ### The Play page
 
 The most important screen in the app, and the most machinery per pixel. Worth
@@ -174,6 +295,15 @@ README still says 8001 — both are stale; the `--port` flag is what matters.
 Always use `Server/.venv/Scripts/python.exe -m uvicorn`, never a bare
 `uvicorn`. Backgrounding a bare `uvicorn` here has silently run under the pyenv
 global Python instead of the venv, producing confusing import errors.
+
+**The CORS allowlist is 5173-only**, so if 5173 is already taken and Vite falls
+back to 5174 the app loads but *every* request fails with a CORS error and the
+page sits on a spinner. It looks exactly like a dead backend. The allowlist is
+`ww_cors_origins` in `core/config.py`, overridable without editing anything:
+
+```powershell
+$env:WW_CORS_ORIGINS="http://localhost:5173,http://localhost:5174"
+```
 
 ## Verifying a change
 

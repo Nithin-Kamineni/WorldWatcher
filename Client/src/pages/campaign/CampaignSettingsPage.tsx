@@ -14,6 +14,7 @@ import { Breadcrumbs } from '../../components/layout/Breadcrumbs';
 import { ShortcutsSettingsDialog } from '../../components/settings/ShortcutsSettingsDialog';
 import { RailLabelsSettingItem } from '../../components/settings/RailLabelsSettingItem';
 import { UiScaleSettingItem } from '../../components/settings/UiScaleSettingItem';
+import { DiceRollSettingItem } from '../../components/settings/DiceRollSettingItem';
 import { useWorldStore, getWorldById } from '../../store/useWorldStore';
 import { useCampaignStore, getCampaignById } from '../../store/useCampaignStore';
 import { PageTitle } from '../../components/shell/PageTitle';
@@ -38,6 +39,7 @@ export function CampaignSettingsPage() {
         <List disablePadding>
           <UiScaleSettingItem />
           <RailLabelsSettingItem />
+          <DiceRollSettingItem />
           <ListItemButton onClick={() => setShortcutsOpen(true)}>
             <ListItemIcon sx={{ minWidth: 36 }}>
               <KeyboardIcon fontSize="small" />

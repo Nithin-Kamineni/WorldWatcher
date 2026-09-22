@@ -1476,6 +1476,41 @@ CREATE TABLE IF NOT EXISTS random_settlement_rumors_hooks (
 DROP TABLE IF EXISTS situational_tables CASCADE;
 
 -- ============================================================
+-- 3e. entity_revisions
+-- ============================================================
+-- Undoable edit history for World Manager content: one row per
+-- create/update/delete/restore of an article, NPC, homebrew creature or
+-- faction. `changes` is the display-level diff the timeline renders;
+-- `before_state` is a full column snapshot of the entity as it stood before
+-- the change, and is what Restore writes back.
+--
+-- entity_id is deliberately NOT a foreign key. It points at one of three
+-- tables depending on entity_type, and the row has to OUTLIVE its entity -
+-- a delete whose history row cascaded away with it would be the one change
+-- that could never be undone. Same looseness as item_usage.item_id.
+--
+-- No updated_at and so no trigger: a revision is an immutable record of
+-- something that already happened. Retention (6 hours or 500 rows per world,
+-- whichever is larger) is enforced in Server/app/services/revisions.py.
+CREATE TABLE IF NOT EXISTS entity_revisions (
+  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  world_id       UUID          NOT NULL REFERENCES worlds (id) ON DELETE CASCADE,
+  entity_type    TEXT          NOT NULL,
+  entity_id      UUID          NOT NULL,
+  entity_name    TEXT          NOT NULL DEFAULT '',
+  action         TEXT          NOT NULL,
+  summary        TEXT          NOT NULL DEFAULT '',
+  changes        JSONB         NOT NULL DEFAULT '[]'::jsonb,
+  before_state   JSONB         NULL,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+-- The timeline query is exactly this index: one world, newest first.
+CREATE INDEX IF NOT EXISTS entity_revisions_world_created_idx
+  ON entity_revisions (world_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS entity_revisions_entity_idx
+  ON entity_revisions (entity_type, entity_id);
+
+-- ============================================================
 -- Deferred FKs (mutual references resolved after all tables exist)
 -- ============================================================
 DO $$

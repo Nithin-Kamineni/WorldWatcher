@@ -28,6 +28,7 @@ const NotesPage = lazy(() => import('../pages/campaign/NotesPage').then((m) => (
 const NoteDetailPage = lazy(() => import('../pages/campaign/NoteDetailPage').then((m) => ({ default: m.NoteDetailPage })));
 const ChatDetailPage = lazy(() => import('../pages/campaign/ChatDetailPage').then((m) => ({ default: m.ChatDetailPage })));
 const EncountersPage = lazy(() => import('../pages/campaign/EncountersPage').then((m) => ({ default: m.EncountersPage })));
+const TablesPage = lazy(() => import('../pages/campaign/TablesPage').then((m) => ({ default: m.TablesPage })));
 const MapsPage = lazy(() => import('../pages/campaign/MapsPage').then((m) => ({ default: m.MapsPage })));
 const CampaignSettingsPage = lazy(() => import('../pages/campaign/CampaignSettingsPage').then((m) => ({ default: m.CampaignSettingsPage })));
 const MapPage = lazy(() => import('../pages/MapPage').then((m) => ({ default: m.MapPage })));
@@ -74,6 +75,10 @@ export function AppRoutes() {
         {/* One DM-notes thread as a document page - where "view"/"edit" on a chat now lands,
             instead of the Play page (see ChatDetailPage). */}
         <Route path="/w/:worldId/c/:campaignId/chats/:chatId" element={<ChatDetailPage />} />
+        {/* Two destinations, two jobs (checklist R4): /tables is "roll me something" and
+            /encounters is "the one I built". Each still forwards the other's old ?view= link
+            shape, so nothing bookmarked before the split breaks. */}
+        <Route path="/w/:worldId/c/:campaignId/tables" element={<TablesPage />} />
         <Route path="/w/:worldId/c/:campaignId/encounters" element={<EncountersPage />} />
         <Route path="/w/:worldId/c/:campaignId/maps" element={<MapsPage />} />
         <Route path="/w/:worldId/c/:campaignId/maps/:mapId" element={<MapPage />} />

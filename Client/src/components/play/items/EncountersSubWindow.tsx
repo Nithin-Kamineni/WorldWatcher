@@ -188,7 +188,7 @@ export function EncountersSubWindow({ worldId, campaignId, slot }: EncountersSub
                   onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'encounters', encounter.id) : pinItem(campaignId, slot, 'encounters', encounter.id))}
                   expanded={isExpanded}
                   onToggleExpand={() => toggleExpanded(encounter.id)}
-                  onOpenNewTab={() => window.open(`/w/${worldId}/c/${campaignId}/encounters?view=management&encounter=${encounter.id}`, '_blank')}
+                  onOpenNewTab={() => window.open(`/w/${worldId}/c/${campaignId}/encounters?encounter=${encounter.id}`, '_blank')}
                 >
                   {isRandom ? (
                     <Typography variant="caption" color="text.secondary">

@@ -15,6 +15,11 @@ interface ArticleStoreState {
   loadedWorldIds: string[];
 
   ensureSeeded: (worldId: string) => Promise<void>;
+  /** Re-reads a world's articles and folders, ignoring the once-only guard on
+   * `ensureSeeded`. Restoring an edit from the World Manager's history rewrites rows
+   * server-side (or brings a deleted one back) without this store ever seeing it, so
+   * that is the one path that has to be able to force a reload. */
+  reloadWorld: (worldId: string) => Promise<void>;
   addArticle: (article: Article) => void;
   updateArticle: (id: string, patch: Partial<Article>) => void;
   deleteArticle: (id: string) => void;
@@ -139,6 +144,30 @@ export const useArticleStore = create<ArticleStoreState>((set, get) => ({
       }));
     } catch (err) {
       console.error(`Failed to load articles for world ${worldId}`, err);
+    }
+  },
+
+  reloadWorld: async (worldId) => {
+    try {
+      const [articlesPage, foldersPage] = await Promise.all([
+        articlesApi.listArticles(worldId),
+        articlesApi.listArticleFolders(worldId),
+      ]);
+      set((state) => ({
+        articles: [
+          ...state.articles.filter((a) => a.worldId !== worldId),
+          ...articlesPage.items.map(apiArticleToArticle),
+        ],
+        folders: [
+          ...state.folders.filter((f) => f.worldId !== worldId),
+          ...foldersPage.items.map(apiArticleFolderToArticleFolder),
+        ],
+        loadedWorldIds: state.loadedWorldIds.includes(worldId)
+          ? state.loadedWorldIds
+          : [...state.loadedWorldIds, worldId],
+      }));
+    } catch (err) {
+      console.error(`Failed to reload articles for world ${worldId}`, err);
     }
   },
 

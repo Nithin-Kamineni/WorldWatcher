@@ -11,6 +11,7 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import MapIcon from '@mui/icons-material/Map';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import CasinoIcon from '@mui/icons-material/Casino';
 import ShieldIcon from '@mui/icons-material/Shield';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
@@ -124,12 +125,26 @@ const CAMPAIGN_ITEMS: RailItem[] = [
     requiresCampaign: true,
     isActive: (p) => p.includes('/notes'),
   },
+  // Tables and Encounters are two buttons, not one (checklist R4). They were one page with two
+  // halves behind a single shield, which named the narrower half and left the random tables -
+  // a whole feature - unnamed anywhere in the nav. They are also two different jobs: rolling
+  // something arrives with no object in mind and wants output in seconds, while an encounter
+  // arrives knowing exactly which one it wants. The Play page's Items window had already split
+  // them into two tabs with these same two glyphs (usePlayItemsStore's ITEMS_TAB_KINDS), so the
+  // rail was the last place telling the DM they were one thing.
+  {
+    key: 'tables',
+    label: 'Tables',
+    tooltip: 'Random Tables',
+    Icon: CasinoIcon,
+    to: (w, c) => `/w/${w}/c/${c}/tables`,
+    requiresCampaign: true,
+    isActive: (p) => p.includes('/tables'),
+  },
   {
     key: 'encounters',
     label: 'Encounters',
-    // One page with two halves: it opens on the unified random-table browser, and
-    // `?view=management` is the encounter side - so the tooltip has to name both.
-    tooltip: 'Random Tables & Encounters',
+    tooltip: 'Encounters',
     Icon: ShieldIcon,
     to: (w, c) => `/w/${w}/c/${c}/encounters`,
     requiresCampaign: true,

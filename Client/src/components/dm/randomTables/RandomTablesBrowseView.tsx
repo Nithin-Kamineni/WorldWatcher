@@ -25,11 +25,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import EditIcon from '@mui/icons-material/Edit';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import ListAltIcon from '@mui/icons-material/ListAlt';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import ShieldIcon from '@mui/icons-material/Shield';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import SearchIcon from '@mui/icons-material/Search';
@@ -54,7 +50,6 @@ import {
   computeFormatCounts,
   computeTagCounts,
   filterTablesByQuery,
-  rankByRelevance,
   rankTablesByUsefulness,
   subtreeCategoryIds,
   type TableUsefulnessSignals,
@@ -69,27 +64,21 @@ import { useItemUsageStore, getItemUsage } from '../../../store/useItemUsageStor
 import type { RandomTable, RandomTableDetail, RollResult } from '../../../types/randomTable';
 import type { Tag } from '../../../types/tag';
 import type { PlaceType } from '../../world/PlaceBuilderDialog';
-import type { Encounter, EncounterPrimaryType } from '../../../types/encounter';
+import type { EncounterPrimaryType } from '../../../types/encounter';
 
 interface RandomTablesBrowseViewProps {
   campaignId: string;
   /** Deep link from the Play page's Items window ("open in new tab" on a table row) - opens
    * this table's roll view once, as soon as its detail has loaded. */
   openTableId?: string;
-  onBack?: () => void;
   onGoToEncounters?: () => void;
+  /** A ROLL landing on an encounter, not browsing for one: a random-encounter table's result
+   * can carry an `encounter_ref`, and clicking it opens that encounter. Survives the browse
+   * split for that reason - see the note on this component. */
   onOpenEncounter?: (encounterId: string) => void;
   onOpenNpcBuilder?: () => void;
   onOpenPlaceBuilder?: (type?: PlaceType) => void;
   onOpenEncounterBuilder?: (type?: EncounterPrimaryType) => void;
-  /** Task 11.3: the second entity kind this screen browses. Encounters carry the same
-   * category_id + tags as random tables, so they run through the same index, the same facet
-   * counts and the same category graph rather than a parallel screen of their own. Owned by
-   * the caller (EncountersSection) - this view only presents them. */
-  encounters?: Encounter[];
-  onEditEncounter?: (encounter: Encounter) => void;
-  onDeleteEncounter?: (encounter: Encounter) => void;
-  onCreateEncounter?: () => void;
 }
 
 function TableRollDialog({ table, onClose, onOpenEncounter, onRolled }: { table: RandomTableDetail; onClose: () => void; onOpenEncounter?: (encounterId: string) => void; onRolled?: (tableId: string) => void }) {
@@ -171,7 +160,18 @@ function tagIcon(tag: Tag) {
   return <LocalOfferOutlinedIcon fontSize="small" />;
 }
 
-export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoToEncounters, onOpenEncounter, onOpenNpcBuilder, onOpenPlaceBuilder, onOpenEncounterBuilder, encounters = [], onEditEncounter, onDeleteEncounter, onCreateEncounter }: RandomTablesBrowseViewProps) {
+/** Browses random TABLES, and only tables.
+ *
+ * It used to browse encounters too, through the same category tree, tag facets and search box,
+ * switched by a Tables/Encounters toggle beside the search field (Task 11.3). That went away
+ * with checklist R4: encounters have their own page now, so the toggle's only job was to push
+ * a second entity kind into this page's tree and counts - a filter for something that belongs
+ * somewhere else.
+ *
+ * Two links to encounters are deliberately kept, because neither is browsing: a roll result
+ * carrying an `encounter_ref` opens that encounter, and picking an encounter category offers
+ * its generator. Both produce or resolve an encounter rather than listing them. */
+export function RandomTablesBrowseView({ campaignId, openTableId, onGoToEncounters, onOpenEncounter, onOpenNpcBuilder, onOpenPlaceBuilder, onOpenEncounterBuilder }: RandomTablesBrowseViewProps) {
   const resultKey = `browse:${campaignId}`;
   const results = useRandomTableStore((s) => s.resultSets[resultKey]?.results ?? EMPTY_RANDOM_TABLE_RESULTS);
   const searching = useRandomTableStore((s) => s.resultSets[resultKey]?.searching ?? false);
@@ -188,8 +188,6 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
   const fetchFormats = useTableFormatStore((s) => s.fetchFormats);
 
   const [searchText, setSearchText] = useState('');
-  /** Task 11.3: which entity kinds the one browse screen is showing. */
-  const [entityKinds, setEntityKinds] = useState<('table' | 'encounter')[]>(['table', 'encounter']);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [formatIds, setFormatIds] = useState<string[]>([]);
   const [showAdvancedFormats, setShowAdvancedFormats] = useState(false);
@@ -244,37 +242,12 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
     () => rankTablesByUsefulness(categoryScopedTables, searchText, usefulness),
     [categoryScopedTables, searchText, usefulness],
   );
-  // The encounter half of the unified browse. Deliberately the same four stages as the table
-  // pipeline above - query -> tags -> category subtree -> rank - so a category count, a tag
-  // facet and a search term mean exactly the same thing whichever kind they land on. Encounters
-  // have no format, so the format facet simply doesn't narrow them.
-  const showTables = entityKinds.includes('table');
-  const showEncounters = entityKinds.includes('encounter');
-  const encounterIndex = useMemo(() => buildTableSearchIndex(encounters, flatCategories, tags), [encounters, flatCategories, tags]);
-  const encounterQueryScoped = useMemo(() => filterTablesByQuery(encounters, searchText, encounterIndex), [encounters, searchText, encounterIndex]);
-  const encounterTagScoped = useMemo(
-    () => (tagIds.length === 0 ? encounterQueryScoped : encounterQueryScoped.filter((encounter) => encounter.tagIds.some((id) => tagIds.includes(id)))),
-    [encounterQueryScoped, tagIds],
-  );
-  const encounterCategoryScoped = useMemo(
-    () => (selectedIds ? encounterTagScoped.filter((encounter) => encounter.categoryId && selectedIds.has(encounter.categoryId)) : encounterTagScoped),
-    [encounterTagScoped, selectedIds],
-  );
-  const selectedEncounters = useMemo(
-    () => (showEncounters ? rankByRelevance(encounterCategoryScoped, searchText) : []),
-    [showEncounters, encounterCategoryScoped, searchText],
-  );
-  const visibleTables = showTables ? selectedTables : [];
+  const visibleTables = selectedTables;
 
-  // Category and tag counts cover whichever kinds are being shown, so the graph's per-branch
-  // numbers always match what the drawer will actually list.
-  const counts = useMemo(() => {
-    const tableCounts = showTables ? computeCategoryCounts(filteredResults, flatCategories) : new Map<string, number>();
-    if (!showEncounters) return tableCounts;
-    const merged = new Map(tableCounts);
-    computeCategoryCounts(encounterTagScoped, flatCategories).forEach((value, key) => merged.set(key, (merged.get(key) ?? 0) + value));
-    return merged;
-  }, [showTables, showEncounters, filteredResults, encounterTagScoped, flatCategories]);
+  // Per-branch counts in the category graph, which are now purely a table count - they used to
+  // add the encounters matching the same branch, which is what made the tree read as a mixed
+  // library rather than a table library.
+  const counts = useMemo(() => computeCategoryCounts(filteredResults, flatCategories), [filteredResults, flatCategories]);
   const drawerTagIds = useMemo(() => Array.from(new Set(selectedTables.flatMap((table) => table.tagIds))), [selectedTables]);
   const drawerTagGroups = useMemo(() => {
     const groups = new Map<string, Tag[]>();
@@ -325,7 +298,6 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
   const filterOverlay = (
     <Paper elevation={4} sx={{ p: 1, borderRadius: 3, bgcolor: 'background.paper', maxWidth: 1040 }}>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ alignItems: { md: 'center' } }}>
-        {onBack && <Tooltip title="Back to encounters"><IconButton size="small" onClick={onBack}><ArrowBackIcon /></IconButton></Tooltip>}
         <Box sx={{ flex: 1.4, minWidth: 260 }}>
           <RandomTableSearchField
             value={searchText}
@@ -341,32 +313,17 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
           />
         </Box>
         <Box sx={{ flex: 1.2, minWidth: 260 }}><TagPicker selectedTagIds={tagIds} onChange={setTagIds} label="Tags" counts={tagCounts} /></Box>
-        {/* Task 11.3: the one control that makes this a unified browse rather than two screens.
-            At least one kind stays selected - deselecting both would leave an empty screen with
-            no way back to content. */}
-        <ToggleButtonGroup
+        <Button
           size="small"
-          value={entityKinds}
-          onChange={(_event, value: ('table' | 'encounter')[]) => { if (value.length > 0) setEntityKinds(value); }}
+          variant={showAdvancedFormats ? 'contained' : 'outlined'}
+          onClick={() => setShowAdvancedFormats((value) => !value)}
+          sx={{ whiteSpace: 'nowrap' }}
         >
-          <ToggleButton value="table" sx={{ whiteSpace: 'nowrap' }}><CasinoIcon fontSize="small" sx={{ mr: 0.5 }} />Tables</ToggleButton>
-          <ToggleButton value="encounter" sx={{ whiteSpace: 'nowrap' }}><ListAltIcon fontSize="small" sx={{ mr: 0.5 }} />Encounters</ToggleButton>
-        </ToggleButtonGroup>
-{/* Format is a table-only dimension - an encounter has no roll structure - so the facet
-            hides rather than sitting there doing nothing when only encounters are shown. */}
-        {showTables && (
-          <Button
-            size="small"
-            variant={showAdvancedFormats ? 'contained' : 'outlined'}
-            onClick={() => setShowAdvancedFormats((value) => !value)}
-            sx={{ whiteSpace: 'nowrap' }}
-          >
-            {showAdvancedFormats ? 'Hide advanced' : 'Show advanced'}
-          </Button>
-        )}
+          {showAdvancedFormats ? 'Hide advanced' : 'Show advanced'}
+        </Button>
         {hasActiveFilters && <Button size="small" color="inherit" onClick={() => { setTagIds([]); setFormatIds([]); }}>Clear</Button>}
       </Stack>
-      <Collapse in={showAdvancedFormats && showTables}>
+      <Collapse in={showAdvancedFormats}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ pt: 1, px: 0.5, alignItems: { md: 'flex-start' } }}>
           <FilterChipGroup label="Core formats" options={coreFormats.map((format) => ({ value: format.id, label: `${format.name} (${formatCounts.get(format.id) ?? 0})` }))} selected={formatIds} onToggle={(id) => setFormatIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} />
           <FilterChipGroup label="Advanced formats" options={advancedFormats.map((format) => ({ value: format.id, label: `${format.name} (${formatCounts.get(format.id) ?? 0})` }))} selected={formatIds} onToggle={(id) => setFormatIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} />
@@ -381,11 +338,11 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
       <CategoryGraphBrowser
         selectedId={selectedCategoryId}
         counts={counts}
-        itemLabel={showTables && showEncounters ? 'item' : showEncounters ? 'encounter' : 'table'}
+        itemLabel="table"
         overlay={filterOverlay}
         onSelect={(id) => { setSelectedCategoryId(id); setDrawerOpen(true); setDrawerHeaderExpanded(false); }}
         onCreateAt={openCreate}
-        secondaryAction={onGoToEncounters ? <Button variant="outlined" startIcon={<ListAltIcon />} onClick={onGoToEncounters} sx={{ bgcolor: 'background.paper', boxShadow: 2 }}>Encounter table view</Button> : undefined}
+        secondaryAction={onGoToEncounters ? <Button variant="outlined" startIcon={<ShieldIcon />} onClick={onGoToEncounters} sx={{ bgcolor: 'background.paper', boxShadow: 2 }}>Encounters</Button> : undefined}
       />
 
       <Drawer anchor="right" open={drawerOpen} onClose={() => setDrawerOpen(false)} slotProps={{ paper: { sx: { width: { xs: '100%', md: '68vw' }, bgcolor: 'background.default' } } }}>
@@ -395,7 +352,7 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
               <Typography variant="h5" sx={{ fontWeight: 850 }}>{selectedCategory?.name ?? 'All categories'}</Typography>
               <Typography variant="body2" color="text.secondary">{selectedCategory ? categoryPath(flatCategories, selectedCategory.id) : 'The complete random table library'}</Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 1 }}>{showTables && <Chip size="small" label={`${visibleTables.length} tables`} />}{showEncounters && <Chip size="small" color="secondary" label={`${selectedEncounters.length} encounters`} />}<Chip size="small" variant="outlined" label={`${drawerTagIds.length} tags`} /></Stack>
+              <Stack direction="row" spacing={1} sx={{ mt: 1 }}><Chip size="small" label={`${visibleTables.length} tables`} /><Chip size="small" variant="outlined" label={`${drawerTagIds.length} tags`} /></Stack>
             </Box>
             <Tooltip title="Close"><IconButton onClick={() => setDrawerOpen(false)}><CloseIcon /></IconButton></Tooltip>
             <Tooltip title={drawerHeaderExpanded ? 'Collapse category details' : 'Expand category details'}><IconButton onClick={() => setDrawerHeaderExpanded((value) => !value)}>{drawerHeaderExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}</IconButton></Tooltip>
@@ -413,7 +370,7 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
               ))}
             </Stack>
           )}
-          <Stack direction="row" spacing={1} sx={{ mt: 2 }}><Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreate(selectedCategoryId)}>Create table here</Button>{onCreateEncounter && <Button variant="outlined" color="secondary" startIcon={<AddIcon />} onClick={onCreateEncounter}>Create encounter</Button>}</Stack>
+          <Stack direction="row" spacing={1} sx={{ mt: 2 }}><Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreate(selectedCategoryId)}>Create table here</Button></Stack>
           </Collapse>
         </Box>
 
@@ -466,37 +423,13 @@ export function RandomTablesBrowseView({ campaignId, openTableId, onBack, onGoTo
               </Stack>
             </Paper>
           )}
-          {/* Encounters first: they are the concrete prepped scenes, and the tables under the
-              same category are the raw material for building more of them. */}
-          {selectedEncounters.map((encounter) => (
-            <Paper key={encounter.id} variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper', borderLeft: 3, borderLeftColor: 'secondary.main' }}>
-              <Stack direction="row" spacing={1.25} sx={{ p: 1.5, alignItems: 'center' }}>
-                <Box sx={{ width: 34, display: 'grid', placeItems: 'center', flexShrink: 0 }}><ListAltIcon color="secondary" /></Box>
-                <Box onClick={() => onOpenEncounter?.(encounter.id)} sx={{ flexGrow: 1, minWidth: 0, cursor: onOpenEncounter ? 'pointer' : 'default' }}>
-                  <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{encounter.name}</Typography>
-                    <Chip size="small" color="secondary" variant="outlined" label="Encounter" />
-                    {encounter.primaryType && <Chip size="small" label={encounter.primaryType} />}
-                    {encounter.challengeRating && <Chip size="small" variant="outlined" label={`CR ${encounter.challengeRating}`} />}
-                  </Stack>
-                  <Typography variant="body2" color="text.secondary" noWrap>
-                    {encounter.description || categoryPath(flatCategories, encounter.categoryId) || 'No description'}
-                  </Typography>
-                </Box>
-                {onOpenEncounter && <Tooltip title="View"><IconButton color="primary" onClick={() => onOpenEncounter(encounter.id)}><VisibilityOutlinedIcon /></IconButton></Tooltip>}
-                {onEditEncounter && <Tooltip title="Edit"><IconButton onClick={() => onEditEncounter(encounter)}><EditIcon /></IconButton></Tooltip>}
-                {onDeleteEncounter && <Tooltip title="Delete"><IconButton color="error" onClick={() => onDeleteEncounter(encounter)}><DeleteOutlineIcon /></IconButton></Tooltip>}
-              </Stack>
-            </Paper>
-          ))}
-          {visibleTables.length + selectedEncounters.length === 0 ? (
+          {visibleTables.length === 0 ? (
             <Paper variant="outlined" sx={{ p: 6, textAlign: 'center', borderStyle: 'dashed' }}>
               <SearchIcon sx={{ fontSize: 46, color: 'text.disabled', mb: 1 }} />
-              <Typography variant="h6">Nothing in this branch</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Create something here, or change the search and filters.</Typography>
+              <Typography variant="h6">No tables in this branch</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Create one here, or change the search and filters.</Typography>
               <Stack direction="row" spacing={1} sx={{ justifyContent: 'center' }}>
-                {showTables && <Button variant="outlined" startIcon={<AddIcon />} onClick={() => openCreate(selectedCategoryId)}>Create table</Button>}
-                {showEncounters && onCreateEncounter && <Button variant="outlined" color="secondary" startIcon={<AddIcon />} onClick={onCreateEncounter}>Create encounter</Button>}
+                <Button variant="outlined" startIcon={<AddIcon />} onClick={() => openCreate(selectedCategoryId)}>Create table</Button>
               </Stack>
             </Paper>
           ) : visibleTables.map((table) => {

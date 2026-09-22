@@ -55,7 +55,8 @@ async function createFloorOnBackend(mapId: string, floor: MapFloor, sortOrder: n
     flipped_horizontal: floor.flippedHorizontal ?? false,
     flipped_vertical: floor.flippedVertical ?? false,
     rotation: floor.rotation ?? 0,
-    raw_data: { initiative: floor.initiative },
+    walls: floor.walls ?? [],
+    raw_data: { initiative: floor.initiative, fog: floor.fog ?? null, authoredStage: floor.authoredStage ?? null },
   });
 }
 
@@ -133,12 +134,19 @@ function tokenFieldsEqual(a: PlacedToken, b: PlacedToken): boolean {
     JSON.stringify(a.deathSaves) === JSON.stringify(b.deathSaves) &&
     a.notes === b.notes &&
     a.encounterEntryId === b.encounterEntryId &&
-    a.creatureId === b.creatureId
+    a.creatureId === b.creatureId &&
+    a.visionRadius === b.visionRadius
   );
 }
 
-function tokenExtrasRawData(token: PlacedToken): { tempHp: number | null; reactionSpent: boolean } {
-  return { tempHp: token.tempHp ?? null, reactionSpent: token.reactionSpent ?? false };
+function tokenExtrasRawData(
+  token: PlacedToken,
+): { tempHp: number | null; reactionSpent: boolean; visionRadius: number | null } {
+  return {
+    tempHp: token.tempHp ?? null,
+    reactionSpent: token.reactionSpent ?? false,
+    visionRadius: token.visionRadius ?? null,
+  };
 }
 
 async function syncTokens(floorId: string, oldTokens: PlacedToken[], newTokens: PlacedToken[]): Promise<void> {
@@ -243,15 +251,41 @@ export async function syncFloorContentChange(floorId: string, oldFloor: MapFloor
   const initiativeChanged = JSON.stringify(oldFloor.initiative) !== JSON.stringify(newFloor.initiative);
   const resolvedRosterChanged =
     JSON.stringify(oldFloor.resolvedEncounterRoster ?? null) !== JSON.stringify(newFloor.resolvedEncounterRoster ?? null);
+  // Walls go to their own column; the fog mask rides in raw_data next to
+  // initiative. Both are compared by value because a reveal brush stroke
+  // rewrites the whole base64 mask, and skipping unchanged ones is what keeps
+  // an idle map from PATCHing on every unrelated floor mutation.
+  const wallsChanged = JSON.stringify(oldFloor.walls ?? []) !== JSON.stringify(newFloor.walls ?? []);
+  const fogChanged = JSON.stringify(oldFloor.fog ?? null) !== JSON.stringify(newFloor.fog ?? null);
+  const authoredStageChanged =
+    JSON.stringify(oldFloor.authoredStage ?? null) !== JSON.stringify(newFloor.authoredStage ?? null);
 
-  if (metaChanged || initiativeChanged || resolvedRosterChanged) {
-    await mapsApi.updateMapFloor(floorId, {
-      flipped_horizontal: newFloor.flippedHorizontal ?? false,
-      flipped_vertical: newFloor.flippedVertical ?? false,
-      rotation: newFloor.rotation ?? 0,
-      locked_encounter_id: newFloor.lockedEncounterId ?? null,
-      raw_data: { initiative: newFloor.initiative, resolvedEncounterRoster: newFloor.resolvedEncounterRoster ?? null },
-    });
+  if (metaChanged || initiativeChanged || resolvedRosterChanged || wallsChanged || fogChanged || authoredStageChanged) {
+    // Only the fields that actually changed - the server PATCH is
+    // exclude_unset, so anything omitted is left alone. This matters because
+    // walls on a map with auto-detected geometry is ~25kB of JSON, and fog
+    // updates once per token move: sending walls every time meant uploading
+    // 25kB per step of a party walking across the map, for nothing.
+    const payload: Record<string, unknown> = {};
+    if (metaChanged) {
+      payload.flipped_horizontal = newFloor.flippedHorizontal ?? false;
+      payload.flipped_vertical = newFloor.flippedVertical ?? false;
+      payload.rotation = newFloor.rotation ?? 0;
+      payload.locked_encounter_id = newFloor.lockedEncounterId ?? null;
+    }
+    if (wallsChanged) {
+      payload.walls = newFloor.walls ?? [];
+    }
+    if (initiativeChanged || resolvedRosterChanged || fogChanged || authoredStageChanged) {
+      // raw_data is rewritten whole, so every field it holds goes together.
+      payload.raw_data = {
+        initiative: newFloor.initiative,
+        resolvedEncounterRoster: newFloor.resolvedEncounterRoster ?? null,
+        fog: newFloor.fog ?? null,
+        authoredStage: newFloor.authoredStage ?? null,
+      };
+    }
+    await mapsApi.updateMapFloor(floorId, payload);
   }
 
   await syncTokens(floorId, oldFloor.placedTokens, newFloor.placedTokens);

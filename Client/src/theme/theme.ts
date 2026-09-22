@@ -1,14 +1,15 @@
 import { createTheme, type PaletteMode, type Theme } from '@mui/material/styles';
 import { UI_SCALE, su } from './uiScale';
+import { BRAND_AMBER, BRAND_AMBER_DEEP, BRAND_AMBER_LIGHT, BRAND_SLATE } from './brandColors';
 
-const amber = '#c8873a';
-const amberLight = '#e0a75f';
-/** The brand amber, deepened until it is legible as TEXT on the light theme's near-white
- * surfaces. `amber` itself only reaches ~2.5:1 there - fine as a fill behind contrastText, well
- * under the 4.5:1 text minimum as a foreground. MUI's own derived primary.dark (a flat 20%
- * darken) only gets to ~3.5:1, so the light palette states this shade outright. */
-const amberDeep = '#8a5a1f';
-const slate = '#3c3a4a';
+/** The values live in brandColors.ts, which imports nothing, so that code in the eager entry
+ * chunk can have a brand colour without dragging MUI's styles runtime in with it. The names
+ * are kept short here because the palette below and the component overrides read better that
+ * way; brandColors.ts carries the reasoning for each shade. */
+const amber = BRAND_AMBER;
+const amberLight = BRAND_AMBER_LIGHT;
+const amberDeep = BRAND_AMBER_DEEP;
+const slate = BRAND_SLATE;
 
 /** The brand colour when it is being used as a FOREGROUND - icon or text - rather than as a
  * fill with contrastText over it.

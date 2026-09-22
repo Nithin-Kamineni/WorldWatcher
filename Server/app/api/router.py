@@ -13,6 +13,7 @@ from app.api.routers import (
     creatures,
     effects,
     encounters,
+    entity_revisions,
     factions,
     generators,
     items,
@@ -51,6 +52,7 @@ api_router.include_router(notes.router)
 api_router.include_router(notes.folders_router)
 api_router.include_router(item_usage.router)
 api_router.include_router(session_chats.router)
+api_router.include_router(entity_revisions.router)
 
 api_router.include_router(creatures.router)
 api_router.include_router(spells.router)

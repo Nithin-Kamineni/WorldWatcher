@@ -11,6 +11,7 @@ from app.models.campaign import (
 )
 from app.models.combat import Combat, Combatant
 from app.models.creatures import Creature, CreatureAction
+from app.models.entity_revision import EntityRevision
 from app.models.encounters import (
     Encounter,
     EncounterCombatBlock,
@@ -128,6 +129,7 @@ __all__ = [
     "Note",
     "NoteFolder",
     "ItemUsage",
+    "EntityRevision",
     "SessionChat",
     "Category",
     "Tag",

@@ -298,7 +298,7 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
                   onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'random-tables', table.id) : pinItem(campaignId, slot, 'random-tables', table.id))}
                   expanded={isExpanded}
                   onToggleExpand={() => toggleExpanded(campaignId, slot, 'random-tables', table.id)}
-                  onOpenNewTab={() => window.open(`/w/${worldId}/c/${campaignId}/encounters?view=random_tables&table=${table.id}`, '_blank')}
+                  onOpenNewTab={() => window.open(`/w/${worldId}/c/${campaignId}/tables?table=${table.id}`, '_blank')}
                 >
                   <Stack spacing={1.25}>
                     <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>

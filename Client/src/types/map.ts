@@ -3,6 +3,8 @@ import type { AoEShape } from './shape';
 import type { InitiativeState } from './initiative';
 import { DEFAULT_INITIATIVE_STATE } from './initiative';
 import type { EncounterCreatureEntry } from './encounter';
+import type { FogState, WallSegment } from './fog';
+import { DEFAULT_FOG_STATE } from './fog';
 
 export type MapKind = 'battle' | 'city' | 'region' | 'continent' | 'world';
 
@@ -61,6 +63,25 @@ export interface MapFloor {
    * yet (or the locked encounter is a fixed roster, which uses its own `creatures[]` directly). */
   resolvedEncounterRoster?: EncounterCreatureEntry[] | null;
   initiative: InitiativeState;
+  /** Sight-blocking geometry, in IMAGE-pixel space - see types/fog.ts. */
+  walls: WallSegment[];
+  fog: FogState;
+  /**
+   * The canvas size this floor's contents were authored against.
+   *
+   * Tokens, AoE shapes and the grid are all stored in raw stage pixels, and the background
+   * image is laid out by contain-fitting it into the canvas. If that fit is computed from
+   * the LIVE canvas size, then opening the map at a different window size - a different
+   * monitor, the sidebar open, fullscreen - re-fits the background while the tokens stay on
+   * their old numbers, and every token appears to have moved.
+   *
+   * Pinning the size the content was authored at makes the fit a pure function of stored
+   * data, so a token's coordinates mean the same thing forever. Adapting to whatever window
+   * is actually open is then a single transform on the Konva Stage, which moves the
+   * background and the tokens together. Written once, on the first load of a floor that
+   * does not have it yet - see MapPage's migration effect.
+   */
+  authoredStage?: { width: number; height: number };
 }
 
 export const DEFAULT_GRID_SIZE = 70;
@@ -91,7 +112,7 @@ export interface MapData {
   customDetails?: MapCustomDetail[];
   createdAt: number;
   updatedAt: number;
-  // future: layers: LayerConfig[]; fogState: FogState
+  // future: layers: LayerConfig[]
 }
 
 export function createEmptyFloor(id: string, name: string, imageSrc: string): MapFloor {
@@ -102,6 +123,8 @@ export function createEmptyFloor(id: string, name: string, imageSrc: string): Ma
     placedTokens: [],
     shapes: [],
     initiative: { ...DEFAULT_INITIATIVE_STATE, entries: [] },
+    walls: [],
+    fog: { ...DEFAULT_FOG_STATE },
   };
 }
 
