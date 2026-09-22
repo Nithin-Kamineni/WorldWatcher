@@ -129,9 +129,12 @@ export function FactionRelationsField({
                 {...params}
                 size="small"
                 placeholder="Add relation to…"
-                InputProps={{
-                  ...params.InputProps,
-                  startAdornment: <AddIcon fontSize="small" sx={{ ml: 0.5, mr: -0.5, color: 'text.secondary' }} />,
+                slotProps={{
+                  ...params.slotProps,
+                  input: {
+                    ...params.slotProps.input,
+                    startAdornment: <AddIcon fontSize="small" sx={{ ml: 0.5, mr: -0.5, color: 'text.secondary' }} />,
+                  },
                 }}
               />
             )}

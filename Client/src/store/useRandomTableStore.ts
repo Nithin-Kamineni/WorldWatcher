@@ -42,7 +42,12 @@ interface RandomTableState {
   searching: boolean;
   resultSets: Record<string, RandomTableResultSet>;
   detailById: Record<string, RandomTableDetail>;
+  /** resultKey -> the serialised params its current contents were loaded with. Drives
+   * ensureSearch; cleared for every key whenever a table is written, so the next mount
+   * refetches rather than serving a list that no longer matches the library. */
+  loadedParamsByKey: Record<string, string>;
   search: (params: RandomTableSearchParams, resultKey?: string) => Promise<void>;
+  ensureSearch: (params: RandomTableSearchParams, resultKey?: string) => Promise<void>;
   fetchDetail: (id: string) => Promise<RandomTableDetail | null>;
   createTable: (payload: Record<string, unknown>) => Promise<RandomTableDetail | null>;
   updateTable: (id: string, payload: Record<string, unknown>) => Promise<RandomTableDetail | null>;
@@ -74,6 +79,21 @@ export const useRandomTableStore = create<RandomTableState>((set, get) => ({
   searching: false,
   resultSets: {},
   detailById: {},
+  loadedParamsByKey: {},
+
+  /** The mount-time load: fetches this result key once, however many components ask for it.
+   *
+   * The whole-library load is ~2600 rows, and up to three components share the `play:<campaign>`
+   * key at once - two Items windows plus the map page's Reference sidebar - so a plain search()
+   * per mount meant the same megabyte fetched two or three times over, each write landing on the
+   * same result set (checklist I-U4). Identical params on an already-loaded key are a no-op;
+   * anything else, including a write to the library, falls through to a real search(). */
+  ensureSearch: async (params, resultKey = 'default') => {
+    const paramsKey = JSON.stringify(toParams(params));
+    if (get().loadedParamsByKey[resultKey] === paramsKey) return;
+    set((state) => ({ loadedParamsByKey: { ...state.loadedParamsByKey, [resultKey]: paramsKey } }));
+    await get().search(params, resultKey);
+  },
 
   search: async (params, resultKey = 'default') => {
     const requestId = crypto.randomUUID();
@@ -154,7 +174,7 @@ export const useRandomTableStore = create<RandomTableState>((set, get) => ({
   createTable: async (payload) => {
     try {
       const detail = apiRandomTableDetailToDetail(await randomTablesApi.createRandomTable(payload));
-      set((state) => ({ detailById: { ...state.detailById, [detail.id]: detail } }));
+      set((state) => ({ detailById: { ...state.detailById, [detail.id]: detail }, loadedParamsByKey: {} }));
       return detail;
     } catch (err) {
       console.error('Failed to create random table', err);
@@ -165,7 +185,7 @@ export const useRandomTableStore = create<RandomTableState>((set, get) => ({
   updateTable: async (id, payload) => {
     try {
       const detail = apiRandomTableDetailToDetail(await randomTablesApi.updateRandomTable(id, payload));
-      set((state) => ({ detailById: { ...state.detailById, [id]: detail } }));
+      set((state) => ({ detailById: { ...state.detailById, [id]: detail }, loadedParamsByKey: {} }));
       return detail;
     } catch (err) {
       console.error(`Failed to update random table ${id}`, err);
@@ -202,7 +222,7 @@ export const useRandomTableStore = create<RandomTableState>((set, get) => ({
       await randomTablesApi.deleteRandomTable(id);
       set((state) => {
         const { [id]: _removed, ...rest } = state.detailById;
-        return { detailById: rest, results: state.results.filter((t) => t.id !== id) };
+        return { detailById: rest, results: state.results.filter((t) => t.id !== id), loadedParamsByKey: {} };
       });
     } catch (err) {
       console.error(`Failed to delete random table ${id}`, err);
@@ -212,7 +232,7 @@ export const useRandomTableStore = create<RandomTableState>((set, get) => ({
   cloneTable: async (id, campaignId) => {
     try {
       const detail = apiRandomTableDetailToDetail(await randomTablesApi.cloneRandomTable(id, campaignId));
-      set((state) => ({ detailById: { ...state.detailById, [detail.id]: detail } }));
+      set((state) => ({ detailById: { ...state.detailById, [detail.id]: detail }, loadedParamsByKey: {} }));
       return detail;
     } catch (err) {
       console.error(`Failed to clone random table ${id}`, err);

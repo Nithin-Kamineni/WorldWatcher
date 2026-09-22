@@ -6,11 +6,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useShellStore } from '../../store/useShellStore';
 import { RightPanelUtilityStrip } from './RightPanelUtilityStrip';
-
-export const RIGHT_PANEL_WIDTH = 300;
-/** Width when no `children` are supplied - the panel is then just the icon strip and doesn't
- * need the full detail-content width. */
-const ICON_ONLY_WIDTH = 56;
+import { RIGHT_PANEL_WIDTH, RIGHT_PANEL_ICON_ONLY_WIDTH } from '../../theme/layout';
 
 /** Shared look for both the "expand" (collapsed state) and "collapse" (open state) floating
  * arrows - same size/transparency/hover behavior, only the side, rounding and icon differ, so
@@ -63,7 +59,7 @@ export function RightPanel({ worldId, children }: RightPanelProps) {
   return (
     <Box
       sx={{
-        width: children ? RIGHT_PANEL_WIDTH : ICON_ONLY_WIDTH,
+        width: children ? RIGHT_PANEL_WIDTH : RIGHT_PANEL_ICON_ONLY_WIDTH,
         flexShrink: 0,
         borderLeft: 1,
         borderColor: 'divider',

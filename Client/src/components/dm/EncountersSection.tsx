@@ -3,8 +3,6 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import Card from '@mui/material/CardActionArea';
-import Paper from '@mui/material/Paper';
 import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -32,8 +30,18 @@ import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatu
 import { useEncounterDifficultySettingsStore } from '../../store/useEncounterDifficultySettingsStore';
 import type { Encounter, EncounterPrimaryType } from '../../types/encounter';
 import type { Creature } from '../../types/creature';
+import { PageTitle } from '../shell/PageTitle';
 
-export type EncounterView = 'menu' | 'management' | 'random_tables';
+/** The Encounters page's two screens.
+ *
+ * There used to be a third, 'menu': a landing screen of two cards making the DM choose between
+ * "Random Tables" and "Encounters" before seeing anything. That choice was already false -
+ * Task 11.3 had made the browse view cover BOTH kinds through one category tree, one tag facet
+ * set and one search box - so the menu's second card led to a second, duplicate browse of the
+ * same encounters (checklist I-U2). The browser is now the page itself; 'management' is the
+ * CRUD/admin table behind it, for the things the browser deliberately does not do (per-row
+ * edit and delete, and live difficulty against the assumed party). */
+export type EncounterView = 'management' | 'random_tables';
 
 interface EncountersSectionProps {
   campaignId: string;
@@ -51,7 +59,7 @@ interface EncountersSectionProps {
 }
 
 export function EncountersSection({ campaignId, worldId, view: controlledView, onViewChange, openEncounterId, openTableId }: EncountersSectionProps) {
-  const [internalView, setInternalView] = useState<EncounterView>('menu');
+  const [internalView, setInternalView] = useState<EncounterView>('random_tables');
   const view = controlledView ?? internalView;
   const setView = (next: EncounterView) => {
     if (onViewChange) onViewChange(next);
@@ -147,48 +155,25 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
     setResolutionFilter([]);
   };
 
-  if (view === 'menu') {
-    return (
-      <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
-        <Paper elevation={2} sx={{ borderRadius: 4, width: 260 }}>
-          <Card onClick={() => setView('random_tables')} sx={{ p: 3, borderRadius: 4 }}>
-            <Stack spacing={1.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
-              <CasinoIcon sx={{ fontSize: 40 }} color="primary" />
-              <Typography variant="h6">Random Tables</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Roll for encounters, loot, roleplay & exploration prompts
-              </Typography>
-            </Stack>
-          </Card>
-        </Paper>
-
-        <Paper elevation={2} sx={{ borderRadius: 4, width: 260 }}>
-          <Card onClick={() => setView('management')} sx={{ p: 3, borderRadius: 4 }}>
-            <Stack spacing={1.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
-              <ListAltIcon sx={{ fontSize: 40 }} color="primary" />
-              <Typography variant="h6">Encounters</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {encounters.length} saved encounter{encounters.length === 1 ? '' : 's'}
-              </Typography>
-            </Stack>
-          </Card>
-        </Paper>
-      </Stack>
-    );
-  }
-
   if (view === 'random_tables') {
     return (
       <Box sx={{ width: '100%', height: '100%', minHeight: 0 }}>
         <RandomTablesBrowseView
           campaignId={campaignId}
           openTableId={openTableId}
-          onBack={() => setView('menu')}
           onGoToEncounters={() => setView('management')}
           onOpenEncounter={(id) => { void fetchEncounterById(campaignId, id).then((encounter) => setViewingEncounter(encounter)); }}
           onOpenNpcBuilder={() => setNpcBuilderOpen(true)}
           onOpenPlaceBuilder={worldId ? (type) => { setPlaceBuilderType(type); setPlaceBuilderOpen(true); } : undefined}
           onOpenEncounterBuilder={(type) => { setEncounterBuilderType(type); setEncounterBuilderOpen(true); }}
+          // Task 11.3: encounters browse through the SAME category tree, tag facets and
+          // full-text search as random tables rather than through a screen of their own.
+          // This section stays the owner of encounter state and dialogs; the browse view
+          // only presents them.
+          encounters={encounters}
+          onEditEncounter={(encounter) => { setEditingEncounter(encounter); setDialogOpen(true); }}
+          onDeleteEncounter={(encounter) => setDeleteTarget(encounter)}
+          onCreateEncounter={() => { setEditingEncounter(undefined); setDialogOpen(true); }}
         />
         <EncounterDetailDialog encounter={viewingEncounter} creatures={creatures} campaignId={campaignId} onClose={() => setViewingEncounter(null)} />
         <QuickNpcRollDialog
@@ -232,6 +217,31 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
           onClose={() => setEncounterBuilderOpen(false)}
           onAdd={(encounter) => { addEncounterToCampaign(campaignId, encounter); setEncounterBuilderOpen(false); setView('management'); }}
         />
+        {/* Editing and deleting an encounter has to work from the unified browse too, not only
+            from the table view - otherwise its encounter rows would be read-only. */}
+        <EncounterFormDialog
+          open={dialogOpen}
+          onClose={() => { setDialogOpen(false); setEditingEncounter(undefined); }}
+          campaignId={campaignId}
+          creatures={creatures}
+          initialEncounter={editingEncounter}
+          onSubmit={(encounter) => {
+            if (editingEncounter) updateEncounterInCampaign(campaignId, encounter);
+            else addEncounterToCampaign(campaignId, encounter);
+            setDialogOpen(false);
+            setEditingEncounter(undefined);
+          }}
+        />
+        <ConfirmDeleteDialog
+          open={!!deleteTarget}
+          itemName={deleteTarget?.name ?? ''}
+          itemType="encounter"
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            if (deleteTarget) deleteEncounterFromCampaign(campaignId, deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+        />
       </Box>
     );
   }
@@ -240,12 +250,12 @@ export function EncountersSection({ campaignId, worldId, view: controlledView, o
     <Box>
       <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <IconButton size="small" onClick={() => setView('menu')}>
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-          <Typography variant="h5" component="h2">
-            Encounter Management
-          </Typography>
+          <Tooltip title="Back to browsing tables and encounters">
+            <IconButton size="small" aria-label="Back to browsing tables and encounters" onClick={() => setView('random_tables')}>
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <PageTitle component="h2">Encounter Management</PageTitle>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Tooltip title="Assumed party used to compute each encounter's live difficulty badge">

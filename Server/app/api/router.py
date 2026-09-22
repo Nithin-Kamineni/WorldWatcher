@@ -22,12 +22,11 @@ from app.api.routers import (
     notes,
     quests,
     random_bank,
-    random_encounter_tables,
     random_tables,
     raw_entities,
     search,
+    item_usage,
     session_chats,
-    situational_tables,
     sources,
     spells,
     table_formats,
@@ -50,6 +49,7 @@ api_router.include_router(bastions.facilities_router)
 api_router.include_router(bastions.router)
 api_router.include_router(notes.router)
 api_router.include_router(notes.folders_router)
+api_router.include_router(item_usage.router)
 api_router.include_router(session_chats.router)
 
 api_router.include_router(creatures.router)
@@ -70,8 +70,6 @@ api_router.include_router(token_library.router)
 
 api_router.include_router(encounters.router)
 api_router.include_router(combats.router)
-api_router.include_router(random_encounter_tables.router)
-api_router.include_router(situational_tables.router)
 
 api_router.include_router(categories.router)
 api_router.include_router(tags.router)

@@ -131,6 +131,37 @@ async def replace_generator_components(generator_id: uuid.UUID, payload: Generat
     return await _load_detail(db, obj)
 
 
+@router.post("/{generator_id}/clone", response_model=GeneratorDetail, status_code=201)
+async def clone_generator(generator_id: uuid.UUID, campaign_id: Optional[uuid.UUID] = None, db: AsyncSession = Depends(get_db)):
+    """Task 11.4: the escape hatch that makes the is_system read-only rule liveable.
+    PATCH and DELETE above refuse to touch a curated generator; this forks it into an
+    editable copy the DM owns, mirroring clone_random_table."""
+    source = await get_or_404(db, Generator, generator_id)
+    detail = await _load_detail(db, source)
+    clone = Generator(
+        campaign_id=campaign_id,
+        # slug is UNIQUE, so it can't be copied verbatim. The uuid4 tail keeps repeated
+        # clones of the same source from colliding with each other either.
+        slug=f"{source.slug}-copy-{uuid.uuid4().hex[:8]}",
+        name=f"{source.name} (copy)",
+        category_id=source.category_id,
+        description=source.description,
+        combine_template=source.combine_template,
+        parameters=source.parameters,
+        is_system=False,
+    )
+    db.add(clone)
+    await db.flush()
+    # Components point AT tables rather than owning them, so the clone shares the source's
+    # component tables - forking a generator must not fork the whole table library with it.
+    await _replace_components(db, clone, detail.components)
+    for tag_id in detail.tag_ids:
+        db.add(GeneratorTag(generator_id=clone.id, tag_id=tag_id))
+    await db.commit()
+    await db.refresh(clone)
+    return await _load_detail(db, clone)
+
+
 @router.delete("/{generator_id}", status_code=204)
 async def delete_generator(generator_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     obj = await get_or_404(db, Generator, generator_id)

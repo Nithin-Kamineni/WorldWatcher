@@ -2,13 +2,14 @@ import Box from '@mui/material/Box';
 import { SessionNotesPanel } from '../SessionNotesPanel';
 import { ChatPanel } from '../ChatPanel';
 import { ItemsWindow } from '../items/ItemsWindow';
-import { WindowKindSwitcher, KIND_LABELS, type ContentWindowKind } from './WindowKindSwitcher';
-import { CollapsedChatStrip } from './CollapsedChatStrip';
+import { WindowKindSwitcher, KIND_ICONS, KIND_LABELS, type ContentWindowKind } from './WindowKindSwitcher';
+import { CollapsedPaneStrip } from './CollapsedPaneStrip';
 import { EmptyPaneWindow } from './EmptyPaneWindow';
 import { PaneDropZone } from './PaneDropZone';
 import { usePaneDrag } from './paneDrag';
+import { usePlayItemsStore, type ItemsTabKind } from '../../../store/usePlayItemsStore';
 import type { PlayWindowKind } from '../../../store/usePlayLayoutStore';
-import type { PaneSlot, SplitDirection } from './playLayoutTrees';
+import type { ItemsSurface, PaneSlot, SplitDirection } from './playLayoutTrees';
 import type { Note } from '../../../types/note';
 
 interface PaneWindowProps {
@@ -25,6 +26,12 @@ interface PaneWindowProps {
   onDismiss: () => void;
   /** False when this is the only pane on screen - it has nowhere to hand its space to. */
   canClose: boolean;
+  /** False when this is the last pane still expanded - collapsing it would leave a workspace
+   * of strips and nothing to read. */
+  canCollapse: boolean;
+  /** What this slot held before it was closed, if anything - lets an empty pane offer to put
+   * that window straight back instead of making the DM pick a kind again (checklist P4). */
+  rememberedKind?: Exclude<PlayWindowKind, 'empty'>;
 
   worldId: string;
   campaignId: string;
@@ -52,6 +59,8 @@ export function PaneWindow({
   onClose,
   onDismiss,
   canClose,
+  canCollapse,
+  rememberedKind,
   worldId,
   campaignId,
   displayedNote,
@@ -62,6 +71,8 @@ export function PaneWindow({
   chatId,
 }: PaneWindowProps) {
   const { draggingSlot } = usePaneDrag();
+  const moveTabToSlot = usePlayItemsStore((s) => s.moveTabToSlot);
+  const CollapsedIcon = kind === 'empty' ? undefined : KIND_ICONS[kind as ContentWindowKind];
 
   const switcher =
     kind === 'empty' ? undefined : <WindowKindSwitcher kind={kind as ContentWindowKind} onSetKind={onSetKind} disabled={locked} />;
@@ -72,9 +83,19 @@ export function PaneWindow({
   const closeTooltip = locked
     ? 'Unlock the layout to close windows'
     : canClose
-      ? 'Close this window'
+      ? kind === 'empty'
+        ? 'Close this window'
+        : `Close ${KIND_LABELS[kind as ContentWindowKind]}`
       : 'The last window cannot be closed';
-  const closeProps = { onClose, closeDisabled: locked || !canClose, closeTooltip };
+  const closeProps = {
+    onClose,
+    closeDisabled: locked || !canClose,
+    closeTooltip,
+    // Collapse is generic now (checklist I-P11), but an empty placeholder has nothing to
+    // shrink and the last expanded pane must stay expanded.
+    onCollapse: kind === 'empty' || !canCollapse ? undefined : onToggleCollapse,
+    parentDirection,
+  };
 
   const content =
     kind === 'empty' ? (
@@ -83,9 +104,21 @@ export function PaneWindow({
         onDismiss={canClose ? onDismiss : undefined}
         dragActive={draggingSlot !== null}
         locked={locked}
+        rememberedKind={rememberedKind}
+        onTearOffTab={({ slot: from, kind }) => {
+          // Becoming an Items window and receiving the tab are two stores' business, so both
+          // happen here rather than either one reaching into the other.
+          onSetKind('items');
+          moveTabToSlot(campaignId, from as ItemsSurface, slot, kind as ItemsTabKind, { replace: true });
+        }}
       />
-    ) : kind === 'chat' && collapsed ? (
-      <CollapsedChatStrip direction={parentDirection} onExpand={onToggleCollapse} />
+    ) : collapsed ? (
+      <CollapsedPaneStrip
+        direction={parentDirection}
+        label={KIND_LABELS[kind as ContentWindowKind]}
+        icon={CollapsedIcon ? <CollapsedIcon fontSize="small" color="action" /> : null}
+        onExpand={onToggleCollapse}
+      />
     ) : kind === 'session' ? (
       <SessionNotesPanel
         slot={slot}
@@ -106,8 +139,6 @@ export function PaneWindow({
         noteId={sessionNoteId}
         chatId={chatId}
         kindSwitcher={switcher}
-        onCollapse={onToggleCollapse}
-        parentDirection={parentDirection}
         {...closeProps}
       />
     ) : (

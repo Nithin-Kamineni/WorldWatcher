@@ -94,10 +94,10 @@ export function ArticleFolderTree({
               }}
               fullWidth
             />
-            <IconButton size="small" onClick={commitRename}>
+            <IconButton size="small" aria-label="Save folder name" onClick={commitRename}>
               <CheckIcon fontSize="small" />
             </IconButton>
-            <IconButton size="small" onClick={() => setEditingId(null)}>
+            <IconButton size="small" aria-label="Cancel renaming" onClick={() => setEditingId(null)}>
               <CloseIcon fontSize="small" />
             </IconButton>
           </Stack>
@@ -110,15 +110,15 @@ export function ArticleFolderTree({
             <ListItemIcon sx={{ minWidth: 28 }}>
               <FolderIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText primary={folder.name} primaryTypographyProps={{ variant: 'body2', noWrap: true }} />
+            <ListItemText primary={folder.name} slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
             <Stack direction="row" sx={{ opacity: 0.6 }}>
-              <IconButton size="small" onClick={(e) => { e.stopPropagation(); startAdd(folder.id); }}>
+              <IconButton size="small" aria-label={`Add a folder inside ${folder.name}`} onClick={(e) => { e.stopPropagation(); startAdd(folder.id); }}>
                 <AddIcon sx={{ fontSize: 14 }} />
               </IconButton>
-              <IconButton size="small" onClick={(e) => { e.stopPropagation(); startRename(folder); }}>
+              <IconButton size="small" aria-label={`Rename folder ${folder.name}`} onClick={(e) => { e.stopPropagation(); startRename(folder); }}>
                 <EditIcon sx={{ fontSize: 14 }} />
               </IconButton>
-              <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }}>
+              <IconButton size="small" aria-label={`Delete folder ${folder.name}`} onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }}>
                 <DeleteOutlineIcon sx={{ fontSize: 14 }} />
               </IconButton>
             </Stack>
@@ -139,7 +139,7 @@ export function ArticleFolderTree({
               }}
               fullWidth
             />
-            <IconButton size="small" onClick={commitAdd}>
+            <IconButton size="small" aria-label="Create folder" onClick={commitAdd}>
               <CheckIcon fontSize="small" />
             </IconButton>
           </Stack>
@@ -169,13 +169,13 @@ export function ArticleFolderTree({
         <Typography variant="caption" color="text.disabled" sx={{ px: 1 }}>
           FOLDERS
         </Typography>
-        <IconButton size="small" onClick={() => startAdd(null)}>
+        <IconButton size="small" aria-label="Add a top-level folder" onClick={() => startAdd(null)}>
           <AddIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Stack>
 
       <ListItemButton selected={selectedFolderId === null} onClick={() => onSelectFolder(null)} sx={{ borderRadius: 1.5, py: 0.4 }}>
-        <ListItemText primary="All articles" primaryTypographyProps={{ variant: 'body2' }} />
+        <ListItemText primary="All articles" slotProps={{ primary: { variant: 'body2' } }} />
       </ListItemButton>
 
       {rootFolders.map((folder) => renderFolder(folder, 0))}
@@ -194,7 +194,7 @@ export function ArticleFolderTree({
             }}
             fullWidth
           />
-          <IconButton size="small" onClick={commitAdd}>
+          <IconButton size="small" aria-label="Create folder" onClick={commitAdd}>
             <CheckIcon fontSize="small" />
           </IconButton>
         </Stack>

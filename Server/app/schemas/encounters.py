@@ -242,9 +242,19 @@ class EncounterTableRead(BaseModel):
 
 
 class RewardDetails(BaseModel):
+    """Task 11.1: one encounter_rewards row. For kind='item', item_id FKs the
+    magic item instead of naming it in `description`; item_name/item_rarity are
+    hydrated on read so the client never has to look the item up itself."""
+
+    model_config = ConfigDict(from_attributes=True)
     kind: str = "other"
+    item_id: Optional[uuid.UUID] = None
     description: str = ""
     quantity: int = 1
+    sort_order: int = 0
+    # Read-only, filled by the router from the linked items row.
+    item_name: Optional[str] = None
+    item_rarity: Optional[str] = None
 
 
 class EncounterRead(BaseModel):
@@ -281,7 +291,8 @@ class EncounterRead(BaseModel):
     party_size: Optional[int] = None
     scaling_notes: Optional[str] = None
     location_id: Optional[uuid.UUID] = None
-    rewards: Optional[list[RewardDetails]] = None
+    generator_id: Optional[uuid.UUID] = None
+    rewards: list[RewardDetails] = []
     created_at: datetime
     updated_at: datetime
     tag_ids: list[uuid.UUID] = []
@@ -329,6 +340,7 @@ class EncounterCreate(BaseModel):
     party_size: Optional[int] = None
     scaling_notes: Optional[str] = None
     location_id: Optional[uuid.UUID] = None
+    generator_id: Optional[uuid.UUID] = None
     rewards: list[RewardDetails] = []
 
 
@@ -364,4 +376,5 @@ class EncounterUpdate(BaseModel):
     party_size: Optional[int] = None
     scaling_notes: Optional[str] = None
     location_id: Optional[uuid.UUID] = None
+    generator_id: Optional[uuid.UUID] = None
     rewards: Optional[list[RewardDetails]] = None

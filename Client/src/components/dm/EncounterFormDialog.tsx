@@ -51,6 +51,7 @@ import {
   type NpcAgenda,
   type NpcAttitude,
   type RpCues,
+  type EncounterReward,
 } from '../../types/encounter';
 import type { Creature } from '../../types/creature';
 import type { ApiCondition, ApiMap } from '../../api/types';
@@ -60,9 +61,12 @@ import { CategoryTreeBrowser } from './randomTables/CategoryTreeBrowser';
 import { TagPicker } from './randomTables/TagPicker';
 import { suggestEncounterDifficulty } from '../../utils/encounterCalculator';
 import { useEncounterStore, getEncountersForCampaign } from '../../store/useEncounterStore';
+import { useMagicItemStore, getMagicItemsForCampaign } from '../../store/useMagicItemStore';
 import * as randomTablesApi from '../../api/resources/randomTables';
-import { apiRandomTableToTable } from '../../api/adapters';
+import * as generatorsApi from '../../api/resources/generators';
+import { apiRandomTableToTable, apiGeneratorToGenerator } from '../../api/adapters';
 import type { RandomTable } from '../../types/randomTable';
+import type { Generator } from '../../types/generator';
 
 interface EncounterFormDialogProps {
   open: boolean;
@@ -195,6 +199,7 @@ function emptyState() {
     partySize: '' as string,
     scalingNotes: '',
     locationId: null as string | null,
+    generatorId: null as string | null,
     rewards: [] as Encounter['rewards'],
     tagIds: [] as string[],
     npcs: [] as EncounterNpcEntry[],
@@ -264,6 +269,7 @@ function stateFromEncounter(encounter: Encounter) {
     partySize: encounter.partySize != null ? String(encounter.partySize) : '',
     scalingNotes: encounter.scalingNotes ?? '',
     locationId: encounter.locationId,
+    generatorId: encounter.generatorId ?? null,
     rewards: encounter.rewards ?? [],
     tagIds: encounter.tagIds ?? [],
     npcs: encounter.npcs ?? [],
@@ -292,9 +298,13 @@ export function EncounterFormDialog({ open, onClose, onSubmit, initialEncounter,
   const [maps, setMaps] = useState<ApiMap[]>([]);
   const [randomTableOptions, setRandomTableOptions] = useState<RandomTable[]>([]);
   const [conditionOptions, setConditionOptions] = useState<ApiCondition[]>([]);
+  const [generatorOptions, setGeneratorOptions] = useState<Generator[]>([]);
   const [wanderingRollText, setWanderingRollText] = useState('');
   const encountersByCampaignId = useEncounterStore((s) => s.encountersByCampaignId);
   const fetchEncountersForCampaign = useEncounterStore((s) => s.fetchEncountersForCampaign);
+  const magicItemsByCampaignId = useMagicItemStore((s) => s.magicItemsByCampaignId);
+  const fetchMagicItemsForCampaign = useMagicItemStore((s) => s.fetchMagicItemsForCampaign);
+  const magicItems = getMagicItemsForCampaign(magicItemsByCampaignId, campaignId);
   const encounterOptions = campaignId ? getEncountersForCampaign(encountersByCampaignId, campaignId).filter((encounter) => encounter.id !== initialEncounter?.id) : [];
 
   useEffect(() => {
@@ -329,7 +339,16 @@ export function EncounterFormDialog({ open, onClose, onSubmit, initialEncounter,
       setRandomTableOptions(items);
     })().catch((err) => console.error('Failed to load wandering table options', err));
     conditionsApi.listConditions({ limit: 500 }).then((page) => setConditionOptions(page.items)).catch((err) => console.error('Failed to load conditions', err));
-  }, [open, campaignId, fetchEncountersForCampaign]);
+    // Task 11.1: an 'item' reward references a magic item by id, so the picker needs the
+    // campaign's items loaded. Same store RandomTableEditor's item-column picker uses.
+    void fetchMagicItemsForCampaign(campaignId);
+    // Task 11.2: the reverse reference direction - an encounter can point at a composite
+    // generator, not just at a single random table.
+    generatorsApi
+      .listGenerators({ campaign_id: campaignId, scope: 'own_or_global', limit: 500 })
+      .then((page) => setGeneratorOptions(page.items.map(apiGeneratorToGenerator)))
+      .catch((err) => console.error('Failed to load generator options', err));
+  }, [open, campaignId, fetchEncountersForCampaign, fetchMagicItemsForCampaign]);
 
   useEffect(() => {
     if (!open) return;
@@ -563,6 +582,7 @@ export function EncounterFormDialog({ open, onClose, onSubmit, initialEncounter,
       partySize: parseOptionalInt(state.partySize),
       scalingNotes: state.scalingNotes.trim() || null,
       locationId: state.locationId,
+      generatorId: state.generatorId,
       rewards: state.rewards,
       tagIds: state.tagIds,
       npcs: state.npcs,
@@ -804,13 +824,73 @@ export function EncounterFormDialog({ open, onClose, onSubmit, initialEncounter,
             )}
           />
 
-          <Box><Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}><Typography variant="subtitle2">Rewards</Typography><Button size="small" startIcon={<AddIcon />} onClick={() => set('rewards', [...state.rewards, { kind: 'other', description: '', quantity: 1 }])}>Add reward</Button></Stack>
-            <Stack spacing={1}>{state.rewards.map((reward, index) => <Stack key={index} direction="row" spacing={1}>
-              <EnumSelect label="Type" value={reward.kind} options={['currency', 'item', 'information', 'favor', 'experience', 'other']} onChange={(kind) => set('rewards', state.rewards.map((value, i) => i === index ? { ...value, kind: kind ?? 'other' } : value))} />
-              <TextField size="small" label="Description" value={reward.description} onChange={(e) => set('rewards', state.rewards.map((value, i) => i === index ? { ...value, description: e.target.value } : value))} sx={{ flex: 1 }} />
-              <TextField size="small" type="number" label="Quantity" value={reward.quantity} onChange={(e) => set('rewards', state.rewards.map((value, i) => i === index ? { ...value, quantity: Math.max(1, Number(e.target.value) || 1) } : value))} sx={{ width: 100 }} />
-              <IconButton onClick={() => set('rewards', state.rewards.filter((_, i) => i !== index))}><DeleteOutlineIcon /></IconButton>
-            </Stack>)}</Stack>
+          <Box>
+            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="subtitle2">Rewards</Typography>
+              <Button
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={() => set('rewards', [...state.rewards, { kind: 'other', itemId: null, description: '', quantity: 1, sortOrder: state.rewards.length }])}
+              >
+                Add reward
+              </Button>
+            </Stack>
+            <Stack spacing={1}>
+              {state.rewards.map((reward, index) => {
+                const updateReward = (patch: Partial<EncounterReward>) =>
+                  set('rewards', state.rewards.map((value, i) => (i === index ? { ...value, ...patch } : value)));
+                return (
+                  <Stack key={index} direction="row" spacing={1}>
+                    <EnumSelect
+                      label="Type"
+                      value={reward.kind}
+                      options={['currency', 'item', 'information', 'favor', 'experience', 'other']}
+                      // Switching away from 'item' drops the FK rather than leaving a stale one
+                      // hanging off a reward that no longer means an item.
+                      onChange={(kind) => updateReward({ kind: kind ?? 'other', itemId: kind === 'item' ? reward.itemId : null })}
+                    />
+                    {reward.kind === 'item' ? (
+                      // Task 11.1: the magic item is REFERENCED, not restated. The free-text
+                      // box beside it is for what the item row can't carry ("still wrapped in
+                      // oilcloth"), not for the item's name.
+                      <Autocomplete
+                        size="small"
+                        options={magicItems}
+                        getOptionLabel={(value) => value.name}
+                        value={magicItems.find((value) => value.id === reward.itemId) ?? null}
+                        onChange={(_e, value) => updateReward({ itemId: value?.id ?? null })}
+                        sx={{ flex: 1.4 }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            label="Magic item"
+                            helperText={reward.itemId ? undefined : 'Link the compendium item so stat changes follow'}
+                          />
+                        )}
+                      />
+                    ) : null}
+                    <TextField
+                      size="small"
+                      label={reward.kind === 'item' ? 'Notes' : 'Description'}
+                      value={reward.description}
+                      onChange={(e) => updateReward({ description: e.target.value })}
+                      sx={{ flex: 1 }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="Quantity"
+                      value={reward.quantity}
+                      onChange={(e) => updateReward({ quantity: Math.max(1, Number(e.target.value) || 1) })}
+                      sx={{ width: 100 }}
+                    />
+                    <IconButton onClick={() => set('rewards', state.rewards.filter((_, i) => i !== index))}>
+                      <DeleteOutlineIcon />
+                    </IconButton>
+                  </Stack>
+                );
+              })}
+            </Stack>
           </Box>
 
           <Box>
@@ -1602,6 +1682,19 @@ export function EncounterFormDialog({ open, onClose, onSubmit, initialEncounter,
                   value={encounterOptions.find((encounter) => encounter.id === state.explorationBlock?.transitionEncounterId) ?? null}
                   onChange={(_e, value) => updateExplorationBlock({ transitionEncounterId: value?.id ?? null })}
                   renderInput={(params) => <TextField {...params} label="Next encounter" />}
+                />
+
+                {/* Task 11.2: a wandering table covers one flat table; this covers a composite
+                    generator, so an encounter can pull a whole generated result (an NPC, a
+                    place) rather than a single rolled row. */}
+                <Autocomplete
+                  options={generatorOptions}
+                  getOptionLabel={(generator) => generator.name}
+                  value={generatorOptions.find((generator) => generator.id === state.generatorId) ?? null}
+                  onChange={(_e, value) => set('generatorId', value?.id ?? null)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Generator" helperText="Roll a composite generator while running this encounter." />
+                  )}
                 />
 
                 <MultiChipToggle label="Resource cost" value={state.explorationBlock.resourceCost} options={RESOURCE_COSTS} onChange={(v) => updateExplorationBlock({ resourceCost: v })} />

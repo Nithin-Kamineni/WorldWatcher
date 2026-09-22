@@ -1,11 +1,11 @@
-import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
-import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemAvatar from '@mui/material/ListItemAvatar';
 import Avatar from '@mui/material/Avatar';
 import ListItemText from '@mui/material/ListItemText';
+import LayersIcon from '@mui/icons-material/Layers';
+import { SectionHeader } from '../../shell/SectionHeader';
 import type { MapFloor } from '../../../types/map';
 
 interface FloorSwitcherPanelProps {
@@ -17,12 +17,8 @@ interface FloorSwitcherPanelProps {
 export function FloorSwitcherPanel({ floors, activeFloorId, onSelectFloor }: FloorSwitcherPanelProps) {
   return (
     <Stack sx={{ height: '100%' }}>
-      <Box sx={{ p: 2, pb: 1 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-          Floors
-        </Typography>
-      </Box>
-      <List sx={{ overflowY: 'auto', px: 1 }}>
+      <SectionHeader icon={<LayersIcon fontSize="small" />} title="Floors" />
+      <List sx={{ overflowY: 'auto', px: 1, pt: 1 }}>
         {floors.map((floor) => (
           <ListItemButton
             key={floor.id}

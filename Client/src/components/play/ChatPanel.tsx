@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Button from '@mui/material/Button';
-import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
@@ -13,18 +13,17 @@ import ListItemText from '@mui/material/ListItemText';
 import Divider from '@mui/material/Divider';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddCommentIcon from '@mui/icons-material/AddCommentOutlined';
-import SendIcon from '@mui/icons-material/Send';
 import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined';
-import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
+import OpenInNewIcon from '@mui/icons-material/OpenInNewOutlined';
 import { PaneHeader, type PaneCloseProps } from './layout/PaneHeader';
 import type { PaneSlot } from './layout/playLayoutTrees';
-import { EntityRefPreview } from '../notes/EntityRefPreview';
-import { useMentionInput } from '../../hooks/useMentionInput';
+import { ChatComposer } from '../notes/ChatComposer';
+import { ChatMessageRow } from '../notes/ChatMessageRow';
+import { ConfirmDeleteDialog } from '../dm/ConfirmDeleteDialog';
 import { useSessionChatStore, getChatsForNote } from '../../store/useSessionChatStore';
 import { usePlayUiStore } from '../../store/usePlayUiStore';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../theme/scrollbarSx';
-import type { SplitDirection } from './layout/playLayoutTrees';
-import type { SessionChat } from '../../types/sessionChat';
+import type { ChatMessage, SessionChat } from '../../types/sessionChat';
 
 interface ChatPanelProps extends PaneCloseProps {
   /** Which pane this panel occupies - the header uses it as its drag handle identity. */
@@ -36,11 +35,6 @@ interface ChatPanelProps extends PaneCloseProps {
   /** Quarter-height layout (dense layouts) - tightens padding, nothing else changes. */
   compact?: boolean;
   kindSwitcher?: ReactNode;
-  /** Chat-only collapse affordance (issues.txt 8.4) - omit to hide the button entirely. */
-  onCollapse?: () => void;
-  /** Which way this pane's parent split runs - decides which way the collapse chevron points
-   * (a row split shrinks width, a column split shrinks height). Defaults to 'row'. */
-  parentDirection?: SplitDirection;
 }
 
 function newChatName(): string {
@@ -61,15 +55,16 @@ export function ChatPanel({
   chatId,
   compact,
   kindSwitcher,
-  onCollapse,
-  parentDirection = 'row',
   ...closeProps
 }: ChatPanelProps) {
   const chats = useSessionChatStore((s) => s.chats);
   const fetchChatsForNote = useSessionChatStore((s) => s.fetchChatsForNote);
   const addChat = useSessionChatStore((s) => s.addChat);
   const appendMessage = useSessionChatStore((s) => s.appendMessage);
+  const updateMessage = useSessionChatStore((s) => s.updateMessage);
+  const deleteMessage = useSessionChatStore((s) => s.deleteMessage);
   const setChat = usePlayUiStore((s) => s.setChat);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchChatsForNote(campaignId, noteId);
@@ -79,37 +74,12 @@ export function ChatPanel({
   const activeChat = chatId ? chats.find((c) => c.id === chatId) : undefined;
 
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const [draft, setDraft] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [pendingDelete, setPendingDelete] = useState<ChatMessage | null>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
-
-  const { handleChange, handleKeyDown: handleMentionKeyDown, MentionPickerElement } = useMentionInput({
-    value: draft,
-    onChange: setDraft,
-    worldId,
-    campaignId,
-    textareaRef,
-  });
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ block: 'end' });
   }, [activeChat?.messages.length]);
-
-  const handleSend = () => {
-    const text = draft.trim();
-    if (!text || !activeChat) return;
-    appendMessage(activeChat.id, text);
-    setDraft('');
-  };
-
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    handleMentionKeyDown(e);
-    if (e.defaultPrevented) return;
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   const handleNewChat = () => {
     const now = Date.now();
@@ -141,18 +111,24 @@ export function ChatPanel({
         {...closeProps}
         actions={
           <>
-            <Tooltip title="Switch or start a chat">
-              <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)}>
-                <ExpandMoreIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            {onCollapse && (
-              <Tooltip title="Collapse">
-                <IconButton size="small" onClick={onCollapse}>
-                  <UnfoldLessIcon fontSize="small" sx={{ transform: parentDirection === 'row' ? 'rotate(90deg)' : 'none' }} />
+            {/* Mid-session the DM could add to a thread here but had to find their way to the
+                thread page by hand to do anything else with it (checklist I-N3). */}
+            {activeChat && (
+              <Tooltip title="Open this thread as a page">
+                <IconButton
+                  size="small"
+                  aria-label="Open this thread as a page"
+                  onClick={() => navigate(`/w/${worldId}/c/${campaignId}/chats/${activeChat.id}`)}
+                >
+                  <OpenInNewIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
             )}
+            <Tooltip title="Switch or start a chat">
+              <IconButton size="small" aria-label="Switch or start a chat" onClick={(e) => setAnchorEl(e.currentTarget)}>
+                <ExpandMoreIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </>
         }
       />
@@ -223,43 +199,44 @@ export function ChatPanel({
               </Typography>
             ) : (
               activeChat.messages.map((m) => (
-                <Paper key={m.id} elevation={0} sx={{ bgcolor: 'action.hover', borderRadius: 1.25, px: 1.5, py: 1 }}>
-                  <EntityRefPreview
-                    body={m.text}
-                    worldId={worldId}
-                    campaignId={campaignId}
-                    noteName={activeChat.name}
-                    enableItemsWindowFocus
-                    sx={{ fontSize: 14 }}
-                  />
-                  <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.5 }}>
-                    {new Date(m.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                  </Typography>
-                </Paper>
+                <ChatMessageRow
+                  key={m.id}
+                  message={m}
+                  worldId={worldId}
+                  campaignId={campaignId}
+                  chatName={activeChat.name}
+                  onSave={(text) => updateMessage(activeChat.id, m.id, text)}
+                  onDelete={() => setPendingDelete(m)}
+                  compact
+                  enableItemsWindowFocus
+                />
               ))
             )}
             <div ref={listEndRef} />
           </Box>
 
-          <Box sx={{ p: compact ? 1 : 1.5, borderTop: 1, borderColor: 'divider', display: 'flex', gap: 1, alignItems: 'flex-end' }}>
-            <TextField
-              inputRef={textareaRef}
-              value={draft}
-              onChange={handleChange}
-              onKeyDown={handleInputKeyDown}
-              placeholder='Quick note… type "@" to mention'
-              multiline
-              maxRows={4}
-              size="small"
-              fullWidth
+          <Box sx={{ p: compact ? 1 : 1.5, borderTop: 1, borderColor: 'divider' }}>
+            <ChatComposer
+              worldId={worldId}
+              campaignId={campaignId}
+              compact
+              onSubmit={(html) => appendMessage(activeChat.id, html)}
             />
-            <IconButton color="primary" onClick={handleSend} disabled={!draft.trim()}>
-              <SendIcon />
-            </IconButton>
           </Box>
         </>
       )}
-      {MentionPickerElement}
+      <ConfirmDeleteDialog
+        open={pendingDelete !== null}
+        itemType="message"
+        itemName={(pendingDelete?.text ?? '').slice(0, 60)}
+        description="will be removed from this thread."
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete && activeChat) deleteMessage(activeChat.id, pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
+
     </Paper>
   );
 }

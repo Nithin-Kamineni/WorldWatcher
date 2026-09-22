@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -7,14 +7,17 @@ import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { ItemsSearchFilterBar, type FilterGroupDef } from './ItemsSearchFilterBar';
+import { ItemsBrowseSection, BROWSE_PAGE } from './ItemsBrowseSection';
 import { PinnableItemRow } from './PinnableItemRow';
 import { EncounterBuilderLauncher } from './BuilderLaunchers';
+import { rankByUsefulness, type UsefulnessSignals } from '../../dm/randomTables/tableSearch';
+import { useItemUsageStore, getItemUsage } from '../../../store/useItemUsageStore';
 import { TokenThumbnail } from '../../map/TokenThumbnail';
 import { EncounterCreatureRow } from './EncounterCreatureRow';
 import { useEncounterStore, getEncountersForCampaign } from '../../../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../../../store/useCreatureStore';
 import { usePlayItemsStore, getPlayItemsState, getSlotItems, compositeId } from '../../../store/usePlayItemsStore';
-import type { PaneSlot } from '../layout/playLayoutTrees';
+import type { ItemsSurface } from '../layout/playLayoutTrees';
 import { getEncounterFallbackImage, type Encounter, type NpcAttitude } from '../../../types/encounter';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../../theme/scrollbarSx';
 
@@ -35,7 +38,7 @@ interface EncountersSubWindowProps {
   campaignId: string;
   /** Which Items window this is - all pin/open/expand state below is scoped to it, and it is
    * also where "open this creature in Stats" opens the card. */
-  slot: PaneSlot;
+  slot: ItemsSurface;
 }
 
 function mobTypesFor(encounter: Encounter, creatures: ReturnType<typeof getCreaturesForCampaign>): string[] {
@@ -56,15 +59,32 @@ export function EncountersSubWindow({ worldId, campaignId, slot }: EncountersSub
   const fetchCreaturesForCampaign = useCreatureStore((s) => s.fetchCreaturesForCampaign);
 
   const byCampaignId = usePlayItemsStore((s) => s.byCampaignId);
-  const focusItem = usePlayItemsStore((s) => s.focusItem);
+  const focusItemAction = usePlayItemsStore((s) => s.focusItem);
   const focusItemInTab = usePlayItemsStore((s) => s.focusItemInTab);
   const pinItem = usePlayItemsStore((s) => s.pinItem);
   const unpinItem = usePlayItemsStore((s) => s.unpinItem);
-  const toggleExpanded = usePlayItemsStore((s) => s.toggleExpanded);
+  const toggleExpandedAction = usePlayItemsStore((s) => s.toggleExpanded);
   const slotState = getSlotItems(getPlayItemsState(byCampaignId, campaignId), slot);
   const pinned = slotState.pinnedByKind.encounters;
   const current = slotState.currentByKind.encounters;
   const expanded = slotState.expandedByKind.encounters;
+
+  // Opening an encounter, and expanding one open to read its roster, are both usefulness
+  // signals - so every such action goes through these rather than calling the store directly
+  // (checklist I-P8).
+  const usageByCampaignId = useItemUsageStore((s) => s.byCampaignId);
+  const recordUse = useItemUsageStore((s) => s.recordUse);
+  const recordOpen = useItemUsageStore((s) => s.recordOpen);
+  const usage = getItemUsage(usageByCampaignId, campaignId, 'encounters');
+
+  const focusItem = (id: string) => {
+    recordOpen(campaignId, 'encounters', id);
+    focusItemAction(campaignId, slot, 'encounters', id);
+  };
+  const toggleExpanded = (id: string) => {
+    if (!expanded.includes(id)) recordUse(campaignId, 'encounters', id);
+    toggleExpandedAction(campaignId, slot, 'encounters', id);
+  };
 
   /** Hands a roster creature to this same window's Stats tab, where it gets the full card and
    * can be pinned for the rest of the session. */
@@ -73,6 +93,8 @@ export function EncountersSubWindow({ worldId, campaignId, slot }: EncountersSub
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Record<string, string[]>>({ theme: [], cr: [], type: [] });
+  const [limit, setLimit] = useState(BROWSE_PAGE);
+  const showMore = useCallback(() => setLimit((n) => n + BROWSE_PAGE), []);
 
   useEffect(() => {
     fetchEncountersForCampaign(campaignId);
@@ -95,16 +117,29 @@ export function EncountersSubWindow({ worldId, campaignId, slot }: EncountersSub
   const activeFilterCount = filters.theme.length + filters.cr.length + filters.type.length;
   const hasQuery = search.trim() !== '' || activeFilterCount > 0;
 
-  const filtered = !hasQuery
-    ? []
-    : rows.filter(({ encounter, mobTypes }) => {
-        const q = search.trim().toLowerCase();
-        if (q && !encounter.name.toLowerCase().includes(q)) return false;
-        if (filters.theme.length > 0 && !filters.theme.includes(encounter.theme)) return false;
-        if (filters.cr.length > 0 && !filters.cr.includes(encounter.challengeRating)) return false;
-        if (filters.type.length > 0 && !filters.type.some((t) => mobTypes.includes(t))) return false;
-        return true;
-      });
+  // A narrowed result set is a fresh list - re-collapse it to the first page.
+  useEffect(() => {
+    setLimit(BROWSE_PAGE);
+  }, [search, filters]);
+
+  // Ranked by what this campaign has actually opened and pinned, never alphabetically, and
+  // never gated behind "type something first": an Encounters sub-window opened mid-fight has to
+  // lead with the fight, not with an empty pane (checklist I-P8).
+  const usefulness: UsefulnessSignals = useMemo(() => ({ usage, pinnedIds: pinned }), [usage, pinned]);
+
+  const matched = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const narrowed = rows.filter(({ encounter, mobTypes }) => {
+      if (q && !encounter.name.toLowerCase().includes(q)) return false;
+      if (filters.theme.length > 0 && !filters.theme.includes(encounter.theme)) return false;
+      if (filters.cr.length > 0 && !filters.cr.includes(encounter.challengeRating)) return false;
+      if (filters.type.length > 0 && !filters.type.some((t) => mobTypes.includes(t))) return false;
+      return true;
+    });
+    return rankByUsefulness(narrowed.map((r) => r.encounter), search, usefulness);
+  }, [rows, search, filters, usefulness]);
+
+  const visible = matched.slice(0, limit);
 
   // Opening an item puts its row at the top of this pane, which is off-screen if the DM was
   // scrolled down the browse list - scroll back up so the click visibly lands.
@@ -152,7 +187,7 @@ export function EncountersSubWindow({ worldId, campaignId, slot }: EncountersSub
                   pinned={isPinned}
                   onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'encounters', encounter.id) : pinItem(campaignId, slot, 'encounters', encounter.id))}
                   expanded={isExpanded}
-                  onToggleExpand={() => toggleExpanded(campaignId, slot, 'encounters', encounter.id)}
+                  onToggleExpand={() => toggleExpanded(encounter.id)}
                   onOpenNewTab={() => window.open(`/w/${worldId}/c/${campaignId}/encounters?view=management&encounter=${encounter.id}`, '_blank')}
                 >
                   {isRandom ? (
@@ -234,21 +269,18 @@ export function EncountersSubWindow({ worldId, campaignId, slot }: EncountersSub
 
         <EncounterBuilderLauncher campaignId={campaignId} slot={slot} />
 
-        <Typography variant="overline" color="text.secondary" sx={{ pl: 0.5 }}>
-          Browse
-        </Typography>
-        {!hasQuery ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            Search or filter to browse encounters.
-          </Typography>
-        ) : filtered.length === 0 ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            No encounters match.
-          </Typography>
-        ) : (
+        <ItemsBrowseSection
+          matched={matched.length}
+          total={encounters.length}
+          narrowed={hasQuery}
+          noun="encounters"
+          emptyLabel="No encounters in this campaign yet."
+          limit={limit}
+          onShowMore={showMore}
+        >
           <List dense disablePadding>
-            {filtered.map(({ encounter }) => (
-              <ListItemButton key={encounter.id} onClick={() => focusItem(campaignId, slot, 'encounters', encounter.id)} sx={{ borderRadius: 1.5 }}>
+            {visible.map((encounter) => (
+              <ListItemButton key={encounter.id} onClick={() => focusItem(encounter.id)} sx={{ borderRadius: 1.5 }}>
                 <ListItemText
                   primary={encounter.name}
                   secondary={`${encounter.challengeRating || 'CR ?'}${encounter.theme ? ` · ${encounter.theme}` : ''}`}
@@ -257,7 +289,7 @@ export function EncountersSubWindow({ worldId, campaignId, slot }: EncountersSub
               </ListItemButton>
             ))}
           </List>
-        )}
+        </ItemsBrowseSection>
       </Box>
     </Box>
   );

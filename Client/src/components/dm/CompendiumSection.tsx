@@ -50,6 +50,11 @@ interface CompendiumSectionProps {
   openCreatureId?: string;
   openSpellId?: string;
   openItemId?: string;
+  /** Pins the section to one catalog and drops the card menu entirely: the World manager
+   * renders Monsters under People and Spells/Magic Items under Codex, where the sidebar is
+   * already the navigation and a "back to menu" arrow would lead nowhere sensible. Omit it
+   * to get the normal menu -> catalog flow the standalone Compendium page uses. */
+  lockedView?: Exclude<CompendiumView, 'menu'>;
 }
 
 /** Reference/catalog material - monster stat blocks, spells, and magic items. NPCs (people
@@ -80,7 +85,9 @@ function SectionHeader({
   onToggleAllCampaigns,
 }: {
   title: string;
-  onBack: () => void;
+  /** Omitted when the section is pinned to one catalog (`lockedView`) - there is no menu to
+   * go back to, so the arrow is left out rather than rendered inert. */
+  onBack?: () => void;
   onAdd: () => void;
   addLabel: string;
   filterOpen: boolean;
@@ -91,9 +98,11 @@ function SectionHeader({
   return (
     <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-        <IconButton size="small" onClick={onBack}>
-          <ArrowBackIcon fontSize="small" />
-        </IconButton>
+        {onBack && (
+          <IconButton size="small" onClick={onBack}>
+            <ArrowBackIcon fontSize="small" />
+          </IconButton>
+        )}
         <Typography variant="h5" component="h2">
           {title}
         </Typography>
@@ -139,9 +148,9 @@ function toggleInArray(arr: string[], value: string): string[] {
   return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
 }
 
-export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpellId, openItemId }: CompendiumSectionProps) {
+export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpellId, openItemId, lockedView }: CompendiumSectionProps) {
   const navigate = useNavigate();
-  const [view, setView] = useState<CompendiumView>('menu');
+  const [view, setView] = useState<CompendiumView>(lockedView ?? 'menu');
   const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
@@ -324,6 +333,15 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
     }
   }, [openCreatureId, openSpellId, openItemId, campaignId, creaturesByCampaignId, spellsByCampaignId, magicItemsByCampaignId]);
 
+  /** Follow `lockedView` when it changes rather than only seeding `view` from it. The World
+   * manager renders the same <CompendiumSection> element for Monsters, Spells and Magic
+   * Items, so React reuses one instance across those sidebar switches and the initial state
+   * alone would leave the previous catalog on screen. Call sites also pass a `key` so the
+   * search box, page and filters reset with it; this keeps the component correct without one. */
+  useEffect(() => {
+    if (lockedView) setView(lockedView);
+  }, [lockedView]);
+
   const goToView = (next: CompendiumView) => {
     setView(next);
     setFilterOpen(false);
@@ -371,7 +389,7 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
       <Box>
         <SectionHeader
           title="Monsters"
-          onBack={() => goToView('menu')}
+          onBack={lockedView ? undefined : () => goToView('menu')}
           addLabel="Add Monster"
           filterOpen={filterOpen}
           onToggleFilter={() => setFilterOpen((v) => !v)}
@@ -528,7 +546,7 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
       <Box>
         <SectionHeader
           title="Spells"
-          onBack={() => goToView('menu')}
+          onBack={lockedView ? undefined : () => goToView('menu')}
           addLabel="Add Spell"
           filterOpen={filterOpen}
           onToggleFilter={() => setFilterOpen((v) => !v)}
@@ -637,7 +655,7 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
     <Box>
       <SectionHeader
         title="Magic Items"
-        onBack={() => goToView('menu')}
+        onBack={lockedView ? undefined : () => goToView('menu')}
         addLabel="Add Item"
         filterOpen={filterOpen}
         onToggleFilter={() => setFilterOpen((v) => !v)}

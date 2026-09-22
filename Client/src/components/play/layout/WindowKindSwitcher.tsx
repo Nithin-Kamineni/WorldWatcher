@@ -43,7 +43,12 @@ export function WindowKindSwitcher({ kind, onSetKind, disabled }: WindowKindSwit
     <>
       <Tooltip title="Change window type">
         <span>
-          <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)} disabled={disabled}>
+          <IconButton
+            size="small"
+            aria-label={`Change window type (currently ${KIND_LABELS[kind]})`}
+            onClick={(e) => setAnchorEl(e.currentTarget)}
+            disabled={disabled}
+          >
             <CurrentIcon fontSize="small" color="action" />
           </IconButton>
         </span>

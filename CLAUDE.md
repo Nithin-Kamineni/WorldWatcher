@@ -7,6 +7,20 @@ session-running "Play" panel.
 Single developer, Windows, PowerShell. There is no CI, no test suite, and no
 staging environment — verification is type-check, lint, and running the app.
 
+## Showing progress
+
+**Every task prompt starts with a progress list, and that list is kept live.**
+This session has no `TodoWrite` tool, so the list is plain markdown in the
+reply: post it as soon as the plan is clear (before the first edit), then
+re-post the whole list whenever an item finishes, so the checkboxes advance
+while the prompt is still running rather than only at the end.
+
+- One line per step, `- [ ]` / `- [x]`, phrased as the work, not as the file.
+- Include the verification step (`tsc -b`, `oxlint`, `npm run build`, running
+  the app) as its own item - it is part of the task, not an afterthought.
+- If a step turns out to be blocked or deliberately skipped, mark it and say
+  why in the same line rather than dropping it off the list.
+
 ## Stack
 
 - **Client** — React 19 + TypeScript + Vite 8, MUI v9 (`@mui/material`),
@@ -73,11 +87,23 @@ against **Part A** (issues.txt numbering) and **Part B** (task numbering).
 The most important screen in the app, and the most machinery per pixel. Worth
 knowing before touching it:
 
-- `components/play/layout/playLayoutTrees.ts` — the 6 layouts as static
-  row/column split trees. `SplitPane.tsx` is the one generic renderer, and
-  `LayoutGlyph.tsx` draws each layout's toolbar icon *from the same tree*, so a
-  new layout gets a correct icon for free. Don't hand-pick an MUI icon for a
-  layout; that is how the old icons came to show the wrong pane counts.
+- `components/play/layout/playLayoutTrees.ts` — the 6 layouts as row/column
+  split trees, **presets that seed an editable copy, not fixed shapes**.
+  Splitting a pane writes to `usePlayLayoutStore.customTrees[layoutId]`; picking
+  the preset again or "Reset this layout" discards it. Read the live tree with
+  `getLayoutTree` / `getLayoutSlots` — never `PLAY_LAYOUTS[id].slots`, which
+  only describes the unedited preset. `SplitPane.tsx` is the one generic
+  renderer, and `LayoutGlyph.tsx` draws each preset's toolbar icon *from the
+  same tree*, so a new preset gets a correct icon for free. Don't hand-pick an
+  MUI icon for a layout; that is how the old icons came to show the wrong pane
+  counts. Slots are `p1`–`p8`; a split allocates the lowest free one.
+- **Both Play stores must tolerate older persisted records.**
+  `usePlayLayoutStore.resolve` and `usePlayItemsStore`'s `normalizeSlot` fill in
+  fields a record saved before a feature existed is missing. Skipping that is
+  how a change that merely *reads more* of the stored shape (a loop over all
+  sub-window kinds; a flag that now applies to every pane, not just chat ones)
+  took the Play page down twice on 2026-09-04. Verify such changes against a
+  hand-injected legacy record, not cleared storage.
 - `PaneHeader.tsx` owns `PANE_HEADER_HEIGHT` (40px) and every pane's chrome:
   kind switcher, truncating title, actions, close button — and it is the drag
   handle. All three pane bodies render it; none of them draws its own header.
@@ -90,10 +116,21 @@ knowing before touching it:
   for the assignment, `usePlayItemsStore` for the tab sets and pins.
 - **Items state is per pane slot, not per campaign** (`usePlayItemsStore`,
   persist version 2). Two Items windows must behave independently; anything you
-  add there takes a `slot`.
-- Random-table search and browse are ranked by relevance blended with recorded
-  usefulness (`tableSearch.ts` `rankTablesByUsefulness` + `useTableUsageStore`),
-  never alphabetically. Both random-table surfaces share it.
+  add there takes a `slot`. That slot is typed `ItemsSurface = PaneSlot |
+  'map'`, not `PaneSlot`: the map page's sidebar has a **Reference** section
+  rendering the same `ItemsWindow` on a fifth `'map'` surface, so the Items
+  window is no longer Play-only and a change there shows up in two places. It
+  is what lets a map token or an initiative row open its creature in the Stats
+  sub-window (`MapPage.showCreatureInReference`).
+- **Every Items sub-window is ranked by relevance blended with recorded
+  usefulness, never alphabetically, and never starts empty.** `tableSearch.ts`
+  holds the ranking (`usageScore` is the kind-agnostic half, `rankByUsefulness`
+  the generic ranker, `rankTablesByUsefulness` the table-flavoured one) and
+  `useItemUsageStore` the signals, keyed per campaign AND per `ItemsTabKind`.
+  All five sub-windows record an open on focus and a use on first expand, and
+  all five end in the shared `ItemsBrowseSection` (Browse heading, live count
+  chip, `BROWSE_PAGE` rows at a time, "Show N more" plus a scroll sentinel).
+  Add a sixth sub-window and it inherits all of that.
 
 ## Running it
 
@@ -143,20 +180,33 @@ global Python instead of the venv, producing confusing import errors.
 There are no tests. The real gates are:
 
 ```powershell
-cd Client; npx tsc --noEmit    # type-check   - clean, keep it that way
-cd Client; npx oxlint src      # lint         - warnings only, no errors
-cd Client; npx vite build      # bundle       - the build gate that passes
+cd Client; npx tsc -b          # type-check — clean, keep it that way
+cd Client; npx oxlint src      # lint       — 10 warnings, no errors
+cd Client; npm run build       # tsc -b + vite build, and it passes
 ```
 
-Note on the build: `npm run build` runs `tsc -b` first and **fails**, on 18
-pre-existing errors from a library-version mismatch (MUI v9 `slotProps`, Konva
-event types) in 11 files: the map popovers/layers, `NotesFolderExplorer`,
-`ArticleFolderTree`, `FactionRelationsField`, `CommandPalette`, `ComingSoon`
-and the world/maps pages. Tracked as `E9` in `checklist.txt`. `npx vite build`
-succeeds. Verified 2026-09-03: `npx tsc --noEmit` itself is clean — those
-errors only surface under `tsc -b`'s stricter project mode, so a `tsc --noEmit`
-error IS yours. Don't treat the 18 as regressions, and don't get drawn into
-fixing them mid-task.
+`npm run build` no longer produces one big bundle: every page in `routes.tsx`
+is a `React.lazy` import, so the entry chunk is ~197 kB (62 kB gzipped) across
+~114 chunks, with Konva in MapPage's chunk and TipTap in a shared editor one.
+Vite still warns about a chunk over 500 kB — that is the TipTap chunk, not a
+regression.
+
+**Do not use `npx tsc --noEmit` here.** The root `tsconfig.json` is a solution
+file — `"files": []` plus two project references — so a bare `tsc --noEmit`
+compiles **zero files** and exits 0 no matter what is broken (`tsc --noEmit
+--listFilesOnly` prints nothing). It was treated as the type-check gate for a
+long time and never checked anything. Use `npx tsc -b`, or
+`npx tsc --noEmit -p tsconfig.app.json` for the errors without build info.
+
+`npm run build` used to fail on 18 "pre-existing library-version mismatch"
+errors in 11 files. **They are all fixed as of 2026-09-04** and the build is
+green. They were never an unfixable mismatch — each was a MUI v9 API removal
+with a documented replacement (`<Stack justifyContent=>` → the same value in
+`sx`, `primaryTypographyProps` → `slotProps.primary`, `PaperProps` →
+`slotProps.paper`, Autocomplete's `params.InputProps` → `params.slotProps`),
+plus `JSX.Element` → `ReactElement` for React 19 and one real Konva typing on
+`onTap`. See `B0` / `E9` in `checklist.txt`. **A `tsc -b` error is now always
+yours.**
 
 For backend changes, hit the endpoint — the API serves interactive docs at
 `/docs`. For DB state, connect directly:
@@ -179,6 +229,10 @@ cd Server; .venv/Scripts/python.exe -m alembic upgrade head
   condition or CR must FK to the existing entity, with encounter-specific
   metadata (quantity, role, attitude) living on the join row. Free-text
   restatement of an entity is a bug.
+- **Chat messages and note/article bodies are all HTML** and all edited with
+  TipTap. `ChatComposer` is the one chat input (compose and edit), a small
+  subset of `TipTapArticleEditor`'s toolbar; `utils/bbcode.ts`'s `bbcodeToHtml`
+  now only renders *legacy* bodies, converted on open by `toEditorHtml`.
 - **Random tables have three orthogonal dimensions**, kept as three separate
   fields and never collapsed: exactly one `category` (a node in a browsable
   tree — what the table is about), many `tags` (faceted: `env:forest`,
@@ -196,6 +250,15 @@ cd Server; .venv/Scripts/python.exe -m alembic upgrade head
   relationships) are stored as newline-joined Text on the server and edited
   with `ItemListField` on the client. Reuse that pattern rather than inventing
   a new one.
+- **One UI scale, applied through the design system.** `theme/uiScale.ts`
+  holds `UI_SCALE` (default 0.6, persisted, changed in Settings) and `su(px)`;
+  `theme/layout.ts` holds every chrome measurement that scales. A new fixed
+  size that is part of the *chrome* goes through `su`. **Do not reach for CSS
+  `zoom` or `transform: scale`** - MUI v9 positions overlays through
+  `@popperjs/core` v2 and Popover's own rect math, neither of which compensates
+  for a scaled ancestor, so a tooltip lands 84px off its anchor and `100vh`
+  stops meaning the viewport. Measured; see `I-S` in `checklist.txt`. Map and
+  note-canvas geometry is excluded from scaling on purpose.
 - **Reuse before adding.** The codebase already has search bars, filter chip
   groups, pinnable rows, split panes and BBCode/TipTap editors. Look for the
   existing component before writing a parallel one.
@@ -205,8 +268,20 @@ cd Server; .venv/Scripts/python.exe -m alembic upgrade head
 
 ## Known dead weight
 
-The old random-table subsystems were replaced but their backend was never
-removed: `Server/app/models/situational_table.py` plus the
-`situational_tables.py` and `random_encounter_tables.py` routers are still
-registered in `api/router.py` while their client-side code is gone. Tracked as
-`E5` in `checklist.txt`. Don't build anything new on them.
+The old random-table subsystems' backend (`models/situational_table.py`, the
+`situational_tables.py` and `random_encounter_tables.py` routers and their
+schemas) is **gone** — deleted, and unregistered from `api/router.py`. That was
+`E5`, and it is done. Don't reintroduce them; random tables are one unified
+system now (`models/random_tables.py`).
+
+`components/layout/AppShell.tsx` has **no callers left**. It was the pre-redesign
+shell (a bare "WorldWatcher" AppBar); `MapPage` was the last page on it and moved to
+`SectionLayout` on 2026-09-22 (`M3` in `checklist.txt`). It is still in the tree, and
+two comments in `TutorialOverlay.tsx` / `tutorialSteps.ts` still point at it for the
+`data-tour` targets - `TopBar` carries `data-tour="navbar-brand"` now. Deleting it is a
+safe, separate cleanup; don't route a new page through it.
+
+`BBCodeEditor.tsx` is **gone** too, along with `utils/bbcode.ts`'s
+`BBCODE_TOOLBAR_TAGS` (its only remaining caller). That was `N7`. The rest of
+`utils/bbcode.ts` is very much alive: `bbcodeToHtml` renders chat messages and
+legacy note bodies, and `buildEntityRefTag` writes chat mentions.

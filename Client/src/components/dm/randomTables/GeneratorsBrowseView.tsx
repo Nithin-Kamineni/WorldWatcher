@@ -20,6 +20,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import EditIcon from '@mui/icons-material/Edit';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import InputOutlinedIcon from '@mui/icons-material/InputOutlined';
@@ -81,6 +82,7 @@ export function GeneratorsBrowseView({ campaignId }: GeneratorsBrowseViewProps) 
   const details = useGeneratorStore((s) => s.detailById);
   const search = useGeneratorStore((s) => s.search);
   const deleteGenerator = useGeneratorStore((s) => s.deleteGenerator);
+  const cloneGenerator = useGeneratorStore((s) => s.cloneGenerator);
   const fetchDetail = useGeneratorStore((s) => s.fetchDetail);
   const categories = useCategoryStore((s) => s.flat);
   const fetchTree = useCategoryStore((s) => s.fetchTree);
@@ -129,7 +131,7 @@ export function GeneratorsBrowseView({ campaignId }: GeneratorsBrowseViewProps) 
           {selectedGenerators.length === 0 ? <Paper variant="outlined" sx={{ p: 6, textAlign: 'center', borderStyle: 'dashed' }}><SearchIcon sx={{ fontSize: 46, color: 'text.disabled' }} /><Typography variant="h6">No generators in this branch</Typography></Paper> : selectedGenerators.map((generator) => {
             const isExpanded = expanded.has(generator.id);
             const detail = details[generator.id];
-            return <Paper key={generator.id} variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper' }}><Stack direction="row" spacing={1.25} sx={{ p: 1.5, alignItems: 'center' }}><IconButton onClick={() => void toggle(generator)}>{isExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}</IconButton><Box onClick={() => void toggle(generator)} sx={{ flexGrow: 1, minWidth: 0, cursor: 'pointer' }}><Stack direction="row" spacing={1}><Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{generator.name}</Typography>{generator.isSystem && <Chip size="small" label="Curated" />}</Stack><Typography variant="body2" color="text.secondary" noWrap>{generator.description || generator.combineTemplate}</Typography></Box><Tooltip title="Run"><IconButton color="primary" onClick={() => setRunTarget(generator)}><AutoAwesomeIcon /></IconButton></Tooltip>{!generator.isSystem && <><Tooltip title="Edit"><IconButton onClick={() => void openEdit(generator)}><EditIcon /></IconButton></Tooltip><Tooltip title="Delete"><IconButton onClick={() => setDeleteTarget(generator)}><DeleteOutlineIcon /></IconButton></Tooltip></>}</Stack>{isExpanded && <><Divider />{detail ? <Box sx={{ p: 2 }}><GeneratorFullView generator={detail} tableResultKey={tableResultKey} /></Box> : <LinearProgress />}</>}</Paper>;
+            return <Paper key={generator.id} variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper' }}><Stack direction="row" spacing={1.25} sx={{ p: 1.5, alignItems: 'center' }}><IconButton onClick={() => void toggle(generator)}>{isExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}</IconButton><Box onClick={() => void toggle(generator)} sx={{ flexGrow: 1, minWidth: 0, cursor: 'pointer' }}><Stack direction="row" spacing={1}><Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{generator.name}</Typography>{generator.isSystem && <Chip size="small" label="Curated" />}</Stack><Typography variant="body2" color="text.secondary" noWrap>{generator.description || generator.combineTemplate}</Typography></Box><Tooltip title="Run"><IconButton color="primary" onClick={() => setRunTarget(generator)}><AutoAwesomeIcon /></IconButton></Tooltip><Tooltip title={generator.isSystem ? 'Copy to edit - curated generators are read-only' : 'Copy generator'}><IconButton onClick={() => void cloneGenerator(generator.id, campaignId).then(refresh)}><ContentCopyIcon /></IconButton></Tooltip>{!generator.isSystem && <><Tooltip title="Edit"><IconButton onClick={() => void openEdit(generator)}><EditIcon /></IconButton></Tooltip><Tooltip title="Delete"><IconButton onClick={() => setDeleteTarget(generator)}><DeleteOutlineIcon /></IconButton></Tooltip></>}</Stack>{isExpanded && <><Divider />{detail ? <Box sx={{ p: 2 }}><GeneratorFullView generator={detail} tableResultKey={tableResultKey} /></Box> : <LinearProgress />}</>}</Paper>;
           })}
         </Stack>
       </Drawer>

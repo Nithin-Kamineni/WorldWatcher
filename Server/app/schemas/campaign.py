@@ -283,31 +283,6 @@ class FactionRelationUpdate(BaseModel):
     notes: Optional[str] = None
 
 
-class RandomEncounterTableRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    campaign_id: uuid.UUID
-    name: str
-    die_expression: str
-    entries: Optional[Any] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class RandomEncounterTableCreate(BaseModel):
-    campaign_id: uuid.UUID
-    name: str
-    die_expression: str = "1d8"
-    entries: Optional[Any] = None
-
-
-class RandomEncounterTableUpdate(BaseModel):
-    campaign_id: Optional[uuid.UUID] = None
-    name: Optional[str] = None
-    die_expression: Optional[str] = None
-    entries: Optional[Any] = None
-
-
 class QuestRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

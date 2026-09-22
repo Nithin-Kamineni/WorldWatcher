@@ -126,7 +126,7 @@ export function CommandPalette({ worldId, campaignId }: CommandPaletteProps) {
       list.push({ id: 'go-notes-quests', group: 'Go to', label: 'Notes - Quests', onSelect: () => go(`/w/${worldId}/c/${campaignId}/notes?tab=quests`) });
       list.push({ id: 'go-encounters', group: 'Go to', label: 'Encounters', onSelect: () => go(`/w/${worldId}/c/${campaignId}/encounters`) });
       list.push({ id: 'go-maps', group: 'Go to', label: 'Maps', onSelect: () => go(`/w/${worldId}/c/${campaignId}/maps`) });
-      list.push({ id: 'go-characters', group: 'Go to', label: 'Characters', sublabel: 'Coming soon', onSelect: () => go(`/w/${worldId}/manager?folder=characters`) });
+      list.push({ id: 'go-characters', group: 'Go to', label: 'Characters', onSelect: () => go(`/w/${worldId}/manager?folder=characters`) });
       list.push({ id: 'go-bastions', group: 'Go to', label: 'Bastions', onSelect: () => go(`/w/${worldId}/manager?folder=places-bastions`) });
       list.push({
         id: 'go-campaign-settings',
@@ -231,7 +231,7 @@ export function CommandPalette({ worldId, campaignId }: CommandPaletteProps) {
   const groups: PaletteEntry['group'][] = ['Go to', 'Jump to', 'Actions'];
 
   return (
-    <Dialog open={open} onClose={close} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+    <Dialog open={open} onClose={close} maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
         <SearchIcon color="disabled" />
         <InputBase

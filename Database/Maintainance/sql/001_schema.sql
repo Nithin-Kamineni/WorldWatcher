@@ -164,10 +164,13 @@ CREATE TRIGGER trg_articles_updated_at BEFORE UPDATE ON articles
 -- Campaign-scoped sibling of article_folders/articles - backs the Notes rail
 -- section's "Folders" toggle (session-prep sheets, narrative/arc-planning
 -- entries, and freeform notes organized into a file-explorer-style tree).
--- Two note_folders rows per campaign (Sessions/Narratives) are seeded lazily
--- by the frontend on first visit, not by this schema - is_default/
--- default_kind mark those two as protected from rename/delete (also
--- enforced server-side, see app/api/routers/notes.py).
+-- Three note_folders rows per campaign are seeded lazily by the frontend on
+-- first visit, not by this schema: the Sessions and Narratives roots, plus
+-- "DM Notes" as a CHILD of Sessions (default_kind 'dm_notes'), which lists
+-- the campaign's session_chats rows instead of notes - see the client's
+-- NotesFolderExplorer. is_default/default_kind mark all three as protected
+-- from rename/delete (also enforced server-side, see
+-- app/api/routers/notes.py).
 CREATE TABLE IF NOT EXISTS note_folders (
   id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   campaign_id    UUID          NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
@@ -190,11 +193,22 @@ CREATE TABLE IF NOT EXISTS notes (
   folder_id      UUID          NULL REFERENCES note_folders (id) ON DELETE SET NULL,
   name           TEXT          NOT NULL,
   kind           TEXT          NULL,
+  -- Which editor opens this file: 'text' (the HTML body), 'whiteboard' or 'tree' (the
+  -- canvas JSONB). Orthogonal to `kind`, which says what a TEXT note is for.
+  doc_type       TEXT          NOT NULL DEFAULT 'text',
   body           TEXT          NOT NULL DEFAULT '',
+  -- Whole whiteboard/tree document: items + connections, or nodes + links, plus the
+  -- remembered pan/zoom. See Client/src/types/noteCanvas.ts for the shape.
+  canvas         JSONB         NOT NULL DEFAULT '{}'::jsonb,
   tags           JSONB         NOT NULL DEFAULT '[]'::jsonb,
   created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
+-- Idempotent re-run against a database created before the canvas note types existed.
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS doc_type TEXT NOT NULL DEFAULT 'text';
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS canvas JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE notes DROP CONSTRAINT IF EXISTS notes_doc_type_check;
+ALTER TABLE notes ADD CONSTRAINT notes_doc_type_check CHECK (doc_type IN ('text','whiteboard','tree'));
 CREATE INDEX IF NOT EXISTS notes_campaign_id_idx ON notes (campaign_id);
 CREATE INDEX IF NOT EXISTS notes_folder_id_idx ON notes (folder_id);
 DROP TRIGGER IF EXISTS trg_notes_updated_at ON notes;
@@ -631,24 +645,13 @@ CREATE TRIGGER trg_quests_updated_at BEFORE UPDATE ON quests
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ============================================================
--- 14b. random_encounter_tables
--- DM-built grouping of existing encounters into a table the DM rolls a die
--- against to pick one. Distinct from encounters.tables/resolution_type, which
--- is importer-owned reference data for 5etools' own random-encounter tables.
+-- 14b. random_encounter_tables - REMOVED
+-- Superseded by random_tables (section 25b). The table, its model and its
+-- router were dropped in migration a8e2d5c1f9b3; a re-run of this file must
+-- not recreate it, so the DROP below keeps a database seeded from an older
+-- copy of this schema consistent with the migrated one.
 -- ============================================================
-CREATE TABLE IF NOT EXISTS random_encounter_tables (
-  id              UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  campaign_id     UUID        NOT NULL REFERENCES campaigns (id),
-  name            TEXT        NOT NULL,
-  die_expression  TEXT        NOT NULL DEFAULT '1d8',
-  entries         JSONB       NULL,  -- [{ "id": "...", "encounter_id": "..." }, ...], array order = table order
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS random_encounter_tables_campaign_id_idx ON random_encounter_tables (campaign_id);
-DROP TRIGGER IF EXISTS trg_random_encounter_tables_updated_at ON random_encounter_tables;
-CREATE TRIGGER trg_random_encounter_tables_updated_at BEFORE UPDATE ON random_encounter_tables
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TABLE IF EXISTS random_encounter_tables CASCADE;
 
 -- ============================================================
 -- 15. maps
@@ -778,7 +781,9 @@ CREATE TABLE IF NOT EXISTS table_formats (
 -- (created before map_floors.locked_encounter_id FK, which is added later.
 --  Extended with the shared "run layer" fields from Task 7.3: primary_type/
 --  category_id/status/read_aloud/objective/party assumptions/scaling_notes/
---  location_id/rewards. `notes` above continues to serve as dm_notes -
+--  location_id. Rewards moved out to encounter_rewards (Task 11.1) so a
+--  reward of kind='item' FKs the magic item instead of naming it in free
+--  text. `notes` above continues to serve as dm_notes -
 --  read_aloud is the new player-facing counterpart, kept as a separate
 --  column per Task 7.3's explicit "kept SEPARATE from dm_notes".)
 -- ============================================================
@@ -815,7 +820,10 @@ CREATE TABLE IF NOT EXISTS encounters (
   party_size                    INTEGER     NULL,
   scaling_notes                 TEXT        NULL,
   location_id                   UUID        NULL REFERENCES locations (id),
-  rewards                        JSONB       NULL,
+  -- Task 11.2: encounters -> generators, the composite-generator counterpart of
+  -- encounter_exploration_blocks.wandering_table_id. generators is created further
+  -- down this file, so the FK itself is added in the deferred-FK block at the end.
+  generator_id                  UUID        NULL,
   created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1160,6 +1168,32 @@ CREATE TABLE IF NOT EXISTS map_shapes (
 CREATE INDEX IF NOT EXISTS map_shapes_map_floor_id_idx ON map_shapes (map_floor_id);
 
 -- ============================================================
+-- 21b. encounter_rewards
+-- Task 11.1: what an encounter pays out, one row per reward. Replaces the
+-- encounters.rewards JSONB array, whose kind='item' entries named a magic
+-- item in free text - a restatement of a row that already exists in `items`
+-- and the clearest breach of this schema's reference-never-duplicate rule.
+-- item_id is nullable because the other reward kinds (currency, information,
+-- favor, experience) have nothing to point at, and so a DM can write down an
+-- item the compendium doesn't hold yet. `description` survives for what the
+-- item row can't carry ("and a note pinned to the hilt"); for an item reward
+-- with item_id set, the item's own name is authoritative.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS encounter_rewards (
+  id            UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  encounter_id  UUID        NOT NULL REFERENCES encounters (id) ON DELETE CASCADE,
+  kind          TEXT        NOT NULL DEFAULT 'other'
+    CHECK (kind IN ('currency','item','information','favor','experience','other')),
+  item_id       UUID        NULL REFERENCES items (id),
+  description   TEXT        NOT NULL DEFAULT '',
+  quantity      INTEGER     NOT NULL DEFAULT 1,
+  sort_order    INTEGER     NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_encounter_rewards_encounter_id ON encounter_rewards (encounter_id);
+CREATE INDEX IF NOT EXISTS ix_encounter_rewards_item_id ON encounter_rewards (item_id);
+
+-- ============================================================
 -- 22. combats
 -- ============================================================
 CREATE TABLE IF NOT EXISTS combats (
@@ -1431,34 +1465,15 @@ CREATE TABLE IF NOT EXISTS random_settlement_rumors_hooks (
 );
 
 -- ============================================================
--- 29. situational_tables
+-- 29. situational_tables - REMOVED
 -- ============================================================
--- Curated, hand-authored non-combat roleplay/exploration random tables for
--- the Encounters section's "Roleplay & Exploration" tab (e.g. a themed
--- "Darkwood Forest" table with linked encounter/behavior/complication
--- columns, each independently rolled and combined into a scene prompt).
--- Read-only reference content seeded by
--- Database/Maintainance/scripts/seed_situational_tables.py, same precedent
--- as the flat random_* bank tables above - no write endpoints, no FK to
--- anything. `columns` is JSONB (array of {key,label,dieSize,entries:
--- [{roll,text}]}) rather than normalized join tables since this is
--- hand-authored content that only needs to render, not be queried
--- relationally.
-CREATE TABLE IF NOT EXISTS situational_tables (
-  id             UUID          NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  name           TEXT          NOT NULL,
-  theme          TEXT          NOT NULL,
-  tags           JSONB         NOT NULL DEFAULT '[]'::jsonb,
-  description    TEXT          NOT NULL DEFAULT '',
-  source         TEXT          NOT NULL DEFAULT '',
-  columns        JSONB         NOT NULL,
-  created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS situational_tables_theme_idx ON situational_tables (theme);
-DROP TRIGGER IF EXISTS trg_situational_tables_updated_at ON situational_tables;
-CREATE TRIGGER trg_situational_tables_updated_at BEFORE UPDATE ON situational_tables
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- The curated roleplay/exploration tables were migrated into random_tables
+-- (section 25b) and the table, model, schema and router were dropped in
+-- migration a8e2d5c1f9b3. NOTE for anyone grepping the client: the string
+-- 'situational_table' is still alive there as a legacy EntityRefType alias
+-- for random tables, baked into [ref] markup already stored in users' note
+-- bodies - it is not a use of this table and must not be renamed.
+DROP TABLE IF EXISTS situational_tables CASCADE;
 
 -- ============================================================
 -- Deferred FKs (mutual references resolved after all tables exist)
@@ -1484,6 +1499,13 @@ BEGIN
   ) THEN
     ALTER TABLE map_floors
       ADD CONSTRAINT map_floors_locked_encounter_id_fkey FOREIGN KEY (locked_encounter_id) REFERENCES encounters (id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'encounters_generator_id_fkey'
+  ) THEN
+    ALTER TABLE encounters
+      ADD CONSTRAINT encounters_generator_id_fkey FOREIGN KEY (generator_id) REFERENCES generators (id);
   END IF;
 END $$;
 

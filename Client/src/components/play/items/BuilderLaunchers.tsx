@@ -18,7 +18,7 @@ import { useCreatureStore } from '../../../store/useCreatureStore';
 import { useEncounterStore } from '../../../store/useEncounterStore';
 import { useEncounterDifficultySettingsStore } from '../../../store/useEncounterDifficultySettingsStore';
 import { usePlayItemsStore } from '../../../store/usePlayItemsStore';
-import type { PaneSlot } from '../layout/playLayoutTrees';
+import type { ItemsSurface } from '../layout/playLayoutTrees';
 import type { Creature } from '../../../types/creature';
 
 /** Quick access to the NPC / Place / Encounter builders from inside the Play page's Items
@@ -164,7 +164,7 @@ export function NpcBuilderLauncher({ worldId, campaignId }: { worldId: string; c
 /** Place Builder - rolls a country/settlement/building/dungeon into a structured world
  * article. The new article lands in this world's catalog, which is what the Places sub-window
  * already browses, so it shows up as soon as it is created. */
-export function PlaceBuilderLauncher({ worldId, campaignId, slot }: { worldId: string; campaignId: string; slot: PaneSlot }) {
+export function PlaceBuilderLauncher({ worldId, campaignId, slot }: { worldId: string; campaignId: string; slot: ItemsSurface }) {
   const [open, setOpen] = useState(false);
   const focusItem = usePlayItemsStore((s) => s.focusItem);
 
@@ -195,7 +195,7 @@ export function PlaceBuilderLauncher({ worldId, campaignId, slot }: { worldId: s
 /** Encounter Builder - rolls a combat/social/exploration scene against the assumed party, then
  * drops it into this campaign and selects it in the Encounters sub-window so it is immediately
  * on screen. */
-export function EncounterBuilderLauncher({ campaignId, slot }: { campaignId: string; slot: PaneSlot }) {
+export function EncounterBuilderLauncher({ campaignId, slot }: { campaignId: string; slot: ItemsSurface }) {
   const [open, setOpen] = useState(false);
   const addEncounterToCampaign = useEncounterStore((s) => s.addEncounterToCampaign);
   const party = useEncounterDifficultySettingsStore((s) => s.getParty(campaignId));
@@ -230,7 +230,7 @@ export function EncounterBuilderLauncher({ campaignId, slot }: { campaignId: str
 /** The Random Tables sub-window's own strip - all three builders together, since that tab is
  * where a DM goes to "roll something up" and shouldn't have to know which of the other tabs
  * owns which builder. */
-export function AllBuilderLaunchers({ worldId, campaignId, slot }: { worldId: string; campaignId: string; slot: PaneSlot }) {
+export function AllBuilderLaunchers({ worldId, campaignId, slot }: { worldId: string; campaignId: string; slot: ItemsSurface }) {
   return (
     <>
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', mb: 0.75, mt: 0.25 }}>

@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import type { SxProps, Theme } from '@mui/material/styles';
 import { bbcodeToHtml, type EntityRefType } from '../../utils/bbcode';
+import { TipTapArticleEditor } from '../world/richtext/TipTapArticleEditor';
+import { isLikelyHtml } from '../world/richtext/bbcodeMigration';
 import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatureStore';
 import { useSpellStore, getSpellsForCampaign } from '../../store/useSpellStore';
 import { useEncounterStore, getEncountersForCampaign } from '../../store/useEncounterStore';
@@ -10,7 +12,7 @@ import { useFactionStore, getFactionsForCampaign } from '../../store/useFactionS
 import { useArticleStore, getArticleById } from '../../store/useArticleStore';
 import { usePlayLayoutStore, getPlayLayoutState } from '../../store/usePlayLayoutStore';
 import { usePlayItemsStore, mapEntityRefToItemsTarget } from '../../store/usePlayItemsStore';
-import { PLAY_LAYOUTS } from '../play/layout/playLayoutTrees';
+import { getLayoutSlots } from '../../store/usePlayLayoutStore';
 import { CreatureStatBlockDialog } from '../dm/CreatureStatBlockDialog';
 import { SpellDetailDialog } from '../dm/SpellDetailDialog';
 import { FactionPreviewCard } from './FactionPreviewCard';
@@ -35,15 +37,27 @@ interface EntityRefPreviewProps {
    * ChatPanel/SessionNotesPanel (both exclusively rendered inside the Play workspace) pass
    * this - every other renderer of notes keeps today's single-click behavior. */
   enableItemsWindowFocus?: boolean;
+  /** Makes the body's checklist boxes tickable from this READING view and saves the result -
+   * the DM ticks off a session-prep item mid-session without switching to Write (checklist
+   * I-N2). Omit it and the boxes render, but refuse the tick rather than showing one that
+   * cannot be saved. Only reaches HTML bodies; legacy BBCode ones have no checklists. */
+  onBodyChange?: (html: string) => void;
 }
 
-/** Renders a note's BBCode body and makes every @-mention inside it clickable, wiki-style:
+/** Renders a note's body and makes every @-mention inside it clickable, wiki-style:
  * NPC/Creature/Spell/Faction/Encounter mentions pop the same card dialogs used elsewhere in
  * the DM Panel; Place mentions navigate to the full Article page with a `returnTo` back-link
  * to this note (see ArticleDetailPage). Uses one delegated click/keydown handler on the
  * rendered-HTML container rather than per-mention React handlers, since the mentions are
- * injected via dangerouslySetInnerHTML and aren't real React elements. */
-export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOpenSituationalTable, enableItemsWindowFocus }: EntityRefPreviewProps) {
+ * injected via dangerouslySetInnerHTML and aren't real React elements.
+ *
+ * Two body formats reach this component. Legacy BBCode bodies are converted with
+ * bbcodeToHtml and injected as HTML, exactly as before. Bodies saved by the rich text editor
+ * are ALREADY HTML, and are rendered by TipTap's own read-only render (the same one
+ * ArticleContentView uses) rather than injected - that keeps custom blocks (collapsible,
+ * secret, button) working and avoids feeding stored markup to dangerouslySetInnerHTML. Either
+ * way the mentions end up as the same `span.ww-ref`, so the click delegation below is shared. */
+export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOpenSituationalTable, enableItemsWindowFocus, onBodyChange }: EntityRefPreviewProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const pendingClickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +103,11 @@ export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOp
         if (article) goToArticle(article.id);
         break;
       }
+      case 'map':
+        // Straight to the map page with this map open. A map is a whole screen, not something
+        // that fits in a preview dialog - which is exactly why Play does not host one (P5).
+        navigate(`/w/${worldId}/c/${campaignId}/maps/${id}`);
+        break;
       case 'situational_table':
         onOpenSituationalTable?.(id);
         break;
@@ -102,7 +121,7 @@ export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOp
       return;
     }
     const layoutState = getPlayLayoutState(layoutByCampaignId, campaignId);
-    const slots = PLAY_LAYOUTS[layoutState.layoutId].slots;
+    const slots = getLayoutSlots(layoutState, layoutState.layoutId);
     const slot = ensureItemsPane(campaignId, layoutState.layoutId, slots);
     focusItemInTab(campaignId, slot, target.kind, target.itemId);
   };
@@ -151,6 +170,12 @@ export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOp
     openRef(el.dataset.refType as EntityRefType, el.dataset.refId);
   };
 
+  // Either children (rich text render) or dangerouslySetInnerHTML (legacy BBCode) - never
+  // both, which React rejects outright.
+  const bodyProps = isLikelyHtml(body)
+    ? { children: <TipTapArticleEditor value={body} editable={false} onChange={onBodyChange} /> }
+    : { dangerouslySetInnerHTML: { __html: bbcodeToHtml(body) } };
+
   const openCreature = openCreatureId ? (creatures.find((c) => c.id === openCreatureId) ?? null) : null;
   const openSpell = openSpellId ? (spells.find((s) => s.id === openSpellId) ?? null) : null;
   const openFaction = openFactionId ? (factions.find((f) => f.id === openFactionId) ?? null) : null;
@@ -173,7 +198,7 @@ export function EntityRefPreview({ body, worldId, campaignId, noteName, sx, onOp
           },
           ...sx,
         }}
-        dangerouslySetInnerHTML={{ __html: bbcodeToHtml(body) }}
+        {...bodyProps}
       />
 
       <CreatureStatBlockDialog

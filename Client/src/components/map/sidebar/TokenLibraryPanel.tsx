@@ -23,6 +23,8 @@ import { SizeControl } from '../SizeControl';
 import { TokenThumbnail } from '../TokenThumbnail';
 import type { Creature } from '../../../types/creature';
 import type { TokenDefinition } from '../../../types/token';
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
+import { SectionHeader } from '../../shell/SectionHeader';
 import { TOKEN_DRAG_MIME, FAVORITE_CREATURE_DRAG_MIME } from '../../../utils/tokenDrag';
 
 /** Server caps `limit` at 500 (see Server/app/api/utils.py's PaginationDep) - a library of
@@ -127,10 +129,8 @@ export function TokenLibraryPanel({ campaignId }: TokenLibraryPanelProps) {
 
   return (
     <Stack sx={{ height: '100%' }}>
-      <Box sx={{ p: 2, pb: 1 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-          Tokens
-        </Typography>
+      <SectionHeader icon={<PeopleAltIcon fontSize="small" />} title="Tokens" />
+      <Box sx={{ p: 1.25 }}>
         <TextField
           size="small"
           fullWidth

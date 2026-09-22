@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Box from '@mui/material/Box';
@@ -16,9 +17,14 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
+import Collapse from '@mui/material/Collapse';
 import BadgeIcon from '@mui/icons-material/Badge';
+import GroupsIcon from '@mui/icons-material/Groups';
+import PublicIcon from '@mui/icons-material/Public';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
+import HistoryIcon from '@mui/icons-material/History';
 import FolderIcon from '@mui/icons-material/Folder';
-import PersonIcon from '@mui/icons-material/Person';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import TableRowsIcon from '@mui/icons-material/TableRows';
 import AddIcon from '@mui/icons-material/Add';
@@ -27,7 +33,6 @@ import CasinoIcon from '@mui/icons-material/Casino';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import { SectionLayout } from '../../components/shell/SectionLayout';
@@ -35,9 +40,9 @@ import { ComingSoon } from '../../components/shell/ComingSoon';
 import { Breadcrumbs } from '../../components/layout/Breadcrumbs';
 import { NpcsSection } from '../../components/dm/NpcsSection';
 import { FactionsSection } from '../../components/dm/FactionsSection';
+import { CompendiumSection } from '../../components/dm/CompendiumSection';
 import { BastionsSection } from '../../components/dm/BastionsSection';
 import { FilterChipGroup } from '../../components/dm/FilterChipGroup';
-import { ArticleFolderTree } from '../../components/world/ArticleFolderTree';
 import { ArticleGridStage, type ArticleGridStageHandle } from '../../components/world/ArticleGridStage';
 import { ArticleTable } from '../../components/world/ArticleTable';
 import { PlaceBuilderDialog, type PlaceType } from '../../components/world/PlaceBuilderDialog';
@@ -55,17 +60,31 @@ import {
 import { ARTICLE_TEMPLATES, type ArticleCategory } from '../../types/article';
 
 type Folder =
+  | 'people'
   | 'npcs'
   | 'deities'
   | 'characters'
+  | 'monsters'
   | 'places'
   | 'places-countries'
   | 'places-settlements'
   | 'places-buildings'
   | 'places-dungeons'
+  | 'places-geography'
   | 'places-bastions'
   | 'factions'
-  | 'items'
+  | 'factions-articles'
+  | 'factions-guilds'
+  | 'factions-cults'
+  | 'factions-noble-houses'
+  | 'factions-criminal'
+  | 'factions-military-orders'
+  | 'factions-religious-orders'
+  | 'codex'
+  | 'codex-items'
+  | 'codex-magic-items'
+  | 'codex-spells'
+  | 'codex-lore'
   | 'articles'
   | 'all'
   | 'recent';
@@ -74,53 +93,117 @@ interface FolderItemDef {
   key: Folder;
   label: string;
   comingSoon?: boolean;
-  /** Set on Places' 4 sub-items - the article categories this item's table is scoped to. */
+  /** The article categories this item's table is scoped to - set on every sub-item backed by
+   * world articles (Places' 4, People's Characters/Deities, Codex's Items/Lore). */
   categories?: ArticleCategory[];
+  /** Set on the sub-items backed by the campaign Compendium's catalogs rather than by world
+   * articles: Monsters under People, Spells and Magic Items under Codex. Renders a
+   * <CompendiumSection> pinned to that one catalog. */
+  compendium?: 'monsters' | 'spells' | 'items';
+  /** Set on Factions' 6 type sub-items - the `Faction.factionType` value stored on the row,
+   * which must stay in step with FACTION_TYPE_PRESETS in types/faction.ts. */
+  factionType?: string;
 }
 
 interface FolderGroupDef {
   group: string;
-  /** Set only for groups where the heading itself is a real content view (Places' combined
-   * table across all 4 categories) - clicking the heading text navigates here in addition to
-   * expanding. Groups without one (People/Factions/Items & lore) just expand on click. */
+  /** Shown at the head of the group row. The sidebar read as four near-identical grey
+   * captions without these. */
+  icon: ReactNode;
+  /** The folder key the heading text itself navigates to. Every group has one now: clicking
+   * "People", "Places", "Factions" or "Codex" shows everything in that group, the way
+   * clicking Places always has, in addition to expanding the group. */
   headingKey?: Folder;
+  /** The article categories the *heading's* combined table spans. Absent on Factions, whose
+   * content comes from the faction store rather than from articles - its heading renders the
+   * unscoped FactionsSection instead. */
   categories?: ArticleCategory[];
+  /** Label for the Create button on the heading's combined view, where no single article
+   * category is in scope to name it after. */
+  createLabel?: string;
+  /** Places only - whether to show the Place Builder promo above the table. */
+  placeBuilder?: boolean;
   items: FolderItemDef[];
 }
 
 /** Sidebar structure for the context sidebar's collapsible group headings (People/Places/
- * Factions/Items & lore) - each group expands independently on click, revealing its items.
- * Places is the one group whose heading is itself a navigable combined-categories table. */
+ * Factions/Codex). The groups behave as an accordion - at most one is open at a time, and
+ * opening one closes the other three - and each heading is itself a navigable "everything in
+ * this group" view.
+ *
+ * Note what a group's *heading* can span: for the three article-backed groups it is a
+ * combined table over `categories`, which covers the article-backed children only. Children
+ * backed by something else - Bastions, and the Compendium-backed Monsters/Spells/Magic Items
+ * - sit outside that combined table and are reachable as their own views, the arrangement
+ * Bastions has always had under Places. */
 const FOLDER_TREE: FolderGroupDef[] = [
   {
     group: 'People',
+    icon: <GroupsIcon fontSize="small" />,
+    headingKey: 'people',
+    categories: ['character', 'deity'],
+    createLabel: 'Create person',
     items: [
       { key: 'npcs', label: 'NPCs' },
-      { key: 'characters', label: 'Characters' },
-      { key: 'deities', label: 'Deities', comingSoon: true },
+      { key: 'characters', label: 'Characters', categories: ['character'] },
+      { key: 'deities', label: 'Deities', categories: ['deity'] },
+      { key: 'monsters', label: 'Monsters', compendium: 'monsters' },
     ],
   },
   {
     group: 'Places',
+    icon: <PublicIcon fontSize="small" />,
     headingKey: 'places',
-    categories: ['country', 'settlement', 'building', 'dungeon'],
+    categories: ['country', 'settlement', 'building', 'dungeon', 'geography'],
+    createLabel: 'Create place',
+    placeBuilder: true,
     items: [
       { key: 'places-countries', label: 'Countries', categories: ['country'] },
       { key: 'places-settlements', label: 'Settlements', categories: ['settlement'] },
       { key: 'places-buildings', label: 'Buildings', categories: ['building'] },
       { key: 'places-dungeons', label: 'Dungeons', categories: ['dungeon'] },
+      { key: 'places-geography', label: 'Geography', categories: ['geography'] },
       { key: 'places-bastions', label: 'Bastions' },
     ],
   },
   {
     group: 'Factions',
-    items: [{ key: 'factions', label: 'Factions' }],
+    icon: <AccountBalanceIcon fontSize="small" />,
+    headingKey: 'factions',
+    items: [
+      { key: 'factions-guilds', label: 'Guilds', factionType: 'Guild' },
+      { key: 'factions-cults', label: 'Cults', factionType: 'Cult' },
+      { key: 'factions-noble-houses', label: 'Noble Houses', factionType: 'Noble House' },
+      { key: 'factions-criminal', label: 'Criminal Organizations', factionType: 'Criminal Organization' },
+      { key: 'factions-military-orders', label: 'Military Orders', factionType: 'Military Order' },
+      { key: 'factions-religious-orders', label: 'Religious Orders', factionType: 'Religious Order' },
+      // The article-backed member of this group, so category-'faction' articles have a home:
+      // the heading and the 6 type views all list faction *store* rows, which would otherwise
+      // leave every Faction article reachable only from the Articles tree / All entries. These
+      // are what the faction form's "also create a world article" checkbox and the faction
+      // card's "Add article" button write.
+      { key: 'factions-articles', label: 'Faction articles', categories: ['faction'] },
+    ],
   },
   {
-    group: 'Items & lore',
-    items: [{ key: 'items', label: 'Items & lore', comingSoon: true }],
+    group: 'Codex',
+    icon: <MenuBookIcon fontSize="small" />,
+    headingKey: 'codex',
+    categories: ['item', 'spell', 'plot', 'event'],
+    createLabel: 'Create codex entry',
+    items: [
+      { key: 'codex-items', label: 'Items', categories: ['item'] },
+      { key: 'codex-magic-items', label: 'Magic Items', compendium: 'items' },
+      { key: 'codex-spells', label: 'Spells', compendium: 'spells' },
+      { key: 'codex-lore', label: 'Lore', categories: ['plot', 'event'] },
+    ],
   },
 ];
+
+/** The Places categories PlaceBuilderDialog can actually build - its own PlaceType union, so
+ * TypeScript rejects this list drifting out of step with it. Geography is deliberately absent:
+ * it is a Places category with no builder facets behind it. */
+const PLACE_BUILDER_TYPES: PlaceType[] = ['country', 'settlement', 'building', 'dungeon'];
 
 function getFolderLabel(key: Folder): string | undefined {
   for (const g of FOLDER_TREE) {
@@ -131,8 +214,23 @@ function getFolderLabel(key: Folder): string | undefined {
   return undefined;
 }
 
-/** The article categories a folder key is scoped to, if any - set on Places' heading and its
- * 4 children, undefined for every other folder key. */
+/** The group a folder key belongs to, whether it is the group's heading or one of its items. */
+function getFolderGroup(key: Folder): FolderGroupDef | undefined {
+  return FOLDER_TREE.find((g) => g.headingKey === key || g.items.some((i) => i.key === key));
+}
+
+/** The sub-item def for a folder key - undefined for group headings and for the keys outside
+ * the tree entirely (articles/all/recent). */
+function getFolderItem(key: Folder): FolderItemDef | undefined {
+  for (const g of FOLDER_TREE) {
+    const item = g.items.find((i) => i.key === key);
+    if (item) return item;
+  }
+  return undefined;
+}
+
+/** The article categories a folder key is scoped to, if any - undefined for keys backed by
+ * something other than articles (NPCs, Bastions, the faction views, the Compendium views). */
 function getFolderCategories(key: Folder): ArticleCategory[] | undefined {
   for (const g of FOLDER_TREE) {
     if (g.headingKey === key) return g.categories;
@@ -146,26 +244,24 @@ export function WorldManagerPage() {
   const { worldId } = useParams<{ worldId: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const folder = (searchParams.get('folder') as Folder | null) ?? 'articles';
+  /** People is the World manager's landing view. It used to be 'articles' (the all-articles
+   * table), but that view lost its sidebar entry when the Articles folder tree was removed,
+   * which left the front door pointing at a view nothing in the nav could select. */
+  const folder = (searchParams.get('folder') as Folder | null) ?? 'people';
   const mode = (searchParams.get('mode') as 'hybrid' | 'table' | null) ?? 'hybrid';
   const articleFolderId = searchParams.get('afid');
-  const [folderSearch, setFolderSearch] = useState('');
   const [articleSearch, setArticleSearch] = useState('');
   const [articleCategoryFilter, setArticleCategoryFilter] = useState<ArticleCategory[]>([]);
   const [articleFilterBarOpen, setArticleFilterBarOpen] = useState(false);
   const [placeBuilderOpen, setPlaceBuilderOpen] = useState(false);
   const gridRef = useRef<ArticleGridStageHandle>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
-    const owner = FOLDER_TREE.find((g) => g.headingKey === folder || g.items.some((i) => i.key === folder));
-    return owner ? new Set([owner.group]) : new Set();
-  });
-  const toggleGroupExpanded = (group: string) =>
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
+  /** Accordion, not a set of independent toggles: at most one group is open, so the nav never
+   * grows past a screenful and the open group is always the one you are working in. Seeded to
+   * whichever group owns the current folder, which for the default view is People. */
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(
+    () => FOLDER_TREE.find((g) => g.headingKey === folder || g.items.some((i) => i.key === folder))?.group ?? null,
+  );
+  const toggleGroupExpanded = (group: string) => setExpandedGroup((prev) => (prev === group ? null : group));
 
   const worlds = useWorldStore((s) => s.worlds);
   const world = getWorldById(worlds, worldId);
@@ -183,9 +279,6 @@ export function WorldManagerPage() {
   const allArticles = useArticleStore((s) => s.articles);
   const allFolders = useArticleStore((s) => s.folders);
   const ensureSeeded = useArticleStore((s) => s.ensureSeeded);
-  const addFolder = useArticleStore((s) => s.addFolder);
-  const renameFolder = useArticleStore((s) => s.renameFolder);
-  const deleteFolder = useArticleStore((s) => s.deleteFolder);
 
   useEffect(() => {
     fetchCampaigns();
@@ -204,18 +297,30 @@ export function WorldManagerPage() {
   const npcs = primaryCampaign ? getCreaturesForCampaign(creaturesByCampaignId, primaryCampaign.id).filter((c) => c.category === 'npc') : [];
   const factions = primaryCampaign ? getFactionsForCampaign(factionsByCampaignId, primaryCampaign.id) : [];
   const worldArticles = getArticlesForWorld(allArticles, worldId);
+  /** Still needed without the sidebar folder tree: ArticleTable renders a Folder column, and
+   * the breadcrumb names the folder when a `?afid=` deep link scopes the Articles view. */
   const worldFolders = getFoldersForWorld(allFolders, worldId);
-  const worldFoldersFiltered = folderSearch.trim()
-    ? worldFolders.filter((f) => f.name.toLowerCase().includes(folderSearch.trim().toLowerCase()))
-    : worldFolders;
 
   /** The current view is either the user-defined "Articles" folder tree (scoped by
-   * folderId) or one of Places' fixed-category views (heading = all 4, each child = 1) -
-   * both render through the same Create/search/Hybrid-Table chrome below. */
-  const placesCategories = getFolderCategories(folder);
-  const isCategoryScopedView = placesCategories !== undefined;
+   * folderId) or one of the tree's fixed-category views - a group heading (People = character
+   * + deity, Places = all 4 place types, Codex = item/spell/plot/event) or one of their
+   * children - and all of them render through the same Create/search/Hybrid-Table chrome
+   * below. */
+  const scopedCategories = getFolderCategories(folder);
+  const isCategoryScopedView = scopedCategories !== undefined;
+  const folderGroup = getFolderGroup(folder);
+  const folderItem = getFolderItem(folder);
+  /** Which Compendium catalog this folder shows, if it is one of the Compendium-backed
+   * sub-items (People > Monsters, Codex > Spells / Magic Items). */
+  const compendiumView = folderItem?.compendium;
+  /** Set on Factions' 6 type sub-items; the Factions heading itself is unscoped. */
+  const scopedFactionType = folderItem?.factionType;
+  const isFactionsView = folder === 'factions' || scopedFactionType !== undefined;
+  /** Views backed by campaign-scoped stores rather than by world articles - they need a
+   * campaign in the world before they can show anything. */
+  const needsCampaign = folder === 'npcs' || folder === 'places-bastions' || isFactionsView || compendiumView !== undefined;
   const visibleArticles = isCategoryScopedView
-    ? worldArticles.filter((a) => placesCategories!.includes(a.category))
+    ? worldArticles.filter((a) => scopedCategories!.includes(a.category))
     : articleFolderId
       ? worldArticles.filter((a) => a.folderId === articleFolderId)
       : worldArticles;
@@ -231,14 +336,26 @@ export function WorldManagerPage() {
     const present = new Set(visibleArticles.map((a) => a.category));
     return Array.from(present).map((c) => ({ value: c, label: ARTICLE_TEMPLATES[c].label }));
   }, [visibleArticles]);
-  const singleScopedCategory = placesCategories && placesCategories.length === 1 ? placesCategories[0] : undefined;
+  const singleScopedCategory = scopedCategories && scopedCategories.length === 1 ? scopedCategories[0] : undefined;
+  /** The Place Builder promo belongs to Places only - the same category-scoped chrome now
+   * also renders People's, Factions' and Codex's views, which have no place taxonomy to
+   * build. Within Places it is further limited to the categories the builder actually
+   * supports: Geography is a Places category but not a PlaceType, so its view gets the plain
+   * table. Deriving the type by `find` over a PlaceType[] (rather than casting the scoped
+   * ArticleCategory) is what keeps `initialType` honest - the builder would otherwise be
+   * handed 'geography' and blow up looking it up in TYPE_META. */
+  const buildablePlaceType = PLACE_BUILDER_TYPES.find((t) => t === singleScopedCategory);
+  const showPlaceBuilder =
+    isCategoryScopedView &&
+    folderGroup?.placeBuilder === true &&
+    (singleScopedCategory === undefined || buildablePlaceType !== undefined);
   const createEntryHref = singleScopedCategory
     ? `/w/${worldId}/manager/entry/new?type=${singleScopedCategory}`
     : `/w/${worldId}/manager/entry/new`;
   const createButtonLabel = singleScopedCategory
     ? `Create ${ARTICLE_TEMPLATES[singleScopedCategory].label}`
     : isCategoryScopedView
-      ? 'Create place'
+      ? folderGroup?.createLabel ?? 'Create entry'
       : 'Create article';
 
   const savedViewEntries = [
@@ -257,17 +374,6 @@ export function WorldManagerPage() {
       { replace: true },
     );
   const setMode = (m: 'hybrid' | 'table') => setSearchParams((prev) => { prev.set('mode', m); return prev; }, { replace: true });
-  const setArticleFolder = (id: string | null) =>
-    setSearchParams(
-      (prev) => {
-        prev.set('folder', 'articles');
-        if (id) prev.set('afid', id);
-        else prev.delete('afid');
-        return prev;
-      },
-      { replace: true },
-    );
-
   const openSavedViewEntry = (entry: { id: string; kind: 'npc' | 'faction' | 'article' }) => {
     if (entry.kind === 'npc') setFolder('npcs');
     else if (entry.kind === 'faction') setFolder('factions');
@@ -293,52 +399,103 @@ export function WorldManagerPage() {
     <SectionLayout
       worldId={worldId!}
       sidebar={
-        <Box>
-          <Typography variant="overline" color="text.secondary" sx={{ display: 'block', px: 1 }}>
-            World manager
-          </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
           <List dense disablePadding sx={{ mb: 1 }}>
             {FOLDER_TREE.map((g) => {
-              const isExpanded = expandedGroups.has(g.group);
+              const isExpanded = expandedGroup === g.group;
+              const headingSelected = g.headingKey != null && folder === g.headingKey;
+              const holdsCurrent = isExpanded || g.items.some((i) => i.key === folder);
               return (
-                <Box key={g.group} sx={{ mb: 0.5 }}>
+                <Box key={g.group} sx={{ mb: 0.25 }}>
                   <ListItemButton
-                    selected={g.headingKey != null && folder === g.headingKey}
+                    selected={headingSelected}
                     onClick={() => {
                       if (g.headingKey) setFolder(g.headingKey);
-                      setExpandedGroups((prev) => new Set(prev).add(g.group));
+                      setExpandedGroup(g.group);
                     }}
-                    sx={{ borderRadius: 1.5, py: 0.4 }}
+                    sx={{
+                      borderRadius: 2,
+                      py: 0.6,
+                      pl: 1,
+                      pr: 0.5,
+                      gap: 0.5,
+                      // A left accent bar instead of a full-bleed highlight: it marks the
+                      // active group without fighting the sub-item selection below it.
+                      position: 'relative',
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        left: 0,
+                        top: 6,
+                        bottom: 6,
+                        width: 3,
+                        borderRadius: 3,
+                        bgcolor: holdsCurrent ? 'primary.main' : 'transparent',
+                        transition: 'background-color 160ms',
+                      },
+                      '&.Mui-selected': { bgcolor: 'action.selected' },
+                    }}
                   >
+                    <ListItemIcon
+                      sx={{ minWidth: 0, color: holdsCurrent ? 'primary.main' : 'text.secondary', transition: 'color 160ms' }}
+                    >
+                      {g.icon}
+                    </ListItemIcon>
                     <ListItemText
                       primary={g.group}
-                      slotProps={{ primary: { variant: 'caption', sx: { fontWeight: 700, color: 'text.disabled' } } }}
+                      slotProps={{
+                        primary: {
+                          variant: 'body2',
+                          sx: { fontWeight: 700, color: holdsCurrent ? 'text.primary' : 'text.secondary' },
+                        },
+                      }}
                     />
                     <IconButton
                       size="small"
+                      aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${g.group}`}
+                      aria-expanded={isExpanded}
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleGroupExpanded(g.group);
                       }}
+                      sx={{
+                        p: 0.25,
+                        color: 'text.disabled',
+                        transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                        transition: 'transform 180ms',
+                      }}
                     >
-                      {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                      <ExpandMoreIcon fontSize="small" />
                     </IconButton>
                   </ListItemButton>
-                  {isExpanded && (
-                    <Box sx={{ pl: 1 }}>
+                  <Collapse in={isExpanded} unmountOnExit>
+                    {/* The children hang off a hairline rail, which is what makes the
+                        hierarchy readable without indenting them so far that labels truncate. */}
+                    <Box sx={{ ml: 2.25, pl: 1, borderLeft: 1, borderColor: 'divider', mt: 0.25, mb: 0.5 }}>
                       {g.items.map((item) => (
                         <ListItemButton
                           key={item.key}
                           selected={folder === item.key}
                           onClick={() => setFolder(item.key)}
-                          sx={{ borderRadius: 1.5, py: 0.4 }}
+                          sx={{
+                            borderRadius: 1.5,
+                            py: 0.3,
+                            minHeight: 0,
+                            '&.Mui-selected': {
+                              bgcolor: 'action.selected',
+                              '& .MuiTypography-root': { fontWeight: 700, color: 'text.primary' },
+                            },
+                          }}
                         >
-                          <ListItemText primary={item.label} slotProps={{ primary: { variant: 'body2' } }} />
+                          <ListItemText
+                            primary={item.label}
+                            slotProps={{ primary: { variant: 'body2', sx: { color: 'text.secondary' } } }}
+                          />
                           {item.comingSoon && <Chip label="Soon" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
                         </ListItemButton>
                       ))}
                     </Box>
-                  )}
+                  </Collapse>
                 </Box>
               );
             })}
@@ -350,35 +507,32 @@ export function WorldManagerPage() {
             variant="outlined"
             startIcon={<AddIcon fontSize="small" />}
             onClick={() => navigate(`/w/${worldId}/manager/entry/new`)}
-            sx={{ mb: 1 }}
+            sx={{ borderRadius: 2 }}
           >
             Create item
           </Button>
 
-          <Divider sx={{ my: 1 }} />
+          {/* Pushes "Recently edited" to the floor of the panel. */}
+          <Box sx={{ flexGrow: 1, minHeight: 12 }} />
 
-          <ArticleFolderTree
-            worldId={worldId!}
-            folders={worldFoldersFiltered}
-            selectedFolderId={folder === 'articles' ? articleFolderId : 'none-selected'}
-            onSelectFolder={(id) => setArticleFolder(id)}
-            search={folderSearch}
-            onSearchChange={setFolderSearch}
-            onAddFolder={addFolder}
-            onRenameFolder={renameFolder}
-            onDeleteFolder={deleteFolder}
-          />
-
-          <Divider sx={{ my: 1 }} />
-          <Typography variant="caption" color="text.disabled" sx={{ px: 1 }}>
-            SAVED VIEWS
-          </Typography>
+          <Divider sx={{ mb: 0.5 }} />
+          {/* The last survivor of the old "SAVED VIEWS" block, and not merely a convenience:
+              it lists every NPC, faction and article in the world (recency-ordered, not
+              truncated), so it stays the one flat cross-cutting view now that the folder tree
+              and "All entries" are gone. */}
           <List dense disablePadding>
-            <ListItemButton selected={folder === 'all'} onClick={() => setFolder('all')} sx={{ borderRadius: 1.5, py: 0.4 }}>
-              <ListItemText primary="All entries" primaryTypographyProps={{ variant: 'body2' }} />
-            </ListItemButton>
-            <ListItemButton selected={folder === 'recent'} onClick={() => setFolder('recent')} sx={{ borderRadius: 1.5, py: 0.4 }}>
-              <ListItemText primary="Recently edited" primaryTypographyProps={{ variant: 'body2' }} />
+            <ListItemButton
+              selected={folder === 'recent'}
+              onClick={() => setFolder('recent')}
+              sx={{ borderRadius: 2, py: 0.5, gap: 0.5, pl: 1 }}
+            >
+              <ListItemIcon sx={{ minWidth: 0, color: folder === 'recent' ? 'primary.main' : 'text.disabled' }}>
+                <HistoryIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText
+                primary="Recently edited"
+                slotProps={{ primary: { variant: 'body2', sx: { color: folder === 'recent' ? 'text.primary' : 'text.secondary' } } }}
+              />
             </ListItemButton>
           </List>
         </Box>
@@ -394,7 +548,7 @@ export function WorldManagerPage() {
 
       {folder === 'articles' || isCategoryScopedView ? (
         <>
-          {isCategoryScopedView && (
+          {showPlaceBuilder && (
             <Paper
               variant="outlined"
               onClick={() => setPlaceBuilderOpen(true)}
@@ -449,10 +603,10 @@ export function WorldManagerPage() {
 
             {mode === 'hybrid' && visibleArticles.length > 0 && (
               <Stack direction="row" spacing={0.5}>
-                <IconButton size="small" onClick={() => gridRef.current?.advance(-1)}>
+                <IconButton size="small" aria-label="Previous entries" onClick={() => gridRef.current?.advance(-1)}>
                   <ChevronLeftIcon fontSize="small" />
                 </IconButton>
-                <IconButton size="small" onClick={() => gridRef.current?.advance(1)}>
+                <IconButton size="small" aria-label="Next entries" onClick={() => gridRef.current?.advance(1)}>
                   <ChevronRightIcon fontSize="small" />
                 </IconButton>
               </Stack>
@@ -517,36 +671,47 @@ export function WorldManagerPage() {
           ) : (
             <ArticleTable articles={tableArticles} folders={worldFolders} onOpen={(id) => navigate(entryHref(id))} />
           )}
-          <PlaceBuilderDialog
-            open={placeBuilderOpen}
-            worldId={worldId!}
-            campaignId={primaryCampaign?.id}
-            initialType={singleScopedCategory as PlaceType | undefined}
-            onClose={() => setPlaceBuilderOpen(false)}
-            onCreated={(article) => {
-              setPlaceBuilderOpen(false);
-              navigate(entryHref(article.id));
-            }}
-          />
+          {showPlaceBuilder && (
+            <PlaceBuilderDialog
+              open={placeBuilderOpen}
+              worldId={worldId!}
+              campaignId={primaryCampaign?.id}
+              initialType={buildablePlaceType}
+              onClose={() => setPlaceBuilderOpen(false)}
+              onCreated={(article) => {
+                setPlaceBuilderOpen(false);
+                navigate(entryHref(article.id));
+              }}
+            />
+          )}
         </>
-      ) : !primaryCampaign && (folder === 'npcs' || folder === 'factions' || folder === 'places-bastions') ? (
+      ) : needsCampaign && !primaryCampaign ? (
         <ComingSoon
           icon={<FolderIcon sx={{ fontSize: 56 }} />}
           title="No campaign yet"
-          description="NPCs, Factions, and Bastions are tracked per-campaign today. Create a campaign in this world to start filling these in."
+          description="NPCs, Monsters, Factions, Spells, Magic Items, and Bastions are tracked per-campaign today. Create a campaign in this world to start filling these in."
         />
       ) : folder === 'npcs' ? (
         <NpcsSection campaignId={primaryCampaign!.id} worldId={worldId} />
-      ) : folder === 'factions' ? (
-        <FactionsSection campaignId={primaryCampaign!.id} worldId={worldId} />
+      ) : isFactionsView ? (
+        <FactionsSection
+          campaignId={primaryCampaign!.id}
+          worldId={worldId}
+          factionType={scopedFactionType}
+          heading={scopedFactionType ? folderItem!.label : undefined}
+        />
+      ) : compendiumView ? (
+        // Keyed by catalog so switching Monsters -> Spells remounts: otherwise React reuses
+        // the one instance and the search box, page and filters carry over from the catalog
+        // you just left.
+        <CompendiumSection
+          key={compendiumView}
+          campaignId={primaryCampaign!.id}
+          worldId={worldId}
+          lockedView={compendiumView}
+        />
       ) : folder === 'places-bastions' ? (
         <BastionsSection campaignId={primaryCampaign!.id} worldId={worldId} />
-      ) : folder === 'characters' ? (
-        <ComingSoon
-          icon={<PersonIcon sx={{ fontSize: 56 }} />}
-          title="Character roster is coming soon"
-          description="A per-party list of PCs - level, class, HP, and a link into each character sheet."
-        />
       ) : folder === 'all' || folder === 'recent' ? (
         <SavedView
           entries={folder === 'recent' ? [...savedViewEntries].sort((a, b) => b.updatedAt - a.updatedAt) : [...savedViewEntries].sort((a, b) => a.name.localeCompare(b.name))}

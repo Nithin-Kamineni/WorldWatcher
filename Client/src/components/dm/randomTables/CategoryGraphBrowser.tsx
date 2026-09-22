@@ -210,10 +210,10 @@ export function CategoryGraphBrowser({ selectedId, onSelect, counts = new Map(),
                 {orientation === 'horizontal' ? <SwapVertIcon fontSize="small" /> : <SwapHorizIcon fontSize="small" />}
               </IconButton>
             </Tooltip>
-            <Tooltip title="Zoom out"><span><IconButton size="small" disabled={zoom <= 0.6} onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))}><RemoveIcon fontSize="small" /></IconButton></span></Tooltip>
+            <Tooltip title="Zoom out"><span><IconButton size="small" aria-label="Zoom out" disabled={zoom <= 0.6} onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))}><RemoveIcon fontSize="small" /></IconButton></span></Tooltip>
             <Typography variant="caption" sx={{ minWidth: 42, textAlign: 'center', fontWeight: 700 }}>{Math.round(zoom * 100)}%</Typography>
-            <Tooltip title="Zoom in"><span><IconButton size="small" disabled={zoom >= 1.25} onClick={() => setZoom((value) => Math.min(1.25, value + 0.1))}><AddIcon fontSize="small" /></IconButton></span></Tooltip>
-            <Tooltip title="Center whole graph"><IconButton size="small" onClick={centerGraph}><CenterFocusStrongIcon fontSize="small" /></IconButton></Tooltip>
+            <Tooltip title="Zoom in"><span><IconButton size="small" aria-label="Zoom in" disabled={zoom >= 1.25} onClick={() => setZoom((value) => Math.min(1.25, value + 0.1))}><AddIcon fontSize="small" /></IconButton></span></Tooltip>
+            <Tooltip title="Center whole graph"><IconButton size="small" aria-label="Center whole graph" onClick={centerGraph}><CenterFocusStrongIcon fontSize="small" /></IconButton></Tooltip>
             <Tooltip title="Reset graph"><IconButton size="small" onClick={() => { setZoom(0.9); setExpanded(new Set([ROOT_ID])); setTimeout(centerGraph, 0); }}><RestartAltIcon fontSize="small" /></IconButton></Tooltip>
           </Stack>
         </Paper>

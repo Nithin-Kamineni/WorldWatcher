@@ -54,6 +54,7 @@ import type {
 } from './types';
 import type { Article, ArticleCategory, ArticleFolder, ArticleVisibility } from '../types/article';
 import type { Note, NoteFolder, NoteKind } from '../types/note';
+import { NOTE_DOC_TYPES, asCanvas, type NoteDocType } from '../types/noteCanvas';
 import type { SessionChat } from '../types/sessionChat';
 import type { Bastion, BastionFacility, BastionFacilityInstance, BastionFacilityInstanceStatus } from '../types/bastion';
 import type { Campaign } from '../types/campaign';
@@ -344,13 +345,18 @@ export function noteFolderToApiPayload(folder: NoteFolder): Record<string, unkno
 }
 
 export function apiNoteToNote(n: ApiNote): Note {
+  const docType = NOTE_DOC_TYPES.includes(n.doc_type as NoteDocType) ? (n.doc_type as NoteDocType) : 'text';
   return {
     id: n.id,
     campaignId: n.campaign_id,
     folderId: n.folder_id,
     name: n.name,
     kind: (n.kind as NoteKind | null) ?? null,
+    docType,
     body: n.body,
+    // Normalized here, once, so no screen ever touches a raw persisted canvas - see
+    // noteCanvas.ts on why (fields added after a board was saved).
+    canvas: asCanvas(docType, n.canvas),
     tags: toStringArray(n.tags),
     createdAt: toEpochMs(n.created_at),
     updatedAt: toEpochMs(n.updated_at),
@@ -364,7 +370,9 @@ export function noteToApiPayload(note: Note): Record<string, unknown> {
     folder_id: note.folderId,
     name: note.name,
     kind: note.kind,
+    doc_type: note.docType,
     body: note.body,
+    canvas: note.canvas,
     tags: note.tags,
   };
 }
@@ -375,7 +383,7 @@ export function apiSessionChatToSessionChat(c: ApiSessionChat): SessionChat {
     campaignId: c.campaign_id,
     noteId: c.note_id,
     name: c.name,
-    messages: c.messages.map((m) => ({ id: m.id, text: m.text, createdAt: m.createdAt })),
+    messages: c.messages.map((m) => ({ id: m.id, text: m.text, createdAt: m.createdAt, editedAt: m.editedAt })),
     createdAt: toEpochMs(c.created_at),
     updatedAt: toEpochMs(c.updated_at),
   };
@@ -937,7 +945,16 @@ export function apiEncounterToEncounter(e: ApiEncounterDetail): Encounter {
     partySize: e.party_size,
     scalingNotes: e.scaling_notes,
     locationId: e.location_id,
-    rewards: Array.isArray(e.rewards) ? e.rewards : [],
+    generatorId: e.generator_id ?? null,
+    rewards: (Array.isArray(e.rewards) ? e.rewards : []).map((r, i) => ({
+      kind: r.kind,
+      itemId: r.item_id ?? null,
+      description: r.description ?? '',
+      quantity: r.quantity ?? 1,
+      sortOrder: r.sort_order ?? i,
+      itemName: r.item_name ?? null,
+      itemRarity: r.item_rarity ?? null,
+    })),
     tagIds: e.tag_ids ?? [],
     npcs: (e.npcs ?? []).map((n) => apiEncounterNpcToEntry(n)),
     combatBlock: e.combat_block ? apiCombatBlockToBlock(e.combat_block) : null,
@@ -971,7 +988,15 @@ export function encounterToApiPayload(encounter: Encounter, campaignId: string):
     party_size: encounter.partySize,
     scaling_notes: encounter.scalingNotes,
     location_id: encounter.locationId,
-    rewards: encounter.rewards,
+    generator_id: encounter.generatorId ?? null,
+    rewards: encounter.rewards.map((r, i) => ({
+      kind: r.kind,
+      // Only an item reward carries the FK - see the server's _replace_rewards.
+      item_id: r.kind === 'item' ? r.itemId : null,
+      description: r.description,
+      quantity: r.quantity,
+      sort_order: r.sortOrder ?? i,
+    })),
   };
 }
 

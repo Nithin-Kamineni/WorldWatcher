@@ -14,15 +14,19 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { getFactionInfluenceOption, type Faction } from '../../types/faction';
 
 interface FactionsTableProps {
   factions: Faction[];
+  /** Opens the read-only faction card. Wired to both the name and the eye action, the two
+   * entry points CreaturesTable gives the NPC stat block. */
+  onView: (faction: Faction) => void;
   onEdit: (faction: Faction) => void;
   onDelete: (faction: Faction) => void;
 }
 
-export function FactionsTable({ factions, onEdit, onDelete }: FactionsTableProps) {
+export function FactionsTable({ factions, onView, onEdit, onDelete }: FactionsTableProps) {
   const rows = useMemo(() => factions, [factions]);
 
   return (
@@ -50,7 +54,11 @@ export function FactionsTable({ factions, onEdit, onDelete }: FactionsTableProps
                     <Avatar sx={{ width: 32, height: 32 }}>{faction.name.charAt(0)}</Avatar>
                   )}
                   <Stack sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    <Typography
+                      variant="subtitle2"
+                      sx={{ fontWeight: 600, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                      onClick={() => onView(faction)}
+                    >
                       {faction.name}
                     </Typography>
                     {faction.description && (
@@ -77,6 +85,11 @@ export function FactionsTable({ factions, onEdit, onDelete }: FactionsTableProps
                 <Chip label={getFactionInfluenceOption(faction.influence).label} size="small" variant="outlined" />
               </TableCell>
               <TableCell align="right">
+                <Tooltip title="View faction card">
+                  <IconButton size="small" onClick={() => onView(faction)}>
+                    <VisibilityIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
                 <Tooltip title="Edit faction">
                   <IconButton size="small" onClick={() => onEdit(faction)}>
                     <EditIcon fontSize="small" />

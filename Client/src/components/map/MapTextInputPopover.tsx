@@ -58,7 +58,7 @@ export function MapTextInputPopover({
             if (e.key === 'Enter' && !multiline) handleSubmit();
           }}
         />
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
+        <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
           <Button size="small" onClick={onClose}>
             Cancel
           </Button>

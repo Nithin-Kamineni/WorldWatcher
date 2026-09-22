@@ -98,13 +98,13 @@ const TAG_RULES: TagRule[] = [
   // first, so this matches the &quot;-encoded attribute form, not raw quotes. Rendered as an
   // inline clickable span; EntityRefPreview's click delegation reads the data-ref-* attributes.
   {
-    pattern: /\[ref type=&quot;(npc|creature|spell|encounter|place|faction|situational_table)&quot; id=&quot;([a-zA-Z0-9-]+)&quot;\]([\s\S]*?)\[\/ref\]/gi,
+    pattern: /\[ref type=&quot;(npc|creature|spell|encounter|place|faction|situational_table|map)&quot; id=&quot;([a-zA-Z0-9-]+)&quot;\]([\s\S]*?)\[\/ref\]/gi,
     replace: (_m, type, id, label) =>
       `<span class="ww-ref" data-ref-type="${type}" data-ref-id="${id}" role="button" tabindex="0">${label}</span>`,
   },
 ];
 
-export type EntityRefType = 'npc' | 'creature' | 'spell' | 'encounter' | 'place' | 'faction' | 'situational_table';
+export type EntityRefType = 'npc' | 'creature' | 'spell' | 'encounter' | 'place' | 'faction' | 'situational_table' | 'map';
 
 /** Builds the `[ref]` tag the @-mention picker inserts - the write-side counterpart to the
  * TAG_RULES pattern above that parses it back out on render. Strips brackets from the label so
@@ -126,16 +126,3 @@ export function bbcodeToHtml(source: string): string {
   }
   return html.replace(/\n/g, '<br />');
 }
-
-export const BBCODE_TOOLBAR_TAGS: { label: string; open: string; close: string }[] = [
-  { label: 'Bold', open: '[b]', close: '[/b]' },
-  { label: 'Italic', open: '[i]', close: '[/i]' },
-  { label: 'Underline', open: '[u]', close: '[/u]' },
-  { label: 'Strikethrough', open: '[s]', close: '[/s]' },
-  { label: 'Heading', open: '[h2]', close: '[/h2]' },
-  { label: 'Quote', open: '[quote]', close: '[/quote]' },
-  { label: 'List', open: '[list]\n[*]', close: '\n[/list]' },
-  { label: 'Link', open: '[url=https://]', close: '[/url]' },
-  { label: 'Image', open: '[img]', close: '[/img]' },
-  { label: 'Center', open: '[center]', close: '[/center]' },
-];

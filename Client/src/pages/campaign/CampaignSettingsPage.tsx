@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import Paper from '@mui/material/Paper';
-import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
@@ -13,8 +12,11 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { SectionLayout } from '../../components/shell/SectionLayout';
 import { Breadcrumbs } from '../../components/layout/Breadcrumbs';
 import { ShortcutsSettingsDialog } from '../../components/settings/ShortcutsSettingsDialog';
+import { RailLabelsSettingItem } from '../../components/settings/RailLabelsSettingItem';
+import { UiScaleSettingItem } from '../../components/settings/UiScaleSettingItem';
 import { useWorldStore, getWorldById } from '../../store/useWorldStore';
 import { useCampaignStore, getCampaignById } from '../../store/useCampaignStore';
+import { PageTitle } from '../../components/shell/PageTitle';
 
 const SECTIONS = ['Players / Invites', 'Publishing', 'Campaign settings'];
 
@@ -31,11 +33,11 @@ export function CampaignSettingsPage() {
   return (
     <SectionLayout worldId={worldId} campaignId={campaignId}>
       <Breadcrumbs items={[{ label: world?.name ?? '…', to: `/w/${worldId}/home` }, { label: campaign?.name ?? '…', to: `/w/${worldId}/c/${campaignId}/home` }, { label: 'Settings' }]} />
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }}>
-        Campaign settings
-      </Typography>
+      <PageTitle sx={{ mb: 2 }}>Campaign settings</PageTitle>
       <Paper variant="outlined" sx={{ borderRadius: 3, maxWidth: 480, overflow: 'hidden' }}>
         <List disablePadding>
+          <UiScaleSettingItem />
+          <RailLabelsSettingItem />
           <ListItemButton onClick={() => setShortcutsOpen(true)}>
             <ListItemIcon sx={{ minWidth: 36 }}>
               <KeyboardIcon fontSize="small" />

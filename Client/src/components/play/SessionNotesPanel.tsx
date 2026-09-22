@@ -16,7 +16,8 @@ import CheckIcon from '@mui/icons-material/Check';
 import { PaneHeader, type PaneCloseProps } from './layout/PaneHeader';
 import type { PaneSlot } from './layout/playLayoutTrees';
 import { EntityRefPreview } from '../notes/EntityRefPreview';
-import { BBCodeEditor } from '../world/BBCodeEditor';
+import { TipTapArticleEditor } from '../world/richtext/TipTapArticleEditor';
+import { toEditorHtml } from '../world/richtext/bbcodeMigration';
 import { useNoteStore } from '../../store/useNoteStore';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../theme/scrollbarSx';
 import type { Note } from '../../types/note';
@@ -61,8 +62,11 @@ export function SessionNotesPanel({
   const [draft, setDraft] = useState(note.body);
   const kindLabel = note.kind === 'narrative' ? 'Narrative' : 'Session';
 
+  // Quick edit uses the same rich text editor as the full Notes page, so a mid-session touch-up
+  // can't downgrade a note's formatting - a legacy BBCode body is converted on the way in
+  // (toEditorHtml) and saved back as HTML, exactly as NoteDetailPage does it.
   const startEdit = () => {
-    setDraft(note.body);
+    setDraft(toEditorHtml(note.body));
     setEditing(true);
   };
   const finishEdit = () => {
@@ -125,7 +129,13 @@ export function SessionNotesPanel({
         sx={{ flexGrow: 1, overflowY: 'auto', minHeight: 0, px: editing ? 1.5 : 2.5, py: editing ? 1.5 : 2, ...thinScrollbarSx }}
       >
         {editing ? (
-          <BBCodeEditor value={draft} onChange={setDraft} worldId={worldId} campaignId={campaignId} hideLabel />
+          <TipTapArticleEditor
+            value={draft}
+            onChange={setDraft}
+            mentions={{ worldId, campaignId }}
+            minHeight={160}
+            placeholder='Quick edit… type "@" to mention'
+          />
         ) : note.body ? (
           <EntityRefPreview
             body={note.body}
@@ -134,6 +144,7 @@ export function SessionNotesPanel({
             noteName={note.name}
             onOpenSituationalTable={onOpenSituationalTable}
             enableItemsWindowFocus
+            onBodyChange={(html) => updateNote(note.id, { body: html })}
             sx={{ lineHeight: 1.6, '& h1, & h2, & h3': { mt: 0 } }}
           />
         ) : (

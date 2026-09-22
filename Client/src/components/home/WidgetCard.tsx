@@ -36,7 +36,12 @@ export function WidgetCard({ title, icon, children, minHeight }: WidgetCardProps
 
       <Tooltip title="Widget layout editing coming soon">
         <span style={{ position: 'absolute', top: 8, right: 8 }}>
-          <IconButton size="small" disabled sx={{ '&.Mui-disabled': { color: 'text.disabled' } }}>
+          <IconButton
+            size="small"
+            disabled
+            aria-label={`Edit the ${title} widget's layout (coming soon)`}
+            sx={{ '&.Mui-disabled': { color: 'text.disabled' } }}
+          >
             <EditIcon sx={{ fontSize: 15 }} />
           </IconButton>
         </span>

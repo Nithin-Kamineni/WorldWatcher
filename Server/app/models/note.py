@@ -53,7 +53,18 @@ class Note(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     # 'session_prep' | 'narrative' | null (freeform user note)
     kind: Mapped[Optional[str]] = mapped_column(Text)
+    # Which editor this file opens in: 'text' (the HTML body below), 'whiteboard' or 'tree'
+    # (the canvas JSONB below). Orthogonal to `kind`, which says what a TEXT note is FOR -
+    # a session-prep sheet is a text document with a template, a whiteboard is a different
+    # kind of file altogether. Defaults to 'text' so every pre-existing row is unchanged.
+    doc_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="text")
     body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    # The whole document for a whiteboard/tree note: sticky items + connections, or nodes +
+    # links, plus the remembered pan/zoom. One JSONB blob rather than item/edge tables
+    # because a canvas is only ever read and written whole, by one editor, and its shape is
+    # still moving - the client normalizes it on read (Client/src/types/noteCanvas.ts).
+    # '{}' rather than NULL for the same reason tags is '[]': one empty shape, not two.
+    canvas: Mapped[Any] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     tags: Mapped[Any] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

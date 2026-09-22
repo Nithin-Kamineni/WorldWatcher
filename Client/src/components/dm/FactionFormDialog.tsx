@@ -41,14 +41,18 @@ interface FactionFormDialogProps {
   /** World this Faction's article (if any) belongs to - omit when there's no world in scope,
    * which hides the "also create a world article" checkbox entirely (issue 4c/4g). */
   worldId?: string;
+  /** Pre-fills Type on a *new* faction, so adding one from the World manager's "Guilds" or
+   * "Cults" view lands in the view you created it from instead of an untyped limbo. Ignored
+   * when editing, and still freely editable in the form. */
+  defaultFactionType?: string;
 }
 
-function emptyState() {
+function emptyState(factionType = '') {
   return {
     name: '',
     description: '',
     imageSrc: '',
-    factionType: '',
+    factionType,
     goals: [] as string[],
     beliefs: [] as string[],
     resources: [] as string[],
@@ -140,6 +144,7 @@ export function FactionFormDialog({
   onUpdateRelation,
   onDeleteRelation,
   worldId,
+  defaultFactionType,
 }: FactionFormDialogProps) {
   const isEditMode = !!initialFaction;
   const [state, setState] = useState(emptyState());
@@ -150,11 +155,11 @@ export function FactionFormDialog({
 
   useEffect(() => {
     if (!open) return;
-    setState(initialFaction ? stateFromFaction(initialFaction) : emptyState());
+    setState(initialFaction ? stateFromFaction(initialFaction) : emptyState(defaultFactionType));
     setMoreOpen(false);
     setCreateArticle(false);
     setCreateArticleNow(true);
-  }, [open, initialFaction]);
+  }, [open, initialFaction, defaultFactionType]);
 
   const set = <K extends keyof ReturnType<typeof emptyState>>(key: K, value: ReturnType<typeof emptyState>[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));

@@ -8,6 +8,7 @@ import { getVisibleSections, DEFAULT_ARTICLE_COVER_IMAGE, type Article, type Art
 import { getArticleCategoryIcon } from './articleIcons';
 import { TipTapArticleEditor } from './richtext/TipTapArticleEditor';
 import { toEditorHtml } from './richtext/bbcodeMigration';
+import { PageTitle } from '../shell/PageTitle';
 
 const VISIBILITY_COLOR: Record<Article['visibility'], 'warning' | 'info' | 'success'> = {
   gm: 'warning',
@@ -79,9 +80,7 @@ export function ArticleContentView({ article, template, headerActions }: Article
       </Box>
 
       <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1, flexWrap: 'wrap', gap: 1 }}>
-        <Typography variant="h4" sx={{ fontWeight: 700 }}>
-          {article.name || 'Untitled article'}
-        </Typography>
+        <PageTitle>{article.name || 'Untitled article'}</PageTitle>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Chip label={VISIBILITY_LABEL[article.visibility]} color={VISIBILITY_COLOR[article.visibility]} size="small" variant="outlined" />
           {headerActions}

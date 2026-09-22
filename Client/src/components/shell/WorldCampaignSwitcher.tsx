@@ -19,6 +19,7 @@ import { useWorldStore, getCampaignsForWorld, getWorldById } from '../../store/u
 import { useCampaignStore, getCampaignById } from '../../store/useCampaignStore';
 import { useShellStore } from '../../store/useShellStore';
 import { NameDescriptionDialog } from './NameDescriptionDialog';
+import { su } from '../../theme/uiScale';
 
 /** Shown until a world has its own uploaded logo (World.imageSrc, see NameDescriptionDialog's
  * image-upload mode). */
@@ -26,7 +27,7 @@ const DEFAULT_WORLD_LOGO = '/world-logo.png';
 
 /** Ellipsis-truncates a name for tight single-line menu real estate - the full name is always
  * still available via Tooltip. */
-const truncateSx = { maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const };
+const truncateSx = { maxWidth: su(180), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const };
 
 interface WorldBrandProps {
   worldId: string;
@@ -68,7 +69,7 @@ export function WorldBrand({ worldId }: WorldBrandProps) {
             component="img"
             src={world?.imageSrc || DEFAULT_WORLD_LOGO}
             alt=""
-            sx={{ width: 30, height: 30, borderRadius: 0.85, objectFit: 'cover', flexShrink: 0 }}
+            sx={{ width: su(30), height: su(30), borderRadius: 0.85, objectFit: 'cover', flexShrink: 0 }}
           />
           <Typography
             variant="subtitle2"
@@ -76,7 +77,7 @@ export function WorldBrand({ worldId }: WorldBrandProps) {
               fontWeight: 700,
               textAlign: 'left',
               lineHeight: 1.15,
-              maxWidth: 160,
+              maxWidth: su(160),
               display: '-webkit-box',
               WebkitLineClamp: 2,
               WebkitBoxOrient: 'vertical',

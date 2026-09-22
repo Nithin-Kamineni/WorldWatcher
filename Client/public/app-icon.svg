@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WorldWatcher">
+  <title>WorldWatcher</title>
+  <rect width="64" height="64" rx="14.08" fill="#1f1b26"/>
+  <g fill="none" stroke="#e0a75f" stroke-width="2.69" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="32.00,6.40 9.83,19.20 9.83,44.80 32.00,57.60 54.17,44.80 54.17,19.20"/>
+  <line x1="32.00" y1="20.16" x2="32.00" y2="6.40"/>
+  <line x1="21.75" y1="37.92" x2="9.83" y2="44.80"/>
+  <line x1="42.25" y1="37.92" x2="54.17" y2="44.80"/>
+  </g>
+  <polygon points="32.00,20.16 21.75,37.92 42.25,37.92" fill="#e0a75f"/>
+  <circle cx="32" cy="32" r="3.71" fill="#1f1b26"/>
+</svg>

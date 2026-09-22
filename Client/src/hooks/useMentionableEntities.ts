@@ -4,6 +4,7 @@ import { useSpellStore, getSpellsForCampaign } from '../store/useSpellStore';
 import { useEncounterStore, getEncountersForCampaign } from '../store/useEncounterStore';
 import { useFactionStore, getFactionsForCampaign } from '../store/useFactionStore';
 import { useArticleStore, getArticlesForWorld } from '../store/useArticleStore';
+import { useCampaignStore, getMapsForCampaign } from '../store/useCampaignStore';
 import { EMPTY_RANDOM_TABLE_RESULTS, useRandomTableStore } from '../store/useRandomTableStore';
 import type { EntityRefType } from '../utils/bbcode';
 import type { ArticleCategory } from '../types/article';
@@ -34,8 +35,10 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
   const fetchFactions = useFactionStore((s) => s.fetchFactionsForCampaign);
   const articles = useArticleStore((s) => s.articles);
   const ensureArticlesSeeded = useArticleStore((s) => s.ensureSeeded);
+  const mapsByCampaignId = useCampaignStore((s) => s.mapsByCampaignId);
+  const fetchMaps = useCampaignStore((s) => s.fetchMapsForCampaign);
   const randomTables = useRandomTableStore((s) => s.resultSets.mentions?.results ?? EMPTY_RANDOM_TABLE_RESULTS);
-  const searchRandomTables = useRandomTableStore((s) => s.search);
+  const ensureSearchRandomTables = useRandomTableStore((s) => s.ensureSearch);
 
   useEffect(() => {
     if (!campaignId) return;
@@ -43,7 +46,8 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
     fetchSpells(campaignId);
     fetchEncounters(campaignId);
     fetchFactions(campaignId);
-  }, [campaignId, fetchCreatures, fetchSpells, fetchEncounters, fetchFactions]);
+    fetchMaps(campaignId);
+  }, [campaignId, fetchCreatures, fetchSpells, fetchEncounters, fetchFactions, fetchMaps]);
 
   useEffect(() => {
     if (worldId) ensureArticlesSeeded(worldId);
@@ -51,9 +55,11 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
 
   // Random tables span both global reference content and campaign homebrew - a single
   // unscoped search (own_or_global, no campaign filter) covers both for @-mention purposes.
+  // ensureSearch, not search: every editor and note pane on screen runs this hook, so two note
+  // panes used to fetch the same 500 rows twice on mount (checklist I-U4).
   useEffect(() => {
-    searchRandomTables({ scope: 'all', limit: 500 }, 'mentions');
-  }, [searchRandomTables]);
+    void ensureSearchRandomTables({ scope: 'all', limit: 500 }, 'mentions');
+  }, [ensureSearchRandomTables]);
 
   return useMemo(() => {
     const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
@@ -61,6 +67,7 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
     const encounters = getEncountersForCampaign(encountersByCampaignId, campaignId);
     const factions = getFactionsForCampaign(factionsByCampaignId, campaignId);
     const places = getArticlesForWorld(articles, worldId).filter((a) => PLACE_CATEGORIES.includes(a.category));
+    const maps = getMapsForCampaign(mapsByCampaignId, campaignId);
 
     const entities: MentionableEntity[] = [
       ...creatures.map((c) => ({ id: c.id, type: (c.category === 'npc' ? 'npc' : 'creature') as EntityRefType, name: c.name, subtitle: c.type })),
@@ -69,6 +76,9 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
       ...factions.map((f) => ({ id: f.id, type: 'faction' as EntityRefType, name: f.name, subtitle: f.factionType })),
       ...places.map((a) => ({ id: a.id, type: 'place' as EntityRefType, name: a.name, subtitle: a.category })),
       ...randomTables.map((t) => ({ id: t.id, type: 'situational_table' as EntityRefType, name: t.name, subtitle: t.sourceBook ?? undefined })),
+      // Maps are the one thing a session note pointed at constantly and could not link to -
+      // clicking one now opens it on the map page, loaded (checklist I-U9).
+      ...maps.map((m) => ({ id: m.id, type: 'map' as EntityRefType, name: m.name, subtitle: 'Map' })),
     ];
     return entities;
   }, [
@@ -77,6 +87,7 @@ export function useMentionableEntities(worldId: string | undefined, campaignId: 
     encountersByCampaignId,
     factionsByCampaignId,
     articles,
+    mapsByCampaignId,
     randomTables,
     campaignId,
     worldId,

@@ -7,6 +7,7 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { TokenThumbnail } from '../map/TokenThumbnail';
 import { RELATION_TYPE_META, type FactionRelation } from '../../types/factionRelation';
 import type { Faction } from '../../types/faction';
@@ -17,6 +18,10 @@ interface FactionDetailPanelProps {
   relation: FactionRelation | undefined;
   onClose: () => void;
   onEditRelation: () => void;
+  /** Opens the full read-only card for `selected`. This panel only ever shows the *pair's*
+   * diplomatic status, so without this the graph gives no way to see one faction's own
+   * details - the table's name/eye actions were the only entry points. */
+  onViewCard?: () => void;
 }
 
 function ComparisonBar({
@@ -67,7 +72,7 @@ function ComparisonBar({
   );
 }
 
-export function FactionDetailPanel({ center, selected, relation, onClose, onEditRelation }: FactionDetailPanelProps) {
+export function FactionDetailPanel({ center, selected, relation, onClose, onEditRelation, onViewCard }: FactionDetailPanelProps) {
   const meta = relation ? RELATION_TYPE_META[relation.type] : RELATION_TYPE_META.neutral;
 
   return (
@@ -113,6 +118,13 @@ export function FactionDetailPanel({ center, selected, relation, onClose, onEdit
               <EditIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          {onViewCard && (
+            <Tooltip title={`View ${selected.name} card`}>
+              <IconButton size="small" onClick={onViewCard}>
+                <VisibilityIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
         </Stack>
       </Box>
 

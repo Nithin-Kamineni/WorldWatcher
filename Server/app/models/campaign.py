@@ -136,24 +136,6 @@ class FactionRelation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class RandomEncounterTable(Base):
-    """DM-built grouping of existing Encounters into a table the DM rolls a die against
-    to pick one - distinct from Encounter.tables/resolution_type, which is importer-owned
-    reference data for 5etools' own random-encounter tables."""
-
-    __tablename__ = "random_encounter_tables"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
-    )
-    campaign_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("campaigns.id"), nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    die_expression: Mapped[str] = mapped_column(Text, nullable=False, default="1d8")
-    entries: Mapped[Optional[Any]] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
 class Quest(Base):
     __tablename__ = "quests"
 

@@ -33,6 +33,10 @@ interface FactionsRelationsGraphProps {
   search: string;
   /** Which influence/power tiers to show for non-center factions; center is always shown. */
   influenceFilter: FactionInfluence[];
+  /** Asks the parent to open the read-only faction card for this faction. The card itself
+   * lives in FactionsSection so the table and the graph share one instance (and one
+   * article-link builder) rather than each owning a copy. */
+  onViewFactionCard?: (faction: Faction) => void;
 }
 
 const CANVAS_SIZE = 680;
@@ -43,7 +47,7 @@ const OUTER_RING_RADIUS = 260;
 const INNER_RING_RADIUS = 160;
 const CENTER_NODE_SIZE = 112;
 
-export function FactionsRelationsGraph({ campaignId, search, influenceFilter }: FactionsRelationsGraphProps) {
+export function FactionsRelationsGraph({ campaignId, search, influenceFilter, onViewFactionCard }: FactionsRelationsGraphProps) {
   const theme = useTheme();
   const factionsByCampaignId = useFactionStore((s) => s.factionsByCampaignId);
   const relationsByCampaignId = useFactionStore((s) => s.relationsByCampaignId);
@@ -393,6 +397,7 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter }: 
               relation={activeRelation}
               onClose={() => setSelectedId(null)}
               onEditRelation={() => setRelationDialogOpen(true)}
+              onViewCard={onViewFactionCard ? () => onViewFactionCard(selected) : undefined}
             />
           )}
         </Stack>

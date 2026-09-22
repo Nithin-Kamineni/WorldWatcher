@@ -1,180 +1,186 @@
 import type { ReactNode } from 'react';
-import { useRef, useState } from 'react';
+import type { SvgIconComponent } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import ButtonBase from '@mui/material/ButtonBase';
 import Tooltip from '@mui/material/Tooltip';
-import Popper from '@mui/material/Popper';
-import Grow from '@mui/material/Grow';
-import AddIcon from '@mui/icons-material/Add';
 import HomeIcon from '@mui/icons-material/Home';
-import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import PublicIcon from '@mui/icons-material/Public';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
-import BuildIcon from '@mui/icons-material/Build';
 import MapIcon from '@mui/icons-material/Map';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import ShieldIcon from '@mui/icons-material/Shield';
-import RouteIcon from '@mui/icons-material/Route';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
-import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder';
-import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
+import { useNavMemoryStore } from '../../store/useNavMemoryStore';
+import { su } from '../../theme/uiScale';
+import {
+  ICON_RAIL_WIDTH,
+  ICON_RAIL_WIDTH_COMPACT,
+  RAIL_HEADING_FONT_SIZE,
+  RAIL_HEADING_LETTER_SPACING,
+  RAIL_ITEM_LABEL_FONT_SIZE,
+} from '../../theme/layout';
 
-export const ICON_RAIL_WIDTH = 64;
-
-interface HoverCreateAction {
-  label: string;
-  icon: ReactNode;
-  to: (worldId: string, campaignId?: string) => string;
-}
+/** Glyph size per mode. 20px ("small") is what fits above a 10px label; 28px is what reads as
+ * a button in its own right once the label is gone. */
+const ICON_SIZE_LABELLED = su(20);
+const ICON_SIZE_COMPACT = su(28);
 
 interface RailItem {
   key: string;
+  /** The cramped name drawn under the icon when labels are on - one short word, ~56px of
+   * room. Also what `getSectionLabel` reports for Resume cards. */
   label: string;
-  icon: ReactNode;
+  /** The full name, shown as the hover tooltip in BOTH modes. Deliberately not `label`: the
+   * tooltip has room to say what the section actually is ("Battle Maps", "DM Notes"), and
+   * hover is the only way an icon names itself once labels are off. */
+  tooltip: string;
+  /** The component, not an element: RailButton sizes it per mode. */
+  Icon: SvgIconComponent;
   to: (worldId: string, campaignId?: string) => string;
   requiresCampaign?: boolean;
   isActive: (pathname: string) => boolean;
-  /** Hovering the rail button flies out one or more small pill affordances to the right (e.g.
-   * the World icon's single shortcut into "Create new - pick a type", or Notes' 3-way
-   * Folders/Plots/Quests shortcut); a plain click still goes to `to()`, so hover is always a
-   * shortcut, never required. */
-  hoverCreate?: HoverCreateAction[];
 }
 
 const WORLD_ITEMS: RailItem[] = [
   {
     key: 'home',
     label: 'Home',
-    icon: <HomeIcon fontSize="small" />,
+    tooltip: 'Home',
+    Icon: HomeIcon,
     to: (w) => `/w/${w}/home`,
     isActive: (p) => /\/w\/[^/]+\/home$/.test(p),
   },
   {
     key: 'manager',
     label: 'World',
-    icon: <TravelExploreIcon fontSize="small" />,
+    tooltip: 'World Manager',
+    // The book icon the Lore rail item used to carry: the Compendium's content (Monsters,
+    // Spells, Magic Items) now lives inside the World manager, so World is the way in.
+    Icon: MenuBookIcon,
     to: (w) => `/w/${w}/manager?mode=hybrid`,
     isActive: (p) => p.includes('/manager'),
-    hoverCreate: [{ label: 'Create new entry', icon: <AddIcon sx={{ fontSize: 18 }} />, to: (w) => `/w/${w}/manager/entry/new` }],
   },
   {
     key: 'atlas',
     label: 'Atlas',
-    icon: <PublicIcon fontSize="small" />,
+    tooltip: 'Atlas',
+    Icon: PublicIcon,
     to: (w) => `/w/${w}/atlas`,
     isActive: (p) => p.includes('/atlas'),
   },
   {
     key: 'timeline',
     label: 'Time',
-    icon: <CalendarMonthIcon fontSize="small" />,
+    tooltip: 'Calendar',
+    Icon: CalendarMonthIcon,
     to: (w) => `/w/${w}/timeline`,
     isActive: (p) => p.includes('/timeline'),
   },
-  {
-    key: 'compendium',
-    label: 'Lore',
-    icon: <MenuBookIcon fontSize="small" />,
-    to: (w) => `/w/${w}/compendium`,
-    isActive: (p) => p.includes('/compendium'),
-  },
-  {
-    key: 'tools',
-    label: 'Tools',
-    icon: <BuildIcon fontSize="small" />,
-    to: (w) => `/w/${w}/tools`,
-    isActive: (p) => p.includes('/tools'),
-  },
+];
+
+/** Sections that no longer have a rail button but whose routes still resolve. Listing them
+ * here keeps `getSectionLabel` naming them (so Resume cards still read "Lore" / "Tools")
+ * instead of falling back to "Home".
+ *
+ * - Lore: the Compendium page's content moved into the World manager's Codex and People
+ *   groups, so the rail stopped advertising it - but `/w/:id/compendium` stays alive for
+ *   existing deep links (the Play page's Items window, chat entity refs).
+ * - Tools: dropped from the rail on request. `/w/:id/tools` still resolves and the command
+ *   palette still offers it. */
+const RETIRED_ITEMS: { label: string; isActive: (pathname: string) => boolean }[] = [
+  { label: 'Lore', isActive: (p) => p.includes('/compendium') },
+  { label: 'Tools', isActive: (p) => p.includes('/tools') },
 ];
 
 const CAMPAIGN_ITEMS: RailItem[] = [
   {
     key: 'play',
     label: 'Play',
-    icon: <SportsEsportsIcon fontSize="small" />,
+    tooltip: 'Play Session',
+    Icon: SportsEsportsIcon,
     to: (w, c) => `/w/${w}/c/${c}/play`,
     requiresCampaign: true,
     isActive: (p) => p.includes('/play'),
   },
   {
-    key: 'notes',
-    label: 'Notes',
-    icon: <AssignmentIcon fontSize="small" />,
-    to: (w, c) => `/w/${w}/c/${c}/notes`,
-    requiresCampaign: true,
-    isActive: (p) => p.includes('/notes'),
-    hoverCreate: [
-      { label: 'Folders', icon: <CreateNewFolderIcon sx={{ fontSize: 18 }} />, to: (w, c) => `/w/${w}/c/${c}/notes?tab=folders` },
-      { label: 'Plots', icon: <RouteIcon sx={{ fontSize: 18 }} />, to: (w, c) => `/w/${w}/c/${c}/notes?tab=plots` },
-      { label: 'Quests', icon: <PlaylistAddCheckIcon sx={{ fontSize: 18 }} />, to: (w, c) => `/w/${w}/c/${c}/notes?tab=quests` },
-    ],
-  },
-  {
-    key: 'encounters',
-    label: 'Encounters',
-    icon: <ShieldIcon fontSize="small" />,
-    to: (w, c) => `/w/${w}/c/${c}/encounters`,
-    requiresCampaign: true,
-    isActive: (p) => p.includes('/encounters'),
-  },
-  {
     key: 'maps',
     label: 'Maps',
-    icon: <MapIcon fontSize="small" />,
+    tooltip: 'Battle Maps',
+    Icon: MapIcon,
     to: (w, c) => `/w/${w}/c/${c}/maps`,
     requiresCampaign: true,
     isActive: (p) => p.includes('/maps'),
   },
+  {
+    key: 'notes',
+    label: 'Notes',
+    tooltip: 'DM Notes',
+    Icon: AssignmentIcon,
+    to: (w, c) => `/w/${w}/c/${c}/notes`,
+    requiresCampaign: true,
+    isActive: (p) => p.includes('/notes'),
+  },
+  {
+    key: 'encounters',
+    label: 'Encounters',
+    // One page with two halves: it opens on the unified random-table browser, and
+    // `?view=management` is the encounter side - so the tooltip has to name both.
+    tooltip: 'Random Tables & Encounters',
+    Icon: ShieldIcon,
+    to: (w, c) => `/w/${w}/c/${c}/encounters`,
+    requiresCampaign: true,
+    isActive: (p) => p.includes('/encounters'),
+  },
 ];
+
+const SETTINGS_ITEM: RailItem = {
+  key: 'settings',
+  label: 'Settings',
+  tooltip: 'Settings',
+  Icon: SettingsIcon,
+  to: (w, c) => (c ? `/w/${w}/c/${c}/settings` : `/w/${w}/settings`),
+  isActive: (p) => p.includes('/settings'),
+};
 
 interface IconRailProps {
   worldId: string;
   campaignId?: string;
 }
 
-function RailButton({ item, worldId, campaignId, active }: { item: RailItem; worldId: string; campaignId?: string; active: boolean }) {
+function RailButton({
+  item,
+  worldId,
+  campaignId,
+  active,
+  showLabel,
+}: {
+  item: RailItem;
+  worldId: string;
+  campaignId?: string;
+  active: boolean;
+  showLabel: boolean;
+}) {
   const navigate = useNavigate();
-  const location = useLocation();
   const disabled = item.requiresCampaign && !campaignId;
-  // The World rail item's hover-create flyout is orange only while actually on a create/
-  // article page (a new entry, or an existing one) - white the rest of the time.
-  const createActive = location.pathname.includes('/manager/entry/');
-  const [hovering, setHovering] = useState(false);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const anchorRef = useRef<HTMLButtonElement | null>(null);
-
-  const startHover = () => {
-    if (!item.hoverCreate) return;
-    hoverTimer.current = setTimeout(() => setHovering(true), 250);
-  };
-  const endHover = () => {
-    if (hoverTimer.current) {
-      clearTimeout(hoverTimer.current);
-      hoverTimer.current = null;
-    }
-    setHovering(false);
-  };
 
   const button = (
     <ButtonBase
-      ref={item.hoverCreate ? anchorRef : undefined}
       disabled={disabled}
+      aria-label={item.tooltip}
       onClick={() => navigate(item.to(worldId, campaignId))}
-      onMouseEnter={() => item.hoverCreate && startHover()}
-      onMouseLeave={endHover}
       sx={{
-        minWidth: 48,
+        minWidth: su(48),
         maxWidth: '100%',
-        py: 0.75,
-        px: 0.5,
-        borderRadius: 1.5,
+        ...(showLabel ? { py: 0.75, px: 0.5 } : { width: su(48), height: su(48) }),
+        borderRadius: showLabel ? 1.5 : 2,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 0.25,
         color: active ? 'primary.main' : 'text.secondary',
         bgcolor: active ? 'action.selected' : 'transparent',
@@ -182,106 +188,75 @@ function RailButton({ item, worldId, campaignId, active }: { item: RailItem; wor
         '&:hover': { bgcolor: disabled ? 'transparent' : 'action.hover' },
       }}
     >
-      {item.icon}
-      <Typography variant="caption" sx={{ fontSize: 10, lineHeight: 1.15, textAlign: 'center' }}>
-        {item.label}
-      </Typography>
+      <item.Icon sx={{ fontSize: showLabel ? ICON_SIZE_LABELLED : ICON_SIZE_COMPACT }} />
+      {showLabel && (
+        <Typography
+          variant="caption"
+          noWrap
+          sx={{ fontSize: RAIL_ITEM_LABEL_FONT_SIZE, lineHeight: 1.15, textAlign: 'center', maxWidth: '100%' }}
+        >
+          {item.label}
+        </Typography>
+      )}
     </ButtonBase>
   );
 
-  const wrapped = disabled ? (
-    <Tooltip title="Create a campaign in this world first" placement="right">
-      <span>{button}</span>
-    </Tooltip>
-  ) : (
-    button
-  );
-
-  if (!item.hoverCreate) return wrapped;
-
-  const actions = item.hoverCreate;
-  const singleAction = actions.length === 1;
-
-  // Rendered through a Popper (portaled to <body>, like Tooltip) rather than as a normal
-  // in-flow sibling: the icon rail scrolls vertically (overflowY: auto), and per the CSS
-  // overflow spec that forces the used value of overflowX to 'auto' too even when it's
-  // declared 'visible' - any absolutely-positioned child poking out past the rail's right
-  // edge gets silently clipped no matter what. Popper sidesteps that entirely.
+  // Hover names the icon, and that is all it does. The rail used to fly out "Create new
+  // entry" (World) and Folders/Plots/Quests (Notes) pills on the same gesture, which fought
+  // the tooltip for it and put a 250ms delay in front of plain navigation; both are gone and
+  // those destinations live on the pages themselves.
+  // The <span> is what lets a disabled button still raise a tooltip - a disabled element
+  // fires no pointer events of its own.
   return (
-    <>
-      {wrapped}
-      <Popper
-        open={hovering}
-        anchorEl={anchorRef.current}
-        placement="right"
-        transition
-        modifiers={[{ name: 'offset', options: { offset: [0, 0] } }]}
-        sx={{ zIndex: (theme) => theme.zIndex.tooltip }}
-      >
-        {({ TransitionProps }) => (
-          <Grow {...TransitionProps} timeout={180} style={{ transformOrigin: 'left center' }}>
-            <Box
-              onMouseEnter={() => setHovering(true)}
-              onMouseLeave={endHover}
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                bgcolor: 'background.paper',
-                border: 1,
-                borderLeft: 0,
-                borderColor: 'divider',
-                borderTopRightRadius: '6px',
-                borderBottomRightRadius: '6px',
-                boxShadow: 3,
-                overflow: 'hidden',
-              }}
-            >
-              {actions.map((action, i) => (
-                <ButtonBase
-                  key={action.label}
-                  title={action.label}
-                  onClick={() => navigate(action.to(worldId, campaignId))}
-                  sx={{
-                    width: 48,
-                    py: 0.75,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 0.25,
-                    color: singleAction && createActive ? 'primary.main' : 'common.white',
-                    borderTop: i > 0 ? 1 : 0,
-                    borderColor: 'divider',
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  {action.icon}
-                  <Typography variant="caption" sx={{ fontSize: 10, lineHeight: 1 }}>
-                    {singleAction ? 'Create' : action.label}
-                  </Typography>
-                </ButtonBase>
-              ))}
-            </Box>
-          </Grow>
-        )}
-      </Popper>
-    </>
+    <Tooltip title={disabled ? 'Create a campaign in this world first' : item.tooltip} placement="right">
+      <Box component="span" sx={{ display: 'flex', maxWidth: '100%' }}>
+        {button}
+      </Box>
+    </Tooltip>
   );
 }
 
 /** Looks up the rail label for a path, so Resume cards can show "which section you were last
  * in" without duplicating the rail's own active-path matching. */
 export function getSectionLabel(pathname: string): string {
-  const match = [...WORLD_ITEMS, ...CAMPAIGN_ITEMS].find((item) => item.isActive(pathname));
+  const match = [...WORLD_ITEMS, ...CAMPAIGN_ITEMS, ...RETIRED_ITEMS].find((item) => item.isActive(pathname));
   return match?.label ?? 'Home';
+}
+
+/** "WORLD" / "CAMPAIGN" over each group, in BOTH rail modes - they name what the icons under
+ * them belong to, which the icon-only rail needs at least as much as the labelled one.
+ *
+ * Keeping them is what puts a floor under the rail's width: "CAMPAIGN" is eight letter-spaced
+ * characters, it was being clipped to "AMPAIGN" at the default scale, and the type floor
+ * (RAIL_HEADING_FONT_SIZE) stops it shrinking before the rail would. So both come from
+ * theme/layout.ts and are floored together - the rail is never narrower than its own heading. */
+function RailGroupHeading({ children }: { children: ReactNode }) {
+  return (
+    <Typography
+      variant="caption"
+      color="text.secondary"
+      noWrap
+      sx={{
+        fontSize: RAIL_HEADING_FONT_SIZE,
+        letterSpacing: RAIL_HEADING_LETTER_SPACING,
+        lineHeight: 1.2,
+        mb: 0.25,
+        maxWidth: '100%',
+      }}
+    >
+      {children}
+    </Typography>
+  );
 }
 
 export function IconRail({ worldId, campaignId }: IconRailProps) {
   const location = useLocation();
+  const showLabel = useNavMemoryStore((s) => s.railLabelsVisible);
 
   return (
     <Box
       sx={{
-        width: ICON_RAIL_WIDTH,
+        width: showLabel ? ICON_RAIL_WIDTH : ICON_RAIL_WIDTH_COMPACT,
         flexShrink: 0,
         borderRight: 1,
         borderColor: 'divider',
@@ -290,40 +265,45 @@ export function IconRail({ worldId, campaignId }: IconRailProps) {
         flexDirection: 'column',
         alignItems: 'center',
         py: 1,
-        gap: 0.25,
+        gap: showLabel ? 0.25 : 0.5,
         overflowY: 'auto',
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
         '&::-webkit-scrollbar': { display: 'none' },
       }}
     >
-      <Typography variant="caption" color="text.secondary" sx={{ fontSize: 9, letterSpacing: 0.6, mb: 0.25 }}>
-        WORLD
-      </Typography>
+      <RailGroupHeading>WORLD</RailGroupHeading>
       {WORLD_ITEMS.map((item) => (
-        <RailButton key={item.key} item={item} worldId={worldId} campaignId={campaignId} active={item.isActive(location.pathname)} />
+        <RailButton
+          key={item.key}
+          item={item}
+          worldId={worldId}
+          campaignId={campaignId}
+          active={item.isActive(location.pathname)}
+          showLabel={showLabel}
+        />
       ))}
 
-      <Box sx={{ width: 32, height: '1px', bgcolor: 'divider', my: 1 }} />
-      <Typography variant="caption" color="text.secondary" sx={{ fontSize: 9, letterSpacing: 0.6, mb: 0.25 }}>
-        CAMPAIGN
-      </Typography>
+      <Box sx={{ width: su(32), height: '1px', bgcolor: 'divider', my: 1 }} />
+      <RailGroupHeading>CAMPAIGN</RailGroupHeading>
       {CAMPAIGN_ITEMS.map((item) => (
-        <RailButton key={item.key} item={item} worldId={worldId} campaignId={campaignId} active={item.isActive(location.pathname)} />
+        <RailButton
+          key={item.key}
+          item={item}
+          worldId={worldId}
+          campaignId={campaignId}
+          active={item.isActive(location.pathname)}
+          showLabel={showLabel}
+        />
       ))}
 
-      <Box sx={{ flexGrow: 1 }} />
+      <Box sx={{ flexGrow: 1, minHeight: 8 }} />
       <RailButton
-        item={{
-          key: 'settings',
-          label: 'Settings',
-          icon: <SettingsIcon fontSize="small" />,
-          to: (w, c) => (c ? `/w/${w}/c/${c}/settings` : `/w/${w}/settings`),
-          isActive: (p) => p.includes('/settings'),
-        }}
+        item={SETTINGS_ITEM}
         worldId={worldId}
         campaignId={campaignId}
         active={location.pathname.includes('/settings')}
+        showLabel={showLabel}
       />
     </Box>
   );

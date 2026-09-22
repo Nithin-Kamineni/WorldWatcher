@@ -47,7 +47,7 @@ export function ComingSoon({ title, description, icon, planned, note }: ComingSo
               <ListItemIcon sx={{ minWidth: 24 }}>
                 <FiberManualRecordIcon sx={{ fontSize: 6 }} />
               </ListItemIcon>
-              <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2', color: 'text.secondary' }} />
+              <ListItemText primary={item} slotProps={{ primary: { variant: 'body2', color: 'text.secondary' } }} />
             </ListItem>
           ))}
         </List>

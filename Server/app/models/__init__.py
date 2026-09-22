@@ -8,7 +8,6 @@ from app.models.campaign import (
     FactionRelation,
     Location,
     Quest,
-    RandomEncounterTable,
 )
 from app.models.combat import Combat, Combatant
 from app.models.creatures import Creature, CreatureAction
@@ -18,6 +17,7 @@ from app.models.encounters import (
     EncounterCreature,
     EncounterExplorationBlock,
     EncounterNpc,
+    EncounterReward,
     EncounterSocialBlock,
     EncounterTable,
     EncounterTableCreature,
@@ -64,8 +64,8 @@ from app.models.random_tables import (
     TableEntryTag,
     TableFormat,
 )
+from app.models.item_usage import ItemUsage
 from app.models.session_chat import SessionChat
-from app.models.situational_table import SituationalTable
 from app.models.spells import Spell
 from app.models.world import World
 
@@ -105,7 +105,6 @@ __all__ = [
     "Faction",
     "FactionRelation",
     "Quest",
-    "RandomEncounterTable",
     "Map",
     "MapFloor",
     "TokenLibrary",
@@ -119,6 +118,7 @@ __all__ = [
     "EncounterSocialBlock",
     "EncounterExplorationBlock",
     "EncounterNpc",
+    "EncounterReward",
     "Combat",
     "Combatant",
     "RawEntity",
@@ -127,8 +127,8 @@ __all__ = [
     "BastionFacilityInstance",
     "Note",
     "NoteFolder",
+    "ItemUsage",
     "SessionChat",
-    "SituationalTable",
     "Category",
     "Tag",
     "RandomTableTag",

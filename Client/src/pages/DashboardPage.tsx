@@ -25,6 +25,7 @@ import { useCreatureStore, getCreaturesForCampaign } from '../store/useCreatureS
 import { useShellStore } from '../store/useShellStore';
 import { useNavMemoryStore } from '../store/useNavMemoryStore';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
+import { SectionTitle } from '../components/shell/PageTitle';
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -112,9 +113,7 @@ export function DashboardPage() {
           )}
 
           <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-            <Typography variant="h5" sx={{ fontWeight: 700 }}>
-              Your worlds
-            </Typography>
+            <SectionTitle>Your worlds</SectionTitle>
             <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setNewWorldOpen(true)}>
               New world
             </Button>
@@ -154,6 +153,7 @@ export function DashboardPage() {
                     </ButtonBase>
                     <IconButton
                       size="small"
+                      aria-label={`Edit ${world.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingWorldId(world.id);
@@ -170,9 +170,7 @@ export function DashboardPage() {
 
           {recentlyEdited.length > 0 && (
             <>
-              <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>
-                Recently edited
-              </Typography>
+              <SectionTitle sx={{ mb: 1.5 }}>Recently edited</SectionTitle>
               <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
                 {recentlyEdited.map((item) => (
                   <Chip key={item.id} label={item.name} onClick={() => navigate(`/w/${item.worldId}/manager`)} />

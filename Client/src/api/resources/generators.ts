@@ -8,6 +8,11 @@ export const updateGenerator = (id: string, body: Record<string, unknown>) =>
   apiPatch<ApiGeneratorDetail>(`/generators/${id}`, body);
 export const replaceGeneratorComponents = (id: string, body: Record<string, unknown>) =>
   apiPut<ApiGeneratorDetail>(`/generators/${id}/components`, body);
+/** Task 11.4: forks a curated (is_system) generator into an editable copy the DM owns -
+ * the escape hatch that makes the read-only rule on PATCH/DELETE liveable. Mirrors
+ * cloneRandomTable. */
+export const cloneGenerator = (id: string, campaignId?: string | null) =>
+  apiPost<ApiGeneratorDetail>(`/generators/${id}/clone`, undefined, { campaign_id: campaignId ?? undefined });
 export const deleteGenerator = (id: string) => apiDelete(`/generators/${id}`);
 export const rollGenerator = (id: string, params: Record<string, string> = {}) =>
   apiPost<ApiGeneratorRollResult>(`/generators/${id}/roll`, { params });

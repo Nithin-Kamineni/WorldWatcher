@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -11,13 +11,16 @@ import PetsIcon from '@mui/icons-material/Pets';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import DiamondIcon from '@mui/icons-material/Diamond';
 import { ItemsSearchFilterBar } from './ItemsSearchFilterBar';
+import { ItemsBrowseSection, BROWSE_PAGE } from './ItemsBrowseSection';
 import { PinnableItemRow } from './PinnableItemRow';
 import { NpcBuilderLauncher } from './BuilderLaunchers';
+import { rankByUsefulness, type UsefulnessSignals } from '../../dm/randomTables/tableSearch';
+import { useItemUsageStore, getItemUsage } from '../../../store/useItemUsageStore';
 import { useCreatureStore, type CreatureScope } from '../../../store/useCreatureStore';
 import { useSpellStore } from '../../../store/useSpellStore';
 import { useMagicItemStore } from '../../../store/useMagicItemStore';
 import { usePlayItemsStore, getPlayItemsState, getSlotItems, compositeId, splitComposite } from '../../../store/usePlayItemsStore';
-import type { PaneSlot } from '../layout/playLayoutTrees';
+import type { ItemsSurface } from '../layout/playLayoutTrees';
 import { formatSpellLevel, SPELL_SCHOOL_COLORS, schoolTextColor } from '../../../types/spell';
 import { getMagicItemRarityOption } from '../../../types/magicItem';
 import { CreatureExpandedDetails } from '../../dm/CreatureExpandedDetails';
@@ -27,7 +30,7 @@ interface StatsSubWindowProps {
   worldId: string;
   campaignId: string;
   /** Which Items window this is - all pin/open/expand state below is scoped to it. */
-  slot: PaneSlot;
+  slot: ItemsSurface;
 }
 
 type StatToggle = 'all' | 'npc' | 'creature' | 'spell' | 'item';
@@ -60,8 +63,12 @@ export function StatsSubWindow({ worldId, campaignId, slot }: StatsSubWindowProp
 
   const hasQuery = search.trim() !== '';
 
+  // Fetched with or without a query. This used to bail out unless something was typed, which is
+  // what made a Stats sub-window opened mid-fight start completely blank - the DM had to know
+  // the name of the thing they were reaching for before the pane would show them anything
+  // (checklist I-P8). With no query the server hands back its first page and the ranking below
+  // floats whatever this campaign has actually been opening to the top of it.
   useEffect(() => {
-    if (!hasQuery) return;
     if (toggle === 'all' || toggle === 'npc' || toggle === 'creature') {
       fetchCreatureBrowse({
         campaignId,
@@ -80,36 +87,66 @@ export function StatsSubWindow({ worldId, campaignId, slot }: StatsSubWindowProp
     }
     // fetch* actions are stable zustand references - omitted to avoid re-running on every render
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasQuery, toggle, search, campaignId]);
+  }, [toggle, search, campaignId]);
 
   const byCampaignId = usePlayItemsStore((s) => s.byCampaignId);
-  const focusItem = usePlayItemsStore((s) => s.focusItem);
+  const focusItemAction = usePlayItemsStore((s) => s.focusItem);
   const pinItem = usePlayItemsStore((s) => s.pinItem);
   const unpinItem = usePlayItemsStore((s) => s.unpinItem);
-  const toggleExpanded = usePlayItemsStore((s) => s.toggleExpanded);
+  const toggleExpandedAction = usePlayItemsStore((s) => s.toggleExpanded);
   const slotState = getSlotItems(getPlayItemsState(byCampaignId, campaignId), slot);
   const pinned = slotState.pinnedByKind.stats;
   const current = slotState.currentByKind.stats;
   const expanded = slotState.expandedByKind.stats;
 
+  // Opening a stat block, and expanding one open to read it, are both usefulness signals - so
+  // every such action goes through these rather than calling the store directly. Keys are the
+  // same composite "creature:<id>" ids the pins use, so one creature ranks the same however it
+  // was reached (checklist I-P8).
+  const usageByCampaignId = useItemUsageStore((s) => s.byCampaignId);
+  const recordUse = useItemUsageStore((s) => s.recordUse);
+  const recordOpen = useItemUsageStore((s) => s.recordOpen);
+  const usage = getItemUsage(usageByCampaignId, campaignId, 'stats');
+
+  const focusItem = (compId: string) => {
+    recordOpen(campaignId, 'stats', compId);
+    focusItemAction(campaignId, slot, 'stats', compId);
+  };
+  const toggleExpanded = (compId: string) => {
+    if (!expanded.includes(compId)) recordUse(campaignId, 'stats', compId);
+    toggleExpandedAction(campaignId, slot, 'stats', compId);
+  };
+
+  const [limit, setLimit] = useState(BROWSE_PAGE);
+  const showMore = useCallback(() => setLimit((n) => n + BROWSE_PAGE), []);
+  // A narrowed result set is a fresh list - re-collapse it to the first page.
+  useEffect(() => {
+    setLimit(BROWSE_PAGE);
+  }, [search, toggle]);
+
   const creatures = creatureBrowse?.items ?? [];
   const spells = spellBrowse?.items ?? [];
   const items = magicItemBrowse?.items ?? [];
 
+  // Ranked by what this campaign has actually opened and pinned, never alphabetically:
+  // alphabetical order put "Acolyte" above the boss the party is currently fighting.
+  const usefulness: UsefulnessSignals = useMemo(() => ({ usage, pinnedIds: pinned }), [usage, pinned]);
+
   const browseRows = useMemo(() => {
-    if (!hasQuery) return [];
-    const rows: { compId: string; title: string; tagline: string; kind: 'creature' | 'spell' | 'item' }[] = [];
+    const rows: { id: string; name: string; tagline: string; kind: 'creature' | 'spell' | 'item' }[] = [];
     if (toggle === 'all' || toggle === 'npc' || toggle === 'creature') {
-      creatures.forEach((c) => rows.push({ compId: compositeId('creature', c.id), title: c.name, tagline: `${c.cr ? `CR ${c.cr}` : c.category} · ${c.type || c.category}`, kind: 'creature' }));
+      creatures.forEach((c) => rows.push({ id: compositeId('creature', c.id), name: c.name, tagline: `${c.cr ? `CR ${c.cr}` : c.category} · ${c.type || c.category}`, kind: 'creature' }));
     }
     if (toggle === 'all' || toggle === 'spell') {
-      spells.forEach((s) => rows.push({ compId: compositeId('spell', s.id), title: s.name, tagline: `${formatSpellLevel(s.level)} · ${s.school}`, kind: 'spell' }));
+      spells.forEach((s) => rows.push({ id: compositeId('spell', s.id), name: s.name, tagline: `${formatSpellLevel(s.level)} · ${s.school}`, kind: 'spell' }));
     }
     if (toggle === 'all' || toggle === 'item') {
-      items.forEach((i) => rows.push({ compId: compositeId('item', i.id), title: i.name, tagline: `${getMagicItemRarityOption(i.rarity).label} · ${i.type}`, kind: 'item' }));
+      items.forEach((i) => rows.push({ id: compositeId('item', i.id), name: i.name, tagline: `${getMagicItemRarityOption(i.rarity).label} · ${i.type}`, kind: 'item' }));
     }
-    return rows.sort((a, b) => a.title.localeCompare(b.title));
-  }, [hasQuery, toggle, creatures, spells, items]);
+    return rankByUsefulness(rows, search, usefulness);
+  }, [toggle, creatures, spells, items, search, usefulness]);
+
+  const visibleRows = browseRows.slice(0, limit);
 
   const displayIds = [...pinned, ...(current && !pinned.includes(current) ? [current] : [])];
 
@@ -182,7 +219,7 @@ export function StatsSubWindow({ worldId, campaignId, slot }: StatsSubWindowProp
                     pinned={isPinned}
                     onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'stats', compId) : pinItem(campaignId, slot, 'stats', compId))}
                     expanded={isExpanded}
-                    onToggleExpand={() => toggleExpanded(campaignId, slot, 'stats', compId)}
+                    onToggleExpand={() => toggleExpanded(compId)}
                     onOpenNewTab={() => window.open(`/w/${worldId}/compendium?creature=${c.id}`, '_blank')}
                   >
                     <CreatureExpandedDetails creature={c} />
@@ -202,7 +239,7 @@ export function StatsSubWindow({ worldId, campaignId, slot }: StatsSubWindowProp
                     pinned={isPinned}
                     onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'stats', compId) : pinItem(campaignId, slot, 'stats', compId))}
                     expanded={isExpanded}
-                    onToggleExpand={() => toggleExpanded(campaignId, slot, 'stats', compId)}
+                    onToggleExpand={() => toggleExpanded(compId)}
                     onOpenNewTab={() => window.open(`/w/${worldId}/compendium?spell=${s.id}`, '_blank')}
                   >
                     <Typography variant="caption" color="text.secondary" component="div" sx={{ '& span': { bgcolor: color, color: schoolTextColor(color), px: 0.5, borderRadius: 0.5 } }}>
@@ -225,7 +262,7 @@ export function StatsSubWindow({ worldId, campaignId, slot }: StatsSubWindowProp
                   pinned={isPinned}
                   onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'stats', compId) : pinItem(campaignId, slot, 'stats', compId))}
                   expanded={isExpanded}
-                  onToggleExpand={() => toggleExpanded(campaignId, slot, 'stats', compId)}
+                  onToggleExpand={() => toggleExpanded(compId)}
                   onOpenNewTab={() => window.open(`/w/${worldId}/compendium?item=${i.id}`, '_blank')}
                 >
                   <Typography variant="caption" color="text.secondary">
@@ -240,24 +277,21 @@ export function StatsSubWindow({ worldId, campaignId, slot }: StatsSubWindowProp
 
         {toggle === 'npc' && <NpcBuilderLauncher worldId={worldId} campaignId={campaignId} />}
 
-        <Typography variant="overline" color="text.secondary" sx={{ pl: 0.5 }}>
-          Browse
-        </Typography>
-        {!hasQuery ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            Search to browse creatures, spells, and items.
-          </Typography>
-        ) : browseRows.length === 0 ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            No matches.
-          </Typography>
-        ) : (
+        <ItemsBrowseSection
+          matched={browseRows.length}
+          total={browseRows.length}
+          narrowed={hasQuery}
+          noun="entries"
+          emptyLabel="Nothing to show - try a different search or filter."
+          limit={limit}
+          onShowMore={showMore}
+        >
           <List dense disablePadding>
-            {browseRows.map((row) => (
-              <ListItemButton key={row.compId} onClick={() => focusItem(campaignId, slot, 'stats', row.compId)} sx={{ borderRadius: 1.5 }}>
+            {visibleRows.map((row) => (
+              <ListItemButton key={row.id} onClick={() => focusItem(row.id)} sx={{ borderRadius: 1.5 }}>
                 {iconFor(row.kind)}
                 <ListItemText
-                  primary={row.title}
+                  primary={row.name}
                   secondary={row.tagline}
                   sx={{ ml: 1 }}
                   slotProps={{ primary: { sx: { fontSize: 13.5 } }, secondary: { sx: { fontSize: 11.5 } } }}
@@ -265,7 +299,7 @@ export function StatsSubWindow({ worldId, campaignId, slot }: StatsSubWindowProp
               </ListItemButton>
             ))}
           </List>
-        )}
+        </ItemsBrowseSection>
       </Box>
     </Box>
   );

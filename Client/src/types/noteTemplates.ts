@@ -1,7 +1,14 @@
-/** BBCode note templates for the Notes feature (see NotesFolderExplorer's quick-create
- * buttons). One session template (used directly - there's only one) and six narrative
- * templates (offered through a picker, since Narrative planning spans several distinct
- * document shapes - arc/villain/faction/brainstorm - unlike a session prep sheet). */
+/** Note templates for the Notes feature (see NotesFolderExplorer's quick-create buttons). One
+ * session template (used directly - there's only one) and six narrative templates (offered
+ * through a picker, since Narrative planning spans several distinct document shapes -
+ * arc/villain/faction/brainstorm - unlike a session prep sheet).
+ *
+ * These EMIT HTML, the format TipTapArticleEditor reads and writes. They used to build BBCode
+ * and rely on toEditorHtml converting it on first open, which rendered correctly but meant a
+ * brand-new note's source was a format nothing in the app writes any more - and the round trip
+ * flattened the numbered outline into plain "1. / 2." text with <br>s, because bbcodeToHtml has
+ * no ordered list (checklist I-N1). Every builder below is unchanged; only these six helpers
+ * are, which is what keeps the templates themselves readable. */
 
 export interface NoteTemplate {
   id: string;
@@ -10,31 +17,54 @@ export interface NoteTemplate {
   build: (name: string) => string;
 }
 
+/** Template text is authored here, not by a user, but it still goes through an escape - a
+ * prompt someone adds later containing "&" or "<" must not silently become markup. */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function heading1(text: string): string {
-  return `[h1]${text}[/h1]`;
+  return `<h1>${escapeHtml(text)}</h1>`;
 }
 
 function heading2(text: string): string {
-  return `[h2]${text}[/h2]`;
+  return `<h2>${escapeHtml(text)}</h2>`;
 }
 
 function heading3(text: string): string {
-  return `[h3]${text}[/h3]`;
+  return `<h3>${escapeHtml(text)}</h3>`;
+}
+
+/** TipTap's listItem holds block content, so every item wraps its text in a paragraph. */
+function listItems(items: string[]): string {
+  return items.map((item) => `<li><p>${escapeHtml(item)}</p></li>`).join('');
 }
 
 function bulletBlock(items: string[]): string {
-  return ['[list]', ...items.map((item) => `[*]${item}`), '[/list]'].join('\n');
+  return `<ul>${listItems(items)}</ul>`;
 }
 
 /** A field group: a title (h2 for flat templates, h3 when nested under an h2 group) followed
  * by its "- label / prompt" lines as a bullet list - mirrors the "- " lines the DM's source
  * templates use for every fillable prompt. */
 function section(title: string, fields: string[], level: 2 | 3 = 2): string {
-  return [level === 2 ? heading2(title) : heading3(title), bulletBlock(fields)].join('\n');
+  return (level === 2 ? heading2(title) : heading3(title)) + bulletBlock(fields);
 }
 
+/** A real ordered list now, not "1. " typed into paragraphs - the numbering is structure the
+ * editor maintains as beats are added or dropped. */
 function numberedList(items: string[]): string {
-  return items.map((item, i) => `${i + 1}. ${item}`).join('\n');
+  return `<ol>${listItems(items)}</ol>`;
+}
+
+/** A tickable checklist (TaskList/TaskItem - see TipTapArticleEditor). The session outline is
+ * the one thing on a prep sheet that is a run order rather than a form to fill in, and the DM
+ * reads it during play - so it gets boxes they can tick off as the session moves, from the
+ * note's own reading view (checklist F2.2 / I-N2). */
+function checklist(items: string[]): string {
+  return `<ul data-type="taskList">${items
+    .map((item) => `<li data-type="taskItem" data-checked="false"><p>${escapeHtml(item)}</p></li>`)
+    .join('')}</ul>`;
 }
 
 function buildSessionPrepTemplate(name: string): string {
@@ -42,7 +72,7 @@ function buildSessionPrepTemplate(name: string): string {
     heading1(name),
 
     heading2('Outline'),
-    numberedList(['[Situation / Moment]', '[Situation / Moment]', '[Event]', '[Situation / Moment]', '[Event]', '[Combat / Encounter]', '[Ending]']),
+    checklist(['[Situation / Moment]', '[Situation / Moment]', '[Event]', '[Situation / Moment]', '[Event]', '[Combat / Encounter]', '[Ending]']),
 
     heading2('Moments'),
     section('Start', ['What is happening when the session begins?', 'Where are the characters?', 'What immediately requires their attention?'], 3),
@@ -73,7 +103,7 @@ function buildSessionPrepTemplate(name: string): string {
     section('Plot Line 1: [Name]', ['Current situation:', 'What is happening right now?', 'What happens if the players do nothing?'], 3),
     section('Plot Line 2: [Name]', ['Current situation:', 'What is happening right now?', 'What happens if the players do nothing?'], 3),
     section('Plot Line 3: [Name]', ['Current situation:', 'What is happening right now?', 'What happens if the players do nothing?'], 3),
-  ].join('\n\n');
+  ].join('');
 }
 
 function buildCampaignArcTemplate(name: string): string {
@@ -89,8 +119,8 @@ function buildCampaignArcTemplate(name: string): string {
     section('Major Locations', ['[Location]', '[Location]']),
     section('Major Factions', ['[Faction]', '[Faction]']),
     section('Major Villains', ['[Villain]', '[Villain]']),
-    [heading2('Narrative Arcs'), numberedList(['[Narrative Arc]', '[Narrative Arc]', '[Narrative Arc]', '[Narrative Arc]'])].join('\n'),
-  ].join('\n\n');
+    heading2('Narrative Arcs') + numberedList(['[Narrative Arc]', '[Narrative Arc]', '[Narrative Arc]', '[Narrative Arc]']),
+  ].join('');
 }
 
 function buildNarrativeArcTemplate(name: string): string {
@@ -112,8 +142,8 @@ function buildNarrativeArcTemplate(name: string): string {
     section('Major Discoveries', ['[Discovery]', '[Discovery]']),
     section('Possible Arc Resolution', ['What conditions could end this arc?']),
     section('Bridge to Next Arc', ['What discovery, consequence, NPC, threat, or event could lead into another arc?']),
-    [heading2('Immediate Arcs'), numberedList(['[Immediate Arc]', '[Immediate Arc]', '[Immediate Arc]', '[Immediate Arc]'])].join('\n'),
-  ].join('\n\n');
+    heading2('Immediate Arcs') + numberedList(['[Immediate Arc]', '[Immediate Arc]', '[Immediate Arc]', '[Immediate Arc]']),
+  ].join('');
 }
 
 function buildImmediateArcTemplate(name: string): string {
@@ -132,7 +162,7 @@ function buildImmediateArcTemplate(name: string): string {
     section('Possible Resolution', ['How might this Immediate Arc end?']),
     section('Consequences', ['What changes after it ends?']),
     section('Related Sessions', ['Session [#]: [Name]', 'Session [#]: [Name]', 'Session [#]: [Name]']),
-  ].join('\n\n');
+  ].join('');
 }
 
 function buildNarrativeArcBrainstormTemplate(name: string): string {
@@ -149,7 +179,7 @@ function buildNarrativeArcBrainstormTemplate(name: string): string {
     section('Session 8', ['???']),
     section('Session 9', ['???']),
     section('Session 10', ['[Possible climax / resolution]']),
-  ].join('\n\n');
+  ].join('');
 }
 
 function buildVillainPlotTemplate(name: string): string {
@@ -171,7 +201,7 @@ function buildVillainPlotTemplate(name: string): string {
     section('Weaknesses', ['[Weakness]', '[Weakness]']),
     section('Secrets', ['[Secret]', '[Secret]']),
     section('Connections', ['Related factions:', 'Related NPCs:', 'Related locations:', 'Related Narrative Arcs:']),
-  ].join('\n\n');
+  ].join('');
 }
 
 function buildFactionGoalsTemplate(name: string): string {
@@ -196,7 +226,7 @@ function buildFactionGoalsTemplate(name: string): string {
     section('Party Reputation', ['How does the faction currently view the characters?']),
     section('Secrets', ['[Secret]', '[Secret]']),
     section('Recent Developments', ['[Development]', '[Development]']),
-  ].join('\n\n');
+  ].join('');
 }
 
 export const SESSION_TEMPLATES: NoteTemplate[] = [

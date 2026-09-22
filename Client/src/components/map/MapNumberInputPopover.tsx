@@ -61,7 +61,7 @@ export function MapNumberInputPopover({
           }}
           slotProps={{ htmlInput: { min: 1 } }}
         />
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
+        <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
           <Button size="small" onClick={onClose}>
             Cancel
           </Button>

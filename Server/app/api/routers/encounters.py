@@ -27,10 +27,12 @@ from app.models import (
     EncounterCreature,
     EncounterExplorationBlock,
     EncounterNpc,
+    EncounterReward,
     EncounterSocialBlock,
     EncounterTable,
     EncounterTableCreature,
     EncounterTag,
+    Item,
 )
 from app.schemas.combat import CombatDetail, CombatantRead
 from app.schemas.common import Page, PageMeta
@@ -53,6 +55,7 @@ from app.schemas.encounters import (
     EncounterTableCreatureRead,
     EncounterTableRead,
     EncounterUpdate,
+    RewardDetails,
 )
 from app.schemas.random_tables import TagIdsWrite
 
@@ -146,6 +149,7 @@ async def get_encounter(encounter_id: uuid.UUID, db: AsyncSession = Depends(get_
             read.portrait_asset_id = linked.portrait_asset_id
         detail.creatures.append(read)
     detail.random_tables = await _load_random_tables(db, encounter_id)
+    detail.rewards = await _load_rewards(db, encounter_id)
     detail.npcs = []
     for n in npc_rows_raw:
         read = EncounterNpcRead.model_validate(n)
@@ -166,6 +170,53 @@ async def get_encounter(encounter_id: uuid.UUID, db: AsyncSession = Depends(get_
     if exploration_block:
         detail.exploration_block = EncounterExplorationBlockRead.model_validate(exploration_block)
     return detail
+
+
+async def _load_rewards(db: AsyncSession, encounter_id: uuid.UUID) -> list[RewardDetails]:
+    """Task 11.1: reads encounter_rewards and hydrates the linked magic item, so a
+    reward of kind='item' renders from the items row rather than from a restatement
+    of its name. An item_id whose row has since been deleted degrades to whatever
+    `description` holds rather than vanishing."""
+    rows = (
+        await db.execute(
+            select(EncounterReward, Item)
+            .outerjoin(Item, EncounterReward.item_id == Item.id)
+            .where(EncounterReward.encounter_id == encounter_id)
+            .order_by(EncounterReward.sort_order)
+        )
+    ).all()
+    result: list[RewardDetails] = []
+    for row, item in rows:
+        read = RewardDetails.model_validate(row)
+        if item:
+            read.item_name = item.name
+            read.item_rarity = item.rarity
+        result.append(read)
+    return result
+
+
+async def _replace_rewards(db: AsyncSession, encounter_id: uuid.UUID, rewards: list[RewardDetails]) -> None:
+    """Whole-list replace, matching replace_encounter_tags: the reward list is edited
+    inline in the encounter form and saved with it, so there are no per-row endpoints."""
+    existing = (
+        await db.execute(select(EncounterReward).where(EncounterReward.encounter_id == encounter_id))
+    ).scalars().all()
+    for row in existing:
+        await db.delete(row)
+    await db.flush()
+    for i, reward in enumerate(rewards):
+        db.add(
+            EncounterReward(
+                encounter_id=encounter_id,
+                kind=reward.kind,
+                # Only kind='item' carries an FK - keeping one on any other kind would
+                # make the reference meaningless.
+                item_id=reward.item_id if reward.kind == "item" else None,
+                description=reward.description,
+                quantity=max(1, reward.quantity),
+                sort_order=reward.sort_order or i,
+            )
+        )
 
 
 async def _load_random_tables(db: AsyncSession, encounter_id: uuid.UUID) -> list[EncounterTableRead]:
@@ -216,21 +267,34 @@ async def _load_random_tables(db: AsyncSession, encounter_id: uuid.UUID) -> list
 
 @router.post("", response_model=EncounterRead, status_code=201)
 async def create_encounter(payload: EncounterCreate, db: AsyncSession = Depends(get_db)):
-    obj = Encounter(**create_kwargs(payload))
+    # rewards live in their own table now (Task 11.1), so they are never a column value.
+    fields = {k: v for k, v in create_kwargs(payload).items() if k != "rewards"}
+    obj = Encounter(**fields)
     db.add(obj)
+    await db.flush()
+    await _replace_rewards(db, obj.id, payload.rewards)
     await db.commit()
     await db.refresh(obj)
-    return obj
+    read = EncounterRead.model_validate(obj)
+    read.rewards = await _load_rewards(db, obj.id)
+    return read
 
 
 @router.patch("/{encounter_id}", response_model=EncounterRead)
 async def update_encounter(encounter_id: uuid.UUID, payload: EncounterUpdate, db: AsyncSession = Depends(get_db)):
     obj = await get_or_404(db, Encounter, encounter_id)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    rewards = data.pop("rewards", None)
+    for key, value in data.items():
         setattr(obj, key, value)
+    if rewards is not None:
+        # Absent means "leave rewards alone"; an empty list means "clear them".
+        await _replace_rewards(db, encounter_id, payload.rewards or [])
     await db.commit()
     await db.refresh(obj)
-    return obj
+    read = EncounterRead.model_validate(obj)
+    read.rewards = await _load_rewards(db, encounter_id)
+    return read
 
 
 @router.delete("/{encounter_id}", status_code=204)

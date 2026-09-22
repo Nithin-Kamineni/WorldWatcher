@@ -4,7 +4,7 @@ Note it's paired with (see app/models/note.py). Not player-facing chat and not a
 persistent messaging system - just a per-campaign thread the DM can jot lines into while
 running the table. messages is stored as JSONB (array of {id, text, createdAt}) rather
 than a join table since it's structured but not relational - it only needs to render in
-order and is replaced whole on write, matching the Note.tags / SituationalTable.columns
+order and is replaced whole on write, matching the Note.tags / Quest.objectives
 precedent for this kind of data in this codebase.
 """
 import uuid

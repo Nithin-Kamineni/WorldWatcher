@@ -60,44 +60,6 @@ them; U1 (header/toolbar scale consistent app-wide) is the surviving
 item in that area and stands on its own evidence.
 
 
-#####################################################################
-PART A - PLAY PANEL REDESIGN   (source: issues.txt)
-#####################################################################
-
---- A2.10. THE WINDOWS THEMSELVES -----------------------------------
-
-🈶    .b.3   Chats must be saved in the folders section inside the
-             session folder, and be viewable/editable there.
-             STATUS: implemented as an "Attached chats" section on the
-             session-prep note's own page (NoteDetailPage.tsx), with
-             inline rename and a "Run" shortcut into Play. NOT
-             implemented as literal sibling rows inside
-             NotesFolderExplorer's own folder browser - that component
-             renders purely from Note/NoteFolder arrays, and SessionChat
-             rows have no folderId of their own (only a noteId), so
-             teaching it to render them touches a large shared component
-             used across all of Notes.
-             RE-VERIFIED 2026-09-03: NotesFolderExplorer.tsx contains no
-             reference to chats at all, and SessionChat still has only
-             note_id (Server/app/models/session_chat.py:30) - no
-             folder_id. The app committed to the other model: a chat
-             belongs to a NOTE, not to a folder, which is what makes the
-             "Attached chats" section and the Run shortcut work.
-             -> RECLASSIFIED 🈶. Giving SessionChat its own folder_id now
-             would create a second, competing ownership path for the same
-             row and force NotesFolderExplorer to render a heterogeneous
-             list. The requirement's INTENT - chats findable and editable
-             from the session's folder - is already met one click in.
-
---- A3. PART A SCOPE NOTES (carried over) ---------------------------
-
-- Part A was implemented Client-only: new Zustand stores with all UI
-  state localStorage-persisted, and no backend or DB changes, consistent
-  with issues.txt not asking for schema changes.
-- Verification done at the time: `npx tsc --noEmit` clean and
-  `npx oxlint src` clean across the whole Client project after every
-  phase. Full click-through verification of every layout and interaction
-  in a browser was NEVER done and is still outstanding.
 
 
 #####################################################################
@@ -107,144 +69,8 @@ PART B - RANDOM TABLES + ENCOUNTERS SUBSYSTEM
 
 --- B0. ORIGINAL FRAMING --------------------------------------------
 
-The Encounters page used to hold four overlapping sections - random
-encounters, encounter management, roleplay and exploration - where
-"encounter management" and "random encounters" did more or less the same
-thing. The whole thing was to be restructured: a RANDOM TABLE is the
-rollable container, and ENCOUNTERS are the items inside it (the old
-model had it backwards, with random tables holding multiple encounters).
-Existing data had to be migrated afterwards into the new structure with
-correct formats, correct placement and reasonable tags. The roleplay and
-exploration sections were rehauled by the same changes.
-
-STACK CONTEXT (respect what exists - never rebuild or duplicate it):
-React + Konva + Vite + TypeScript + Zustand frontend; FastAPI +
-PostgreSQL backend. The app already has creature/monster stat blocks,
-spells and magic items (D&D Beyond + 5e SRD, with CR/HP/type), an
-initiative + combat tracker (HP/conditions), a faction relationship
-graph, an NPC generator and NPC records, a quest tracker, and maps with
-fog of war. Combat encounters must LINK to existing creature stat-block
-rows, social encounters to existing NPC rows, treasure tables to
-existing magic-item rows - storing only encounter-specific metadata
-(quantity, role, attitude) on the join rows, so a stat-block edit
-propagates everywhere.
-
-CORE DESIGN PHILOSOPHY - a random table is described along THREE
-INDEPENDENT dimensions, kept as three separate fields, never collapsed:
-  1. CATEGORY - what the table is ABOUT. Exactly ONE per table. A node
-     in a browsable tree.
-  2. TAGS - cross-cutting facets for search/filter (environment, tier,
-     theme, source book). MANY per table.
-  3. FORMAT - how the table is STRUCTURED and rolled. Exactly ONE.
-Example: a forest tier-1 wandering-monster table has
-category = Encounters > Combat, tags = [env:forest, tier:1,
-pillar:combat, phase:travel], format = lookup (or scene_generator).
-Environment and tier are TAGS, never categories - category nodes per
-environment or tier make the tree explode combinatorially.
-
---- B11. TASK 11 - CROSS-CUTTING INTEGRATION (the weak spot) --------
-
-⚠️  11.1    Every *_ref in tables and every entity-naming encounter
-            field must resolve to the existing creature/NPC/spell/item
-            records, with hydration endpoints provided.
-            STATUS: hydration endpoints exist and most fields are
-            reference-backed, but NOT every entity-naming field is yet
-            reference-backed or hydrated.
-            RE-VERIFIED 2026-09-03: hydration is real but LOCAL to random
-            tables - _hydrate_ref lives in random_tables.py:353 and is
-            called only from that router. Concrete confirmed gap, the
-            clearest one to act on first: EncounterReward is
-            `{ kind; description; quantity }` (Client/src/types/
-            encounter.ts:185) - a reward of kind 'item' names a magic
-            item in FREE TEXT with no FK, which is exactly the
-            "reference, never duplicate" rule being broken. By contrast
-            the exploration blocks ARE reference-backed (trap/hazard
-            carry damageType + conditionIds).
-            -> STILL OPEN: start with rewards -> magic_items FK.
-
-⚠️  11.2    Encounters must be referenceable FROM random tables
-            (reference / set-piece formats) AND random tables/generators
-            must be referenceable FROM encounters (e.g. an exploration
-            "wandering monster" complication rolling a table).
-            STATUS: tables -> encounters works fully. The reverse
-            direction is only partly there.
-            VERIFIED: encounters DO now carry wandering_table_id, an FK
-            to random_tables (Server/app/models/encounters.py:172), so
-            the exploration wandering-monster hook specifically works.
-            What is still missing is the general case - encounters
-            cannot reference generators, or tables in other contexts.
-            RE-VERIFIED 2026-09-03: unchanged. wandering_table_id
-            (encounters.py:172) is STILL the only encounter -> table FK
-            in the model; there is no generator_id anywhere on encounters.
-            -> STILL OPEN, but further along than progress2.txt claimed.
-
-⚠️  11.3    One browse/search screen unifying CATEGORY (tree) + TAGS
-            (facets) + FORMAT filters + full-text, for BOTH random
-            tables and encounters.
-            STATUS: random tables have the full unified graph/tag/
-            format/text browse. Encounters are still browsed separately.
-            VERIFIED: the backend for unified encounter browsing now
-            EXISTS - Encounter carries category_id and tags, there is an
-            encounter_tag join, and the encounters list endpoint already
-            accepts q, category_id and tag_ids (ANY-match)
-            (Server/app/api/routers/encounters.py:78-106). So the
-            remaining work is front-end only: EncountersSection still
-            renders encounters in their own view instead of through the
-            same unified browser as random tables.
-            RE-VERIFIED 2026-09-03: confirmed, and the shape of the work
-            is now clear. EncountersSection.tsx has a hard three-way view
-            switch - EncounterView = 'menu' | 'management' |
-            'random_tables' - and imports RandomTablesBrowseView for the
-            third one only; the file contains no category / tag / format
-            filtering of its own. The client API module has
-            replaceEncounterTags but listEncounters is a bare
-            QueryParams passthrough with no browse UI feeding it.
-            -> STILL OPEN, and now mostly a UI task rather than a
-            backend one: the job is to make RandomTablesBrowseView (or a
-            shared extraction of it) serve both entity kinds.
-
-⚠️  11.4    Respect user vs system content everywhere (is_system):
-            curated seed data read-only-ish, users can clone-to-edit and
-            freely add categories, tags, formats, tables, generators and
-            encounters.
-            STATUS: system/user rules exist for most content, but custom
-            formats and full generator clone-to-edit do not.
-            RE-VERIFIED 2026-09-03: HALF OF THIS IS NOW DONE. Custom
-            formats exist end to end - table_formats.py has GET/POST/
-            PATCH/DELETE and the client has the matching resource module
-            (Client/src/api/resources/tableFormats.ts, all four verbs).
-            Random tables have clone-to-edit
-            (random_tables.py:314, which explicitly sets is_system=False
-            on the clone) and generators DO enforce the read-only rule
-            (generators.py:113,137 guard PATCH and DELETE on is_system).
-            What is missing is only the escape hatch: generators.py has
-            no /clone route, so a curated generator is read-only with no
-            way to fork it.
-            -> STILL OPEN, but narrowed to ONE endpoint + its button.
-
---- B12. PART B DATA MIGRATION + REBUILD OUTCOMES -------------------
-
-⚠️  All old, now-unused code deleted rather than left as dead weight.
-    STATUS: the client side was cleaned up (the old random-table dialog,
-    the old roleplay-tables page and their data stores are gone).
-    VERIFIED: the BACKEND still carries the old subsystems -
-    Server/app/models/situational_table.py, and the routers
-    situational_tables.py and random_encounter_tables.py are all still
-    present and registered.
-    RE-VERIFIED 2026-09-03: unchanged - all three files still exist and
-    both routers are still included (api/router.py:73-74).
-    IMPORTANT NUANCE FOUND: the STRING 'situational_table' is still very
-    much alive on the client, but as a legacy ALIAS for random tables,
-    not as a use of the dead backend - useMentionableEntities.ts:71 maps
-    randomTables to type 'situational_table', and bbcode.ts:107 bakes
-    that literal into the EntityRefType union and the stored [ref]
-    markup. So the backend removal is safe, but do NOT rename that
-    literal as part of it: it is persisted inside users' note bodies.
-    -> STILL OPEN: decide whether those are still needed and, if not,
-    remove them along with their models/schemas and migration remnants.
-
 VERIFICATION PERFORMED AT THE TIME
-❌  PRE-EXISTING UNRELATED ISSUE, still outstanding: the project's
+✅  PRE-EXISTING UNRELATED ISSUE, now CLOSED (2026-09-04): the project's
     strict type-check step (not the actual app build) already had about
     a dozen errors before the tables/encounters work began, caused by a
     library-version mismatch elsewhere in the app - map popovers, the
@@ -258,6 +84,39 @@ VERIFICATION PERFORMED AT THE TIME
     declare. That is a real defect in the current Play-layout work and
     should be fixed on its own, not filed under this cleanup item. The
     other 18 are the same MUI v9 / Konva mismatch as before.
+    THE THREE NEW ONES ARE FIXED (2026-09-04). `locked` was not a stray
+    prop but a missing feature: both actions on an empty pane - filling
+    it and handing its space back - change the layout, so the lock has to
+    disable them the way it already disabled the pane header's close
+    button. Declared the prop and wired it: both buttons disable with a
+    tooltip saying why, and the hint line reads "The layout is locked."
+    `npx tsc -b` is back to exactly 18 errors in 12 files, all the
+    library mismatch. This item stays ❌ for those 18.
+    CLOSED 2026-09-04. ✅ All of them are fixed - `npx tsc -b` is clean
+    and `npm run build` (tsc -b + vite build) passes for the first time.
+    They were never an unfixable "library-version mismatch": every one
+    was a MUI v9 API removal with a documented replacement.
+      - `<Stack justifyContent=/alignItems=>` → the same values in `sx`
+        (v9 dropped the system props from StackOwnProps). 9 sites.
+      - `<ListItemText primaryTypographyProps={...}>` →
+        `slotProps={{ primary: ... }}`. 6 sites.
+      - `<Dialog PaperProps={...}>` → `slotProps={{ paper: ... }}`.
+      - Autocomplete's `renderInput` params lost `InputProps`; it now
+        hands down `slotProps`, so FactionRelationsField merges into
+        `slotProps.input` instead.
+      - `JSX.Element` → `ReactElement` (React 19 removed the global JSX
+        namespace).
+      - The one genuine Konva typing: MapObjectsLayer passed a
+        `KonvaEventObject<MouseEvent>` handler to `onTap`, which wants a
+        TouchEvent. Widened to `MouseEvent | TouchEvent` - TouchEvent
+        carries ctrlKey/metaKey too, so no cast was needed.
+    ALSO FOUND, and it matters more than the 18: **`npx tsc --noEmit`
+    checks NOTHING.** The root tsconfig.json is a solution file with
+    `"files": []` and two project references, so a bare `tsc --noEmit`
+    compiles zero files and exits 0 no matter what is broken -
+    `tsc --noEmit --listFilesOnly` prints nothing. Every "type-check is
+    clean" claim made against that command was vacuous. The real gates
+    are `npx tsc -b` (or `-p tsconfig.app.json`). CLAUDE.md updated.
 
 
 #####################################################################
@@ -267,83 +126,100 @@ Extracted from the ⚠️ and ❌ marks in Parts A-D, roughly highest value
 first. These are the items for the two big feature efforts, and they
 were each verified against the code on 2026-09-03.
 
-RE-VERIFIED 2026-09-03. Current tally of this list:
-  ✅ done      E11
-  ⚠️ partial   E6, E7, E8, E12
-  ❌ not done  E4, E5, E9, E13
-  🈶 moot      E10
-WHERE TO SPEND EFFORT, in order:
-  1. The 3 NEW type errors called out under E9 - a live defect in the
-     Play-layout code you are mid-refactor on, and the cheapest fix here.
-  2. E8 - one clone endpoint on generators closes all of 11.4.
-  3. E6 - reward -> magic item FK; a named, bounded instance of the
-     codebase's core "reference, never duplicate" rule being violated.
-  4. E4 - the biggest genuine feature left, and now UI-only.
-  5. E5 - pure deletion, no design needed (mind the alias caveat).
-  6. E13 - needs a layout decision from you before any code.
+RE-VERIFIED 2026-09-03, then WORKED THROUGH 2026-09-04.
+
+PART E IS NOW CLOSED. Every item still open on this list has been
+finished and verified: E6, E9, E12 and E13 on 2026-09-04, against the
+running stack (native dev, :8006/:5173, driven in a real browser). E4,
+E5, E7, E8, E10 and E11 were already done and had been stripped out or
+marked earlier. The 2026-09-03 "where to spend effort" ordering that
+used to sit here is spent - what remains for the Play page and the rest
+of the app is Part I, below.
+
+  ✅ done      E6, E9, E10, E11, E12, E13
 
 Parts F and G carry a second, older backlog (map, notes, articles,
 shell, randomizers, original product goals) inherited from the Client/
 tracking files. Those were NOT re-verified, so they are kept separate
 rather than merged in here - see the note at the top of Part F.
 
-❌  E4  Unified encounter browsing in the UI (11.3). The backend already
-        supports q + category_id + tag_ids; only the front end still
-        keeps encounters on a separate view.
-        RE-VERIFIED: EncountersSection still hard-switches between
-        'management' and 'random_tables' views and does no category/tag/
-        format filtering of its own.
 
-❌  E5  Remove the dead backend for the old subsystems - the
-        situational_table model plus the situational_tables and
-        random_encounter_tables routers - or document why they stay
-        (B12).
-        RE-VERIFIED: all three files present, both routers still included
-        at api/router.py:73-74. CAVEAT: keep the 'situational_table'
-        STRING - it is a live alias for random tables in mentions and is
-        persisted in stored [ref] BBCode.
-
-⚠️  E6  Audit remaining free-text entity-naming fields and make them
+✅  E6  Audit remaining free-text entity-naming fields and make them
         reference-backed + hydrated (11.1).
-        RE-VERIFIED: partly done - exploration blocks are reference-backed,
-        but EncounterReward still names magic items in free text. Start there.
+        The called-out gap was closed earlier - EncounterReward FKs items
+        via the encounter_rewards table (see 11.1).
+        THE STANDING AUDIT IS NOW DONE, 2026-09-04. What it covered:
+          - Encounters are clean. EncounterCreature / EncounterNpc /
+            EncounterTableCreature / EncounterReward all FK. The JSONB
+            detail blocks that LOOK like free text are not: trap and
+            hazard carry `condition_ids` (real FKs), and their damage
+            type, save ability and skill fields are closed enum pickers
+            in EncounterFormDialog (DAMAGE_TYPES / ABILITIES / SKILLS).
+          - Random tables are clean - table_entries has creature_id,
+            npc_id, item_id, encounter_id and target_table_id.
+          - Combatant is clean (creature_id / character_id /
+            map_token_id); `display_name` is a deliberate override.
+          - NOT violations, recorded so the next sweep can skip them:
+            characters.class/subclass/species/background are free text,
+            but there is no class/species/background table to reference -
+            the compendium is creatures/spells/items only. Same for
+            skills, damage types and abilities: no table exists, and a
+            closed TypeScript enum is the right shape for a fixed rules
+            constant.
+          - ONE REAL FINDING, and it is FIXED: the map / initiative token
+            status picker. Client/src/types/effect.ts hard-coded the 15
+            core 5e conditions as strings while a `conditions` table with
+            its own /api/conditions router sat right there - the same
+            table EncounterFormDialog already picks from. Replaced by
+            useEffectCatalogStore, which loads that table and groups it
+            by `condition_type`: Conditions (the 15, deduped across the
+            two rules editions by keeping the fuller text), Statuses
+            (Bloodied / Concentration / Surprised) and Diseases (26 from
+            the source books, previously unreachable anywhere in the
+            app). Every row now carries its rules text as a tooltip, on
+            the picker row AND on the applied chip, so "what does
+            Restrained do again" is answered without leaving the map.
+            Verified in the browser: 73 entries, 15/3/26/29 by group,
+            degraded=false. CONDITION_FALLBACK_NAMES stays as a
+            names-only offline fallback; SPELL_STATUS_EFFECTS stays
+            curated on purpose (Rage, Dodge, Dying and Stable are not
+            spells and are in no table).
 
-⚠️  E7  Let encounters reference generators, and tables from contexts
-        beyond the wandering-monster hook (11.2).
-        RE-VERIFIED: wandering_table_id is still the only such FK; no
-        generator_id on encounters at all.
-
-⚠️  E8  Custom formats and full generator clone-to-edit under the
-        is_system user/system rules (11.4).
-        RE-VERIFIED: custom formats are DONE (table_formats CRUD + client
-        resource module). Only the generator /clone route is missing -
-        curated generators are guarded read-only with no way to fork.
-
-❌  E9  Fix the ~dozen pre-existing strict type-check errors from the
+✅  E9  Fix the ~dozen pre-existing strict type-check errors from the
         library-version mismatch in map popovers, the notes folder tree
         and the world pages (Part B verification note).
-        RE-VERIFIED: now 21 errors in 13 files. 18 are the known
-        mismatch; 3 are NEW and unrelated to it - EmptyPaneWindow.tsx:29
-        (x2) and PaneWindow.tsx:85 pass/expect a `locked` prop that
-        EmptyPaneWindowProps never declares. Fix those 3 FIRST and
-        separately: they are a real bug in current Play-layout work.
+        DONE 2026-09-04. All 20 errors across 11 files are fixed and
+        `npm run build` passes end to end for the first time. They were
+        MUI v9 API removals with documented replacements, not an
+        unfixable mismatch - the full breakdown is under B0 in Part B,
+        along with the separate and more important discovery that
+        `npx tsc --noEmit` was compiling zero files and had therefore
+        never been a gate at all.
 
-🈶  E10 Session chats as literal sibling rows inside
-        NotesFolderExplorer's folder browser (A2.10.3b.3).
-        RECLASSIFIED: the app settled on chat-belongs-to-NOTE (SessionChat
-        has note_id only). Adding folder_id now would introduce a second,
-        competing ownership path for the same row and undo that model.
-        The intent - chats findable and editable from the session - is
-        already met via the note page's "Attached chats" section.
+✅  E10 Session chats as rows inside NotesFolderExplorer's folder
+        browser (A2.10.3b.3).
+        DONE 2026-09-04 on the user's instruction - see .b.3 in Part A.
+        The ownership objection still stands and was respected: SessionChat
+        did NOT get a folder_id. Instead the single protected "DM Notes"
+        folder inside Sessions is a VIEW onto the campaign's chats, so a
+        chat still belongs only to a note.
+        SUPERSEDED 2026-09-04 on the "open a chat" behaviour: a row used
+        to open the Play page's Chat window. It now opens the thread's
+        own page (ChatDetailPage, /c/:campaignId/chats/:chatId), where
+        the transcript can be read, searched and edited message by
+        message; "Run in Play" is a separate, explicitly-labelled action
+        and is the only thing that still opens Play. See the 2026-09-04
+        entry at the end of Part I for why.
 
 ✅  E11 Replace the text/JSON boxes on the free-form encounter fields
         (rewards, some exploration sub-details) with real mini-forms.
         DONE. Rewards are a typed repeating row; trap/hazard/puzzle/
         skillChallenge/navigation/sensoryClues all have typed editors.
         No JSON boxes remain in EncounterFormDialog. (The reward->magic
-        item FK gap is tracked under E6, not here.)
+        item FK gap was tracked under E6 and is now closed - the reward
+        row's item field is a magic-item picker.)
 
-⚠️  E12 Manual browser click-through of every Play layout and
+✅  E12 Manual browser click-through of every Play layout and
         interaction.
         2026-09-03: the Items window's four sub-windows were driven in a
         real browser (Playwright) - tab open/close, the counted
@@ -362,21 +238,89 @@ rather than merged in here - see the note at the top of Part F.
         independent (different currentByKind values per slot), a
         creature stat card opened from an encounter roster, and a rolled
         table climbing from row 6 to row 1 of the browse list.
-        -> STILL OPEN, but much narrower: divider resizing by drag,
-        chat-pane collapse, the triple-half layout, and the whole page
-        under a locked layout are all still unexercised. Pane
-        drag-and-drop was verified by dispatching synthetic DragEvents
-        (Playwright cannot drive native HTML5 drag), so the real mouse
-        path has still never been used.
+        2026-09-04: THE FOUR REMAINING GAPS ARE NOW EXERCISED, with a
+        real mouse (Playwright CDP input, not synthetic events):
+          - Divider resize by drag: dragged the triple-half root divider
+            350px; it tracked the pointer (x 1430 -> 1075) and committed
+            `triple-half: [0.744, 1.256]` to paneSizes.
+          - Chat-pane collapse: collapsedPanes.p3 went true, the pane
+            became the thin strip with its "Expand DM Notes" control, and
+            expanding put it back.
+          - Triple-half: picked from the More-layouts popover, three
+            panes rendered (session / items / chat), committed to the
+            store.
+          - Locked layout: audited every affordance at once. Dividers
+            leave the DOM, all three pane close buttons disable, all
+            three quick-layout buttons plus More-layouts and Reset
+            disable, pane headers stop being draggable, and the lock
+            button relabels to "Unlock layout". The only things still
+            live are the Items SUB-TAB drag and close, which are window
+            content rather than layout - correct.
+        Three defects the click-through turned up, all fixed in the same
+        pass: the details-panel floating handle was sitting on top of the
+        rightmost pane's close button (see the U-fix note under P4), and
+        the tab strip's crush behaviour (P10).
+        A THIRD DEFECT, found the same way and FIXED: where a vertical
+        and a horizontal divider cross, grabbing the intersection
+        resized the WRONG AXIS. Every divider sat at the same z-index, so
+        DOM order decided the winner at the overlap - and the nested
+        divider is always later in the tree, so the outer one always
+        lost. Because a horizontal divider only tracks clientY, a
+        horizontal drag on that spot moved nothing at all: it committed a
+        delta of 0.02px and looked like a dead divider.
+        SplitPane now passes `depth` down and stacks dividers
+        `DIVIDER_BASE_Z - depth`, so outer beats inner. That matches what
+        the pointer is actually on - the outer divider runs through that
+        pixel, the inner one only reaches it via its half-hit-size
+        overhang - and the hover tint now shows which axis is about to
+        move. Verified at the exact failing point: the cursor there went
+        from row-resize to col-resize, and a 300px horizontal drag went
+        from a no-op to committing `triple-half: [0.858, 1.142]`.
+        (This was written up as a "known papercut, not worth fixing" in
+        the first pass. That was wrong on both counts - it is a dead
+        control, not a papercut, and the fix is four lines.)
 
-❌  E13 Clicking a map token or an initiative-tracker entry cannot open
-        that creature in the Items window. Asked for 2026-09-03 and NOT
-        built: the map and the initiative panel live on MapPage, a
-        separate route from PlayPage, so there is no Items window on
-        screen to open into. Needs either a 'map' pane kind in the Play
-        workspace (playLayoutTrees/PaneWindow/usePlayLayoutStore) or the
-        Items window rendered as a MapPage sidebar - a layout decision,
-        not a wiring one.
+✅  E13 Clicking a map token or an initiative-tracker entry cannot open
+        that creature in the Items window.
+        BUILT 2026-09-04, taking the second of the two options: the Items
+        window rendered as a MapPage sidebar section. The first option (a
+        'map' pane kind inside Play) was rejected because MapPage holds
+        its tokens and initiative in local component state, so a
+        Play-side map pane would have meant lifting most of a 1200-line
+        page into a store before a single pixel moved.
+        How it is wired:
+          - `ItemsSurface = PaneSlot | 'map'` (playLayoutTrees.ts) is the
+            new keyspace for usePlayItemsStore. The map sidebar is a
+            fifth Items surface alongside p1-p4, so what the DM pins
+            there does not disturb either Play pane. PaneHeader accepts
+            it and narrows 'map' out of the drag path (that surface is
+            never inside a PaneDragProvider, so `enabled` is already
+            false there).
+          - MapSidebar gained a fourth rail section, "Reference", 420px
+            wide rather than 300 because it holds a stat block, not a
+            list row. It takes a `SidebarOpenRequest {section, nonce}` so
+            the page can pull it open; the nonce is what makes
+            double-clicking the SAME token twice reopen it the second
+            time.
+          - MapPage.handleTokenStatsRequest now calls
+            showCreatureInReference(): openTab + focusItemInTab on the
+            'map' surface's Stats sub-window, then opens the panel. The
+            existing creature-resolution fallbacks (campaign cache ->
+            browse caches -> on-demand fetch) are untouched, and
+            StatsSubWindow hydrates an unseen creature by id on its own.
+          - Three entry points reach it: double-click a token on the
+            canvas, double-click a row in the bottom InitiativeBar, and a
+            NEW per-row stat-block button in the sidebar's
+            InitiativePanel (disabled with a reason when the token has no
+            linked creature).
+          - CreatureStatBlockDialog is no longer used on MapPage. The
+            sidebar is strictly better mid-combat: a modal over the board
+            stops the DM moving tokens while reading it, a panel does
+            not. The component still exists for its other callers.
+        Verified in the browser end to end: the Reference section renders
+        the Items window on the map page, and a creature focused on the
+        'map' surface came back as a fully rendered stat block
+        (Aarakocra - AC 12, HP 13 (3d8), CR 1/4, Dive Attack).
 
 
 #####################################################################
@@ -396,121 +340,1252 @@ tint (paneDrag.tsx / PaneDropZone.tsx), Items state keyed per pane slot
 so two Items windows are independent, and usefulness-ranked random-table
 search and browse (tableSearch.ts + useTableUsageStore.ts).
 
+2026-09-04 ADDITIONS to that context, from the Part B/E closing pass:
+
+  - The Play page's own EMPTY STATE was a dead end. A campaign with no
+    session prep note got "Create one in Notes -> Folders -> Sessions,
+    then come back here to run it" and a "Go to Notes" button - three
+    navigations and a mental note to return. It now leads with "Create a
+    session note", which makes the same note the Notes explorer's own
+    "New session prep" makes (session folder, SESSION_TEMPLATES[0]) and
+    drops the DM straight into the running workspace on it. "Go to
+    Notes" stays as a text button beside it. Verified in the browser:
+    one click from the empty state to a filled session-prep outline in
+    the workspace.
+  - The Items window is no longer Play-only: the map page's sidebar has
+    a "Reference" section rendering the same component on its own 'map'
+    Items surface (checklist E13). Anything added to ItemsWindow or its
+    sub-windows now shows up in two places, and its `slot` prop is
+    typed ItemsSurface, not PaneSlot.
+
 --- I-P. PLAY PAGE --------------------------------------------------
 
-❌  P1  Pane drag-and-drop only SWAPS two panes. Dropping on a pane's
+✅  P1  Pane drag-and-drop only SWAPS two panes. Dropping on a pane's
         edge to split it, or dropping to create a new row/column, is not
         supported - so the reachable arrangements are still the 6 static
         trees in playLayoutTrees.ts, minus whatever is closed. A DM who
         wants "three panes, the middle one narrow and split top/bottom"
         still cannot build it.
+        DONE 2026-09-04, on the model you chose: THE SIX PRESETS STAY AS
+        STARTING POINTS YOU EDIT.
+        Picking a preset seeds an editable per-campaign copy of its tree
+        (usePlayLayoutStore.customTrees, keyed by preset). Splitting a
+        pane edits that copy; picking the preset again, or "Reset this
+        layout", throws the edits away and returns to the shape on the
+        toolbar icon. So `layoutId` keeps meaning "which preset am I
+        working from", every glyph still tells the truth, and nothing
+        needed a saved-layout manager.
+          - PaneSlot widened from p1-p4 to p1-p8. A bounded union, not a
+            bare string: every piece of Play state is keyed by slot
+            (window assignment, Items tab sets, collapsed and dismissed
+            flags) and those Record types stay exhaustive and checked.
+            Eight is well past the point where another pane helps.
+          - splitLeaf inserts a SIBLING when the target's parent already
+            runs along the requested axis, rather than nesting a split
+            inside a split - three panes in a row stay one row of three,
+            which is both what the DM sees and what keeps the divider
+            between every adjacent pair draggable. removeLeaf collapses
+            any split left holding one child, so the tree never grows
+            pointless wrappers.
+          - Split node `path` (the paneSizes key) is now a stable id,
+            never renumbered: a generated one for splits the DM makes,
+            the original positional ones for presets. Renumbering on
+            each edit would have silently reattached remembered sizes to
+            different splits, so splitting one pane would resize
+            another.
+          - Splitting is in the pane header's move menu ("Split right /
+            down / left / up") rather than only as an edge-drop, for the
+            same reason P2 put swapping there: a menu item works from
+            the keyboard and on a touch screen. The new pane starts
+            EMPTY, so it lands on the existing placeholder that already
+            asks what goes there (P4).
+          - Both "find me a pane of this kind" callers (an @-mention
+            click, opening a chat in Play) now ask the LIVE tree via
+            getLayoutSlots instead of the preset's `slots` - an edited
+            layout has slots the preset never mentions, and landing on
+            one that is not on screen would have silently done nothing.
+        Verified in the browser by building the item's own example: from
+        the three-pane preset, "Split down" on the MIDDLE pane produced
+        row[p1, column[p2, p4], p3] and measured as three columns with
+        the middle one split top/bottom (session 907x1195 at x=64; items
+        907x597 at y=57; new pane 907x597 at y=655 in the same column;
+        DM notes 907x1195 at x=1878). Filled the new pane from its
+        placeholder - four working panes - then Reset, which returned
+        the three-pane preset and cleared the stored tree.
+        NOT DONE, and worth its own round: dropping a DRAGGED pane on
+        another pane's edge. The store action and the tree surgery are
+        in place and shared, so it is now a PaneDropZone change (edge
+        sub-zones instead of one whole-pane target) rather than an
+        architecture change.
 
-❌  P2  Pane rearranging is mouse-only. It uses native HTML5 drag, so
+✅  P2  Pane rearranging is mouse-only. It uses native HTML5 drag, so
         there is no keyboard path to move or swap a window and no
-        pointer-event fallback for touch. This is also why it cannot be
-        driven by Playwright's real mouse (see E12).
+        pointer-event fallback for touch.
+        DONE 2026-09-04. The drag handle is no longer decoration: it is
+        a real IconButton ("Move Items", "Move DM Notes"…) that opens a
+        menu of the other panes - "Swap with Session Notes", "Swap with
+        Items". One control covers all three gaps at once: keyboard
+        (it is a button in the tab order with a normal MUI menu), touch
+        (a tap, no drag gesture), and anyone who would simply rather not
+        drag. Dragging still works exactly as before; this is a second
+        route to the same swap, not a replacement.
+        PaneDragContext grew `slots`, `labelForSlot` and `swap` so the
+        menu can name its targets by what they are showing rather than
+        by slot id, and the Items window - which has no `title`, its
+        header being a tab strip - names itself through labelForSlot
+        instead of reading "Move this window".
+        Verified in the browser with the KEYBOARD ONLY, on a three-pane
+        layout: opened the Items pane's move menu, ArrowDown, Enter -
+        windowAssignment went from {p1 session, p2 items, p3 chat} to
+        {p1 session, p2 chat, p3 items} and the headers relabelled to
+        match.
 
-❌  P3  A sub-tab can only be reordered within its own Items window.
+✅  P3  A sub-tab can only be reordered within its own Items window.
         Dragging a sub-tab into the OTHER Items window, or tearing one
-        off into its own pane, is not supported - which is the natural
-        next thing to try once two Items windows exist.
+        off into its own pane, is not supported.
+        DONE 2026-09-04, both halves.
+        The drag payload is now `${sourceSlot}:${kind}` rather than the
+        bare kind, in its own module (items/tabDrag.ts) shared by the
+        three surfaces that speak it. That is the crux: a receiving
+        window's `draggingTab` state only ever describes a drag that
+        started in itself, so without the source slot in the payload it
+        had no way to know where an arriving tab came from. The
+        dragover/drop guards moved off `draggingTab` and onto
+        `dataTransfer.types` for the same reason.
+          - CROSS-WINDOW MOVE: usePlayItemsStore.moveTabToSlot moves the
+            tab AND that kind's pins, opened row and expanded rows, and
+            makes it active in its new home. The tab is its contents -
+            leaving them behind would empty the tab in the act of moving
+            it.
+          - TEAR-OFF: an empty pane placeholder accepts a tab drop
+            ("Drop to give this sub-window its own pane", with a primary
+            outline while hovering), becomes an Items window and takes
+            the tab with `replace: true` so it lands ALONE rather than
+            beside the default Random Tables tab.
+        Verified in the browser with synthetic DragEvents over a shared
+        DataTransfer (native HTML5 drag, which Playwright's real mouse
+        cannot drive - see E12): payload read back as "p2:factions", the
+        Factions tab left p2, arrived active in p3 and brought its
+        opened faction id with it; then a fresh run tore Factions off
+        onto a closed pane, which became an Items window holding only
+        Factions while the other window kept Random Tables.
 
-❌  P4  Closing a pane leaves an empty placeholder, but nothing
-        remembers what used to be in it. "Bring closed windows back"
-        restores the SPACE, not the window kind that was there; the DM
-        has to pick the kind again.
+✅  P4  Closing a pane leaves an empty placeholder, but nothing
+        remembers what used to be in it.
+        DONE 2026-09-04. usePlayLayoutStore gained
+        `lastKindBySlot[layoutId][slot]`, written by closePane and
+        dismissPane and cleared by setWindowKind and resetLayout, and
+        swapped along with everything else by swapPanes. Two things use
+        it: the empty placeholder now leads with a filled "Reopen DM
+        Notes" button (the kind's own icon, with "Something else"
+        demoted to a text button beside it), and "bring closed windows
+        back" puts each restored pane's window back rather than handing
+        over bare space. Verified in the browser: closed DM Notes ->
+        placeholder offered Reopen DM Notes -> one click restored it.
 
-❌  P5  Still only three window kinds (Session Notes / DM Notes /
+        TWO DEFECTS FOUND WHILE VERIFYING THIS, both fixed:
+          - The details panel's floating show/hide handle is pinned to
+            the viewport's right edge and deliberately takes no layout
+            space, so it sat ON TOP of the rightmost pane's close button
+            - which in the triple and quad layouts is exactly where a
+            pane header lands. The close button was genuinely unclickable
+            (Playwright reported the handle intercepting the pointer).
+            RightPanel now exports RIGHT_PANEL_HANDLE_WIDTH and the Play
+            workspace reserves that much right padding.
+          - Every icon-only control in the Play chrome had NO accessible
+            name - see U6.
+
+✅  P5  Still only three window kinds (Session Notes / DM Notes /
         Items). A 'map' kind and an 'initiative tracker' kind are what
-        E13 actually needs, and are the obvious way to make Play the
-        single command centre instead of one of three routes a DM keeps
-        switching between mid-session.
+        E13 actually needs.
+        CLOSED 2026-09-04 AS A DECISION, NOT AS CODE - your call, and I
+        agree with it: the map is too big a feature to live in a pane
+        and belongs on its own page. It has a Konva stage, its own
+        toolbar, fog, floors, a WebSocket sync and a full-viewport
+        layout; squeezing that into a third of the Play screen would
+        make both worse.
+        The cross-need that made this item look necessary was already
+        met from the other direction: E13 put the Items window INTO the
+        map page's sidebar, so a map token or an initiative row opens
+        its creature's stat block without leaving the map. The map does
+        not need to come to Play; the reference material went to the
+        map.
+        REFINEMENT DONE INSTEAD, per your "refine things around this":
+        maps are now @-mentionable, and clicking one opens the map page
+        with that map loaded - see U9. A session note can finally point
+        at the map it is about.
+        STILL WORTH DOING SEPARATELY (not blocked, just not this): an
+        INITIATIVE pane in Play. Its state already lives in the maps
+        store, but the ~250 lines that act on it - roll, next turn,
+        damage, lock, start/end encounter, undo - are inline in
+        MapPage.tsx against its local mutateActiveFloor closures. They
+        need extracting into a shared hook first, or Play gets a second,
+        silently diverging copy of your combat rules. Say the word.
 
-❌  P7  Per-slot Items state is never garbage-collected. Pins, opened
+✅  P7  Per-slot Items state is never garbage-collected. Pins, opened
         rows and expanded rows persist per pane slot in localStorage
         forever, including slots belonging to layouts the DM no longer
         uses, and there is no "clear this window" action. Reset clears
         the layout, not the Items state behind it.
+        DONE 2026-09-04, all three halves.
+          - "CLEAR THIS WINDOW" is an icon action in the Items window's
+            pane header, present only when there is something to clear
+            and labelled with the count ("Clear this window (3 pinned or
+            open rows)") so it is never a blind button. It drops that
+            slot's whole state - tab strip, pins, opened and expanded
+            rows - back to a fresh Random Tables window.
+          - RESET NOW CLEARS THE ITEMS STATE BEHIND THE LAYOUT.
+            usePlayItemsStore.clearCampaignSlots wipes every pane slot,
+            and the toolbar's Reset calls it alongside resetLayout. The
+            'map' surface is deliberately spared: it is the map page's
+            Reference sidebar and belongs to no Play layout, so a Play
+            reset must not wipe it out from under that page.
+          - RETIRED SLOTS ARE PRUNED ON LOAD. pruneUnknownSlots drops any
+            surface outside p1-p4/'map', run from onRehydrateStorage. It
+            is a real action deferred by a microtask, not an in-place
+            mutation of the rehydrating state - the first attempt
+            mutated state directly, which fixed the in-memory copy and
+            left the stale slot sitting in localStorage, exactly the bug
+            being fixed.
+        Verified in the browser: opened 3 rows on the map page's
+        Reference surface, the Clear button appeared reading "(3 pinned
+        or open rows)", clicking it emptied the slot and removed it from
+        localStorage while the window fell back to a fresh Random Tables
+        tab. Hand-injected a bogus 'p9' slot alongside a real 'p1' one
+        and reloaded: p9 was gone from localStorage, p1 kept its pin. On
+        Play, opened rows in a 2-pane layout, then Reset - both slots
+        cleared from storage and the Clear button disappeared.
+        Not attempted: pruning ids for entities that have since been
+        deleted. Nothing on the client knows an id is dead without
+        fetching it, and a stale pin already renders as nothing, so it
+        would be work for no visible gain.
 
-❌  P8  Only Random Tables got usefulness ranking. Encounters, Stats,
+        SECOND REGRESSION FROM THIS ITEM, FOUND AND FIXED THE SAME DAY -
+        reported as "the Play page shows for a second, then goes white":
+          TypeError: Cannot read properties of undefined (reading
+          'length') at countSlotItems -> ItemsWindow
+        countSlotItems reduces over all five ItemsTabKinds. That was the
+        first code ever to touch every kind of a PERSISTED slot record
+        unconditionally, and it exposed a latent hole this store had
+        carried its whole life: unlike usePlayLayoutStore, whose
+        `resolve` fills in anything a persisted record is missing,
+        usePlayItemsStore's resolveSlot handed the stored object back
+        verbatim. A slot persisted BEFORE a sub-window kind existed has
+        no entry for it in pinnedByKind/currentByKind/expandedByKind, so
+        reading `.length` off it throws. It had always been able to
+        crash - only when you opened that particular tab - and
+        countSlotItems turned it into a crash on mount for anyone with
+        older state.
+        FIXED AT THE ROOT: resolveSlot now normalises through
+        `normalizeSlot`, which fills every missing kind map, filters
+        `kinds` down to kinds that still exist and repoints `active` if
+        it named one that does not. Results are cached in a WeakMap
+        keyed on the stored object - that is correctness, not
+        optimisation: these values go straight into components' useMemo
+        dependency lists (see DEFAULT_SLOT_STATE's comment), so a fresh
+        object per call would re-run the Random Tables ranking pass over
+        the whole library on every render. countSlotItems also got
+        optional chaining, redundant by design, because it should not be
+        the single point of failure twice.
+        Verified by REPRODUCING FIRST: injected a slot record missing
+        'factions' and 'places' entirely, confirmed the exact reported
+        stack trace, applied the fix, and reloaded with the same broken
+        record still in localStorage - Play renders in full, zero console
+        errors, and opening the two previously-missing sub-windows works
+        (9 rows each) including pinning a row.
+        LESSON: every browser check in this round had been run against
+        freshly-reset localStorage, which is exactly the state that
+        cannot reproduce a persisted-shape bug. Test with legacy state,
+        not clean state.
+
+✅  P8  Only Random Tables got usefulness ranking. Encounters, Stats,
         Places and Factions still sort alphabetically AND still refuse
         to list anything until something is typed - so a sub-window
-        opened mid-fight starts empty. Each needs the same treatment: a
-        usage signal recorded on open/use, and a ranked default list.
+        opened mid-fight starts empty.
+        DONE 2026-09-04. All five sub-windows now share one ranking and
+        one browse shell.
+          - useTableUsageStore became useItemUsageStore: the same
+            counters, keyed per campaign AND per ItemsTabKind, with
+            recordUse (rolled/ran/read it) and recordOpen. The persist
+            key keeps its old name and a version-1 `migrate` files the
+            flat v0 map under 'random-tables', so an existing DM's
+            accumulated table signal survives.
+          - tableSearch.ts's usefulnessScore split in two: usageScore
+            (kind-agnostic - counters, recency, pins) plus the
+            table-only half (own-campaign homebrew, described vs stub).
+            rankByUsefulness is the generic ranker on the same relevance
+            tiers as rankTablesByUsefulness, so all five lists order on
+            one scale.
+          - The four sub-windows no longer gate their list behind
+            "type something first", record an open on focus and a use on
+            first expand, and end in the new shared ItemsBrowseSection
+            (Browse heading + live count chip + BROWSE_PAGE cap +
+            "Show all N"). Random Tables was refactored onto it too, so
+            there is one implementation rather than five.
+        Verified in the browser on the map page's Reference surface:
+        with nothing typed, Encounters listed "200 encounters" (40
+        rendered), Stats "75 entries", Places "8 places", Factions
+        "12 factions" - all four were blank before. Opening "Danger at
+        the Crossroads 1" from row 13 of the encounter list moved it to
+        row 1 immediately. Usage localStorage was snapshotted and
+        restored afterwards; the restore confirmed the v0 -> v1
+        migration had nested the existing table counters under
+        'random-tables'.
 
-❌  P9  Usage signals (useTableUsageStore) are localStorage-only, so
-        "most useful" resets on a new browser or machine and cannot
-        inform anything server-side. Worth a real table on the server
-        once the ranking has proven itself in play.
+✅  P9  Usage signals are localStorage-only, so "most useful" resets on
+        a new browser or machine and cannot inform anything server-side.
+        DONE 2026-09-04, full stack.
+          - `item_usage` table: one row per (campaign, kind, item_id),
+            with rolls / opens / last_used_at. item_id is deliberately
+            NOT a foreign key - the five kinds point at five different
+            tables, and a usage counter is an observation about an id,
+            not a relationship. It is Text, so the Stats sub-window's
+            composite "creature:<uuid>" ids fit beside plain uuids
+            without the server needing to know which kind it is looking
+            at.
+          - POST /api/item-usage takes an EVENT ("use" or "open" plus a
+            count), never totals, and applies it as an ON CONFLICT
+            upsert with a server-side increment. Two Play windows - or
+            two machines - recording the same open both count instead of
+            one clobbering the other. GET returns a campaign's rows
+            unpaginated on purpose: the ranker needs all of them at once
+            to sort anything.
+          - useItemUsageStore writes LOCAL FIRST and posts second,
+            never awaiting: recording a signal happens on the click that
+            opens a stat block mid-combat, so it must not wait on a
+            round trip, and a failed post must not lose the signal or
+            throw into a render path. syncFromServer merges the server's
+            counters in on mount, taking the MAX of local and server per
+            counter rather than the sum - the local numbers already
+            include everything this browser posted, so adding them would
+            double-count its own history. localStorage stays as the
+            write-through cache, which is what keeps ranking working at
+            a table with no internet.
+          - The migration was HAND-TRIMMED: autogenerate also emitted
+            131 drop_index/drop_constraint statements for indexes that
+            exist in the database but are not declared on the ORM models
+            (the trigram and FK indexes from sql/001_schema.sql).
+            Keeping them would have silently dropped a large part of the
+            search performance work.
+        Verified: curl proved the upsert increments (open -> rolls 0 /
+        opens 1, then use x2 -> rolls 2 / opens 1 on the same row) and
+        that composite ids round-trip. In the browser, cleared local
+        storage, seeded the server with a "seeded-from-another-machine"
+        row, opened the map page's Reference sidebar - the row arrived
+        in local state, which is the whole point of the item. Opening a
+        real table row then created a new server row within a second.
+        Test rows deleted afterwards via the new DELETE endpoint.
 
-⚠️  P10 The Items tab strip does not handle overflow. Each tab caps at
-        168px and shrinks to a 32px minimum, so five tabs in a narrow
-        pane crush together with no scroll and no overflow menu.
+✅  P10 The Items tab strip does not handle overflow.
+        DONE 2026-09-04. Tabs no longer shrink below MIN_TAB_WIDTH
+        (104px, the point where a tab is an icon and an ellipsis and
+        nothing else); the strip scrolls sideways instead, with its
+        scrollbar hidden, and the active tab is scrolled into view
+        whenever it changes so switching from the "+" menu or resizing a
+        pane cannot leave it off-screen. Verified with all five
+        sub-windows open in a narrowed pane: widths held at 153/130/104/
+        104/116 with every label still readable, where they used to
+        crush to 32px slivers.
+        No overflow MENU was added - a scrolling strip with a readable
+        minimum solves the actual problem (unreadable tabs) without a
+        second, hidden place tabs can live.
 
-⚠️  P11 Chat-pane collapse and pane close now overlap conceptually -
+✅  P11 Chat-pane collapse and pane close now overlap conceptually -
         collapse is a chat-only thin strip, close is generic and leaves
         an empty placeholder - and a chat pane carries both at once.
-        Decide whether collapse becomes generic (any pane collapsible to
-        a strip) or goes away in favour of close.
+        DECIDED AND DONE 2026-09-04: COLLAPSE BECOMES GENERIC.
+        The two are not really the same idea - "shrink this to the edge,
+        I still want it" and "take this window away" - and the confusion
+        came from only ONE window kind being able to express the first
+        one. Removing collapse would have lost a real affordance;
+        generalising it makes the pair read as a pair.
+          - CollapsedChatStrip is now CollapsedPaneStrip, taking a label
+            and an icon, so a collapsed pane still says what it is
+            ("Expand Items", not a nameless sliver).
+          - The collapse button moved out of ChatPanel's actions and
+            into PaneHeader, beside Close, so every kind gets it in the
+            same place; onCollapse/parentDirection joined the shared
+            PaneCloseProps bag the panels already forward.
+          - The workspace no longer filters collapsed slots down to chat
+            panes, and adds two guards: an empty placeholder cannot
+            collapse (nothing to shrink), and neither can the LAST
+            expanded pane, which would otherwise leave a workspace of
+            strips with nothing in it.
+        Verified in the browser: an Items pane collapsed from 1358px to
+        a 44px strip reading "Expand Items", the other pane's Collapse
+        button correctly disappeared while it was the last one expanded,
+        and expanding brought both back.
 
-⚠️  P12 A truncated pane title has no tooltip, so a long session-note
-        name cannot be read without widening the pane.
+        REGRESSION FOUND AND FIXED THE SAME DAY, reported as "the Play
+        page is blank". Making collapse generic exposed a latent bug in
+        how it was STORED: `collapsedPanes` was one flat per-CAMPAIGN
+        map, not per-layout. That was survivable only while collapse was
+        chat-only, because a flag left on a slot that was not a chat
+        pane in the current layout was simply ignored. Once every kind
+        honoured it, a pre-existing flag started collapsing real panes in
+        layouts the DM had never collapsed anything in - and two flags
+        at once turned a two-pane workspace into two 44px strips with no
+        content at all. Reproduced exactly by injecting
+        {p1: true, p2: true} and opening Play: no panes, no content.
+        Two fixes, belt and braces:
+          - collapsedPanes is now Record<PlayLayoutId, ...>, keyed like
+            windowAssignment and dismissedPanes already were, so a flag
+            set in one layout cannot leak into another. A record in the
+            old flat shape is recognised (its values are booleans, not
+            objects) and DISCARDED rather than migrated - a stale
+            collapse flag is the thing that caused this, and "nothing is
+            collapsed" is the safe landing.
+          - SessionRunnerWorkspace enforces "at least one pane stays
+            expanded" ON READ, not only on write, so no persisted state -
+            however it got written - can leave the DM with nothing to
+            read.
+        Verified: with the legacy flat {p1,p2} still in localStorage the
+        workspace renders both panes with content and offers both
+        Collapse buttons; collapse/expand round-trips and persists as
+        {'double-row': {p2: true}}; the last expanded pane still refuses
+        to collapse.
+
+✅  P12 A truncated pane title has no tooltip.
+        DONE 2026-09-04. PaneHeader measures its own title
+        (scrollWidth > clientWidth, re-measured through a ResizeObserver
+        so dragging a divider updates it) and shows the full text as a
+        tooltip only when it is actually clipped - a short title does not
+        sprout a redundant hover label.
 
 --- I-U. THE REST OF THE APPLICATION --------------------------------
 
-❌  U1  Header/toolbar scale is not consistent app-wide. Play's panes
+✅  U1  Header/toolbar scale is not consistent app-wide. Play's panes
         are now a deliberate 40px; the section headers on the world,
         notes, encounters and map pages were each styled independently.
-        Pick one header scale and apply it the way PaneHeader did for
-        Play.
+        2026-09-04, THE SCALE EXISTS AND THE PANEL HEADERS USE IT.
+        theme/headerScale.ts is now the single source: it exports
+        SECTION_HEADER_HEIGHT (40) and useIsTruncated, PaneHeader's
+        PANE_HEADER_HEIGHT is derived from it rather than being its own
+        40, and both headers measure their own titles with the same
+        hook. components/shell/SectionHeader.tsx is PaneHeader's
+        non-draggable sibling - same height, action.hover background,
+        bottom border, truncating subtitle2 title with a tooltip only
+        when clipped - and the map sidebar's three hand-rolled panel
+        headers (Tokens, Floors, Initiative: a `p: 2` block with a
+        subtitle1, one with a Divider under it and two without) now
+        render it. The notes explorer's directory toolbar takes the same
+        chrome with the height as a minimum, since that row is allowed
+        to wrap.
+        Verified in the browser: on the map page all four sidebar panels
+        measure 40px with bgcolor rgba(0,0,0,0.04) - Tokens, Floors,
+        Initiative and the Reference panel's PaneHeader tab strip, which
+        they sit directly beside and used not to match.
+        THE IN-CONTENT HALF, FINISHED LATER THE SAME DAY. Page titles
+        were a second, separate inconsistency: notes, articles, chats,
+        maps and world home titled themselves with an h4 while both
+        Settings pages, the map page and Encounter Management used an
+        h5, and the dashboard's "Your worlds" used an h5 where every
+        other in-page section used an h6. components/shell/PageTitle.tsx
+        now exports PageTitle (h4/700, `component="h1"`) and
+        SectionTitle (h6/700), and all eleven sites render one of them.
+        Kept separate from SECTION_HEADER_HEIGHT on purpose: a 40px
+        chrome bar and a page's title are different things solving
+        different problems, and collapsing them would have made both
+        worse.
+        Verified in the browser across 6 routes: every page title
+        measures 34px and every section heading 20px, where they had
+        been a mix of 34/24/20.
 
-❌  U2  Encounters page still browses encounters in its own view rather
+✅  U2  Encounters page still browses encounters in its own view rather
         than through the unified category/tag/format browser the random
         tables use (= E4; the backend already supports it).
+        RE-VERIFIED AND DONE 2026-09-04. The premise was HALF STALE:
+        Task 11.3 had already taught RandomTablesBrowseView to browse
+        encounters - a Tables/Encounters toggle, encounters run through
+        the same search index, tag facets and category subtree scoping,
+        with rankByRelevance ordering them on the same scale as tables.
+        What was still true is the shape of the PAGE around it: opening
+        Encounters landed on a menu of two cards ("Random Tables" /
+        "Encounters") that made the DM pick before seeing anything, and
+        the second card led to a second, duplicate browse of the same
+        encounters with its own search box and filter chips.
+        That choice was false, so the menu is gone. The Encounters page
+        opens ON the unified browser. The old table view survives as
+        'management', reached by its "Encounter table view" button and
+        still the right place for what the browser deliberately does not
+        do - per-row edit and delete, and live difficulty against the
+        assumed party - with a labelled back arrow returning to the
+        browser. `?view=management` still deep-links to it, and the old
+        `?view=generators` links still resolve.
+        Verified in the browser: /encounters now lands on the browser
+        with TABLES/ENCOUNTERS toggles and no two-card menu; "Encounter
+        table view" reaches Encounter Management and its back arrow
+        returns, clearing the query param. The category graph's three
+        zoom controls were unnamed and got aria-labels on the way past
+        (they had only been reachable behind the menu, so the U6 sweep
+        had not seen them).
 
-❌  U3  The client ships as one 2.27 MB (675 kB gzipped) chunk with no
+✅  U3  The client ships as one 2.27 MB (675 kB gzipped) chunk with no
         code splitting, so opening Play downloads the map canvas, the
-        editors and the whole compendium UI with it. Route-level dynamic
-        imports would cut what a session-time page has to load.
+        editors and the whole compendium UI with it.
+        DONE 2026-09-04. Every page in routes.tsx is a React.lazy
+        dynamic import behind one Suspense, whose fallback is a top-edge
+        LinearProgress rather than a full-screen spinner - the wait is a
+        few hundred ms on a cold route and nothing on a warm one, and a
+        centred spinner for that reads as a page that broke. The pages
+        export named components, so each import maps `.then(m => ({
+        default: m.X }))` and nothing outside routes.tsx changed.
+        The entry chunk went from 2,301 kB (682 kB gzipped) to 197 kB
+        (62.5 kB gzipped), across 114 chunks. Konva now lands in
+        MapPage's own 435 kB chunk and TipTap in a 500 kB one shared by
+        the pages that render rich text, so neither reaches a DM who
+        only opened Play.
+        Verified in the browser: all 12 world/campaign routes still
+        render (dashboard, home, manager, atlas, timeline, compendium,
+        tools, world settings, play, notes, encounters, maps, campaign
+        settings). The only console errors are the pre-existing external
+        ones on World Home - Docker Hub CORS and a 404 from the GitHub
+        releases API.
+        The vite chunk-size warning still fires, now for the shared
+        TipTap chunk rather than for one 2.3 MB bundle; splitting the
+        editor itself would be the next step if it ever matters.
 
-❌  U4  The Random Tables sub-window loads the WHOLE table library
+✅  U4  The Random Tables sub-window loads the WHOLE table library
         (limit 20000, 2622 rows today) per Items window on mount - two
-        Items windows means two full loads into two result sets. The
-        browse list then renders 40 rows behind a "Show all 2622" button
-        that mounts every remaining row un-virtualised.
+        Items windows means two full loads. The browse list then renders
+        40 rows behind a "Show all 2622" button that mounts every
+        remaining row un-virtualised.
+        DONE 2026-09-04, both halves.
+          - useRandomTableStore gained `ensureSearch`, which no-ops when
+            a result key already holds a load made with identical
+            params, and `loadedParamsByKey` to remember that. Writing to
+            the library (create/update/delete/clone) clears the whole
+            map so the next mount refetches. The sub-window's mount-time
+            library load uses it, and so does useMentionableEntities -
+            every note/chat editor on screen runs that hook, so two note
+            panes were separately fetching the same 500 mention rows.
+            `search` still always fetches, so the browse view's explicit
+            refresh-after-edit is unaffected.
+          - The "Show all N" button is gone. ItemsBrowseSection (shared
+            by all five sub-windows) now pages: BROWSE_PAGE rows at a
+            time, a "Show 40 more of 2622" button, and an
+            IntersectionObserver sentinel below the last row that pulls
+            the next page in as it scrolls into view. No path mounts
+            more than one page more than the DM has actually scrolled
+            to, so nothing needed virtualising.
+        Verified in the browser with a 3-pane Play layout holding TWO
+        Items windows: exactly one GET /api/random-tables?limit=5000
+        where there used to be one per window, and with two DM Notes
+        panes exactly one limit=500 mentions load. The table list opened
+        at 40 rows, grew 40 -> 80 -> 120 on clicks, and scrolling to the
+        bottom pulled in exactly one more page (160) and then stopped -
+        no runaway loading.
 
-❌  U5  The new Play chrome (LayoutGlyph, PaneDropZone, EmptyPaneWindow,
+✅  U5  The new Play chrome (LayoutGlyph, PaneDropZone, EmptyPaneWindow,
         PaneHeader) was only eyeballed in whatever theme was active.
         Neither light nor dark was checked deliberately, and the snap
         tint is a hard-coded 22% primary alpha.
+        DONE 2026-09-04. Checked deliberately in BOTH modes by measuring
+        contrast ratios in the running app (compositing translucent
+        backgrounds down the parent chain first, since `action.hover`
+        and `action.selected` are alphas). Two real defects, both fixed,
+        and neither was visible by eyeballing:
+          - THE ACTIVE LAYOUT GLYPH WAS THE LEAST LEGIBLE THING IN THE
+            TOOLBAR IN LIGHT MODE: 2.52:1, under even the 3:1 minimum
+            for a graphic, while every INACTIVE glyph sat at 21:1. The
+            cause is palette-level, not local - the brand amber
+            (#c8873a) is a fill colour, and light mode was painting it
+            as a foreground. The light palette now states
+            primary.dark outright (#8a5a1f, ~4.5:1 as text on white;
+            MUI's derived 20% darken only reaches ~3.5:1), theme.ts
+            exports primaryForeground(theme) for "primary used as a
+            foreground", and the Play toolbar and empty-pane caption use
+            it. Light 2.52 -> 4.94, dark 4.62.
+          - THE SAME BUG APP-WIDE: every text/outlined primary Button
+            drew its label in that amber - the empty pane's "Something
+            else" measured 2.67:1. Fixed once in the theme as a
+            MuiButton `variants` entry, NOT the classic
+            textPrimary/outlinedPrimary style slots: MUI v9 emits
+            `MuiButton-text` and `MuiButton-colorPrimary` as two
+            separate classes and no longer has the composite class
+            those slots key off, so they compile fine and silently do
+            nothing. Light 2.67 -> 5.24, dark 8.49; contained buttons
+            and the disabled state (still action.disabled) unaffected.
+          - The snap tint is no longer one hard-coded alpha: the 22%
+            that reads as a clear wash over a light pane barely
+            registers over a dark one, so it is now 20% light / 34%
+            dark.
+        Everything else measured clean in both modes: pane header title
+        19.3/12.9, empty-window title 18.7/18.1, "Reopen …" 5.9/8.3,
+        "Give space back" 18.7/18.1, inactive glyphs 21/16.4, and the
+        map sidebar's three new SectionHeaders 21/16.4.
 
-❌  U6  No accessibility pass on any of it: the layout buttons and most
-        pane actions are icon-only with tooltips as their sole label,
-        the drag handle is decorative, and the empty-pane placeholder is
-        not announced.
+✅  U6  No accessibility pass on any of it.
+        2026-09-04, THE NAMING HALF IS DONE. An audit of the running Play
+        page found NINE buttons with no accessible name at all - MUI's
+        Tooltip renders a visual label but does not set aria-label, so a
+        screen reader got "button" for the layout glyphs, More layouts,
+        Reset, both window-kind switchers, the pane swap and every pane
+        close button. All of them now carry an explicit aria-label, and
+        the toggles carry aria-pressed:
+          - layout buttons: the layout's own name + aria-pressed
+          - lock: "Lock layout"/"Unlock layout" + aria-pressed
+          - kind switcher: "Change window type (currently Items)"
+          - pane close: "Close Session Notes" / "Close DM Notes" / ...
+            rather than three identical "Close this window"s
+          - Items sub-tabs: "Close Random Tables", "Open a sub-window"
+        Verified in the browser: no unnamed button remains in the Play
+        chrome.
+        2026-09-04, LATER: the naming pass spread a little further as
+        other items were done - the Items window's "Clear this window"
+        (P7), the Chat pane's thread switcher, Collapse and "Open this
+        thread as a page" (N3), and the editor's new Checklist toolbar
+        button (N2) all carry aria-labels. Note the rest of the article
+        toolbar's toggle buttons still do NOT - they are bare
+        ToggleButtons with icons and no tooltip or label at all, which
+        is the single largest remaining cluster.
+        2026-09-04, FINISHED. The three things left open above are all
+        closed:
+          - THE EDITOR TOOLBAR. All 14 formatting toggles were bare
+            ToggleButtons holding an icon and nothing else - no tooltip,
+            no label - so each read as "button" and none reported
+            whether it was on. They render through a new FormatToggle
+            wrapper carrying a tooltip, an aria-label and aria-pressed;
+            the toolbar's two IconButton helpers (ToolbarIconButton and
+            ColorSwatchPopover) now set aria-label from the `title` they
+            already had, since MUI's Tooltip renders a visual label but
+            never sets one.
+          - THE EMPTY-PANE PLACEHOLDER is a role="status" aria-live
+            polite region. It appears in response to something done
+            ELSEWHERE - closing a pane, dragging one over it - so a
+            screen-reader user has no reason to be looking at it when it
+            changes. Polite, not assertive: it is a status, not an
+            alert.
+          - THE KEYBOARD PATH for moving a window is P2, now done.
+          - THE REST OF THE APP. An audit over 12 routes found ~50
+            unnamed controls; all are named: the top bar's two icon-only
+            split buttons, every home widget's disabled "layout editing
+            coming soon" pencil, the world and campaign card pencils
+            (now "Edit <name>"), the notes explorer's five view-mode
+            toggles (their Tooltip wrapped the ICON, leaving the button
+            itself anonymous - it wraps the button now, with
+            aria-pressed), all 14 rename/delete/open/run row actions in
+            both the list and card views, the world manager's group
+            expanders (with aria-expanded) and grid arrows, and all
+            eight buttons in the article folder tree.
+        Verified in the browser: a sweep of all 12 world/campaign routes
+        reports every visible button and role="button" has an accessible
+        name, down from ~50 that had none.
+        The COLOUR half was done separately - see U5, which found and
+        fixed two real contrast failures in light mode (the active
+        layout glyph at 2.5:1, and every text/outlined primary button's
+        label at 2.7:1 app-wide).
+        NOT claimed: this is a NAMING and CONTRAST pass, not a full
+        WCAG audit. Focus order, focus-visible rings, dialog focus traps
+        and the Konva map canvas (which is a bitmap to a screen reader
+        and would need a parallel DOM view) have not been looked at.
 
-❌  U7  app-icon.png is a stock illustration and appears to carry a
-        stock-library watermark - faint diagonal text is visible across
-        the die at full size. It is the app's brand mark (top bar,
-        favicon, apple-touch icon), so it wants replacing with licensed
-        or original art. A simple flat mark would also survive 16px far
-        better than a detailed illustration does; public/favicon.svg is
-        such a mark, unreferenced, left over from an earlier iteration.
+✅  U7  app-icon.png is a stock illustration carrying a stock-library
+        watermark - confirmed to be a Dreamstime comp, i.e. a licensing
+        problem and not a matter of taste.
+        REPLACED 2026-09-04 with an original mark, to your brief: simple,
+        d20-based, distinct enough to be recognisably this app.
+        THE MARK: a d20 seen face-on - the canonical hexagon plus
+        top-face triangle silhouette, which is what makes it read as a
+        d20 and not a hexagon - with an eye in that top face. That is
+        the name: a die for the game, a watching eye for the Watcher.
+        Two colours (the brand amber on the app's deep ink), no
+        gradients, no illustration.
+        scripts/make-brand-icons.py holds ONE geometry definition and
+        emits both public/app-icon.svg and every raster size, so the
+        vector and the PNGs can never drift - regenerate the whole set
+        by running it. The SVG is the master and is offered to browsers
+        first (rel="icon" type="image/svg+xml"); the top bar renders it
+        directly rather than a bitmap.
+        The 16px file is a deliberately SIMPLIFIED variant - no facet
+        lines, no pupil, a fatter stroke and a slightly larger die -
+        because the full drawing turns to mush at that size. That is the
+        entire reason favicons are authored per size instead of left to
+        the browser to shrink, which is what the old set did wrong.
+        Also deleted: public/favicon.svg, which this item had described
+        as a candidate mark. It was not - it was a purple lightning bolt
+        from a project template, unreferenced, nothing to do with
+        WorldWatcher.
+        Verified in the browser: /app-icon.svg serves 200, the top bar
+        renders it at 40x40 in the 56px bar, and all five PNG favicon
+        links plus the apple-touch icon resolve.
 
-❌  U8  Icon sizing was set by eye on 2026-09-03, never against a design:
-        the top-bar brand icon (58px), the world logo in the switcher
-        (30px), and the favicon set, which is the d20 cropped out of
-        app-icon.png and squared (the full composition is wide, so its
-        subject only filled ~60% of a square icon box). favicon-16/32/
-        48/256.png and apple-touch-icon.png are all generated from
-        app-icon.png and must be regenerated together if the brand
-        changes - see the comment in Client/index.html.
+✅  U8  Icon sizing was set by eye on 2026-09-03, never against a design.
+        DONE 2026-09-04, in two parts.
+        THE MEASURABLE DEFECT, fixed first: the top-bar brand icon was
+        58px inside a 56px TOP_BAR_HEIGHT - the mark was taller than the
+        bar containing it and was being clipped by 2px. Measured in the
+        running app, not inferred. It is now SECTION_HEADER_HEIGHT
+        (40px), sized from the app's one header scale rather than by
+        eye, and sits with 8px of breathing room top and bottom.
+        THE REST followed U7, as predicted: the favicon set is no longer
+        "the d20 cropped out of a wide illustration and squared" filling
+        ~60% of its box - every size is drawn from the vector to fill
+        its own box, with a simplified variant at 16px. Nothing is
+        cropped from anything any more.
+        Still set by eye and left alone: the world logo in the switcher
+        (30px). It is a per-world user image rather than brand
+        furniture, so there is no scale to derive it from - say the word
+        if you want it on a fixed rhythm.
 
-❌  U9  The map / combat gaps (Part F1) and the notes / articles /
+⚠️  U9  The map / combat gaps (Part F1) and the notes / articles /
         world-manager gaps (Part F2) are still unaddressed, and Parts
         F-G were never re-verified against the code - check them against
         the code before acting on any of them.
+        OUT OF SCOPE 2026-09-04, on purpose. This item is not work of
+        its own - it is a pointer at Parts F and G, which start at the
+        PART F header below and which this round was explicitly asked
+        not to touch. One piece of it did get done incidentally: F2.2's
+        second half, interactive checkboxes, closed via N2.
+        It stays open as a pointer, at your instruction ("leave U9").
+        Whoever picks up Parts F-G should re-verify each item against
+        the code first - three F items were already found stale once.
+        2026-09-04, THE ONE PIECE YOU DID ASK FOR IS DONE: maps are
+        @-mentionable, and clicking a map mention opens the map page
+        with that map loaded.
+          - 'map' is a real EntityRefType now, on both the parse side
+            (the [ref] pattern in utils/bbcode.ts) and the write side,
+            so it works in legacy BBCode bodies and in the rich editor's
+            entityRef node alike.
+          - useMentionableEntities offers this campaign's maps under a
+            new "Maps" category in the picker, between Places and
+            Factions.
+          - EntityRefPreview navigates to /maps/<id> rather than opening
+            a dialog. A map is a whole screen, not something that fits
+            in a preview card - which is the same reasoning that closed
+            P5.
+        Verified in the browser: typed "@Riverside" in a note, the
+        picker offered "Riverside Ambush · Map", picking it inserted a
+        map entityRef, and clicking it from the saved note's reading
+        view landed on /maps/2679cc4d-... with the map page titled
+        "Riverside Ambush". Also works from the chat composer (N5). Test
+        note deleted.
 
+--- I-N. NOTES EDITOR + CHAT PAGE ROUND (2026-09-04) ----------------
+
+Context for the N-series. Two things were asked for and built on
+2026-09-04, both verified in a real browser against the running stack
+(Playwright, native dev on :8006/:5173):
+
+  1. NOTES TEXT EDITING WAS REBUILT to match article creation. Session
+     and narrative notes had been stuck on the hand-rolled raw-BBCode
+     textarea (BBCodeEditor) while articles moved to a real rich text
+     editor months earlier. NoteDetailPage is now shaped like
+     ArticleDetailPage + ArticleForm: a saved note OPENS in a reading
+     view (NoteContentView, the notes-side ArticleContentView) with an
+     Edit button; editing gives the sticky Write/Preview + Cancel/Save
+     bar, a 34px in-canvas title, the full TipTapArticleEditor
+     (headings, lists, tables, colours, collapsible/secret/button
+     blocks) and a "More options" accordion holding folder + tags -
+     folder being newly settable from the editor at all. Play's
+     quick-edit (SessionNotesPanel) uses the same editor, so a
+     mid-session touch-up can no longer downgrade a note's formatting.
+     Mentions survived the move: EntityRefNode is a TipTap inline atom
+     rendering the exact `span.ww-ref` markup bbcodeToHtml already
+     emitted, and useTipTapMentions reuses the existing MentionPicker +
+     detectMentionQuery rather than TipTap's own Suggestion utility, so
+     "@" behaves identically in every editor. Legacy BBCode bodies
+     convert on open (toEditorHtml) and save back as HTML;
+     EntityRefPreview now renders either format.
+  2. CHATS GOT THEIR OWN PAGE. ChatDetailPage
+     (/w/:worldId/c/:campaignId/chats/:chatId) - transcript grouped by
+     day, per-message edit and delete (useSessionChatStore.updateMessage
+     / deleteMessage, ChatMessage.editedAt), thread search, inline
+     rename, a mention-aware composer. Every "view/edit a chat" entry
+     point now lands here instead of the Play page: both chat rows in
+     NotesFolderExplorer, the session note's Attached-chats list, and
+     "New chat". "Run in Play" is the one remaining path into Play.
+
+✅  N1  Note templates (types/noteTemplates.ts) still BUILD BBCode
+        strings... and the round-trip loses the numbered "1. / 2."
+        outline lines to plain text with <br>.
+        DONE 2026-09-04. The templates emit HTML now - the format
+        TipTapArticleEditor reads and writes - so a brand-new note's
+        source is the same format as an edited one, with no conversion
+        step in between.
+        The seven builders themselves are UNCHANGED, which is the point:
+        every template is expressed through six helpers (heading1/2/3,
+        bulletBlock, section, numberedList), and only those changed. The
+        helpers gained an escape pass, list items wrap their text in a
+        paragraph as TipTap's listItem schema requires, and the "\n\n"
+        glue between blocks is gone - HTML blocks are self-delimiting.
+          - numberedList is a real <ol> now. That is the loss the item
+            named: bbcodeToHtml has no ordered list, so "1. / 2." went
+            through as literal text with <br>s and the numbering was
+            decoration the editor could not maintain.
+          - The session-prep OUTLINE is a tickable checklist rather than
+            a numbered list. It is the one part of a prep sheet that is
+            a run order rather than a form to fill in, and it is read
+            during play - which is exactly what F2.2 asked for, now that
+            N2 has made the boxes work from the reading view.
+        Verified in the browser: a session note created from Play stored
+        as "<h1>Session — …</h1><h2>Outline</h2><ul data-type=
+        "taskList">…", with no BBCode anywhere, 7 real checkboxes and 27
+        headings rendered in the pane; ticking one from the Play pane
+        came back as data-checked="true" on the server. A Campaign Arc
+        note made from the Notes picker stored a real <ol> and rendered
+        it as a 4-item numbered list. Both test notes deleted.
+
+✅  N2  Interactive checkboxes are still missing from note bodies - see
+        F2.2, which this round narrowed but did not close. This is the
+        one thing a session-prep sheet most wants.
+        DONE 2026-09-04. TaskList + TaskItem joined the shared article
+        extensions (they are NOT in StarterKit's bundle, despite living
+        in the same @tiptap/extension-list package the list extensions
+        come from), with a Checklist toolbar button beside the bullet
+        and numbered list ones, and task-list CSS that gives the box its
+        own column so a wrapped item lines up under its text and a
+        ticked one strikes through.
+        The boxes are tickable from the READING view, not only from
+        Write - which is the point, since that is where the DM is
+        mid-session. TaskItem's node view refuses to edit a read-only
+        document and hands its callback no position, so the work is
+        split: `onReadOnlyChecked` returns true purely to stop it
+        reverting the visual tick, and a small ProseMirror plugin
+        (ReadOnlyTaskToggle) does the real edit, resolving the item from
+        the checkbox's own DOM node. Both are only installed when a
+        read-only render was given an onChange, so a render with nowhere
+        to save still refuses the tick rather than showing one it will
+        lose. That handler is threaded EntityRefPreview -> NoteContentView
+        -> NoteDetailPage and, separately, to Play's SessionNotesPanel,
+        so a box can be ticked from the notes page and from the Play
+        pane alike. The editor's Preview tab deliberately does not get
+        it - that draft is not saved yet.
+        Verified in the browser: made a note with two checklist items,
+        saved it, ticked one from the reading view (struck through
+        immediately), then reloaded the page from cold - the tick came
+        back checked, so it had gone to the server, not just the DOM.
+        Test note deleted afterwards.
+
+✅  N3  The Play page's Chat pane still cannot edit or delete a message;
+        only ChatDetailPage can. The pane has no "open this thread"
+        action either, so mid-session the DM can add to a thread but not
+        correct it without leaving Play by hand.
+        DONE 2026-09-04 by extraction, not by writing it twice.
+        ChatDetailPage's MessageRow - the hover edit/delete actions and
+        the "@"-mention-aware inline editor - was a private component
+        inside that page, which is the whole reason the pane never had
+        them. It is now components/notes/ChatMessageRow.tsx, taking a
+        `compact` prop for the pane's tighter padding and
+        `enableItemsWindowFocus` for Play's mention behaviour, and BOTH
+        surfaces render it. An affordance can no longer exist on only
+        one of them.
+        The pane header gained an "Open this thread as a page" action
+        beside the thread switcher, and deleting goes through the same
+        ConfirmDeleteDialog the page uses rather than deleting on one
+        click mid-session. Its two previously-unnamed icon buttons (the
+        thread switcher and Collapse) picked up aria-labels on the way
+        past - see U6.
+        Verified in the browser: from a DM Notes pane in a 3-pane Play
+        layout, posted a message, edited it in place ("round two" ->
+        "round THREE", and the row then read "edited"), followed "Open
+        this thread as a page" to /chats/<id> where the same message and
+        the same edit action were present, came back and deleted it
+        through the confirm dialog. Test chat and session note deleted
+        afterwards.
+
+✅  N4  ChatDetailPage renders every message un-virtualised, and its
+        search filters rather than highlights. Fine for a session's
+        worth of jots, wrong for a campaign-long thread - same class of
+        problem as U4.
+        DONE 2026-09-04, both halves.
+          - PAGED, TAIL-FIRST. The transcript opens on its most recent
+            TRANSCRIPT_PAGE (50) messages with a "Show 50 earlier
+            messages (N older)" button above them. A transcript reads
+            newest-last, so the window is the tail and grows upward -
+            the opposite direction from the Items browse lists, same
+            idea. Nothing needed virtualising once no single render
+            mounts thousands of rich-text bodies.
+          - SEARCH HIGHLIGHTS, IT NO LONGER FILTERS. Pulling the
+            non-matching messages out threw away the day separators and
+            the surrounding lines, which are most of what makes a
+            transcript readable. Matches now keep their place, outlined
+            and tinted in primary, with a "3 of 12 matches" chip and
+            prev/next buttons that scroll through them. A match that
+            would fall outside the paging window widens it
+            automatically, so paging can never make a real match look
+            like "no results".
+        Verified in the browser on a 60-message thread: 50 rendered with
+        "Show 10 earlier messages (10 older)"; searching "Ravensford"
+        (matching the 7th and 41st) widened the window to 54, tinted
+        both matches, left the non-matching lines in place, and reported
+        "1 of 2 matches" stepping to "2 of 2" and back. Test thread and
+        note deleted.
+
+✅  N5  Chat messages are still BBCode while note bodies are now HTML.
+        EntityRefPreview handles both, so nothing is broken, but the
+        chat composer has no formatting affordance at all and the app
+        now carries two body formats.
+        DECIDED BY YOU AND DONE 2026-09-04: CHAT JOINS THE RICH EDITOR.
+        One body format across the app, and the one surface with no
+        formatting at all now has some.
+        components/notes/ChatComposer.tsx is the single chat input -
+        composing a new message and editing an existing one both render
+        it. Deliberately a SMALL subset of the article toolbar (bold,
+        italic, strikethrough, bullet list): a chat message is a jot,
+        not a document, so StarterKit's headings, code blocks,
+        blockquotes and rules are switched OFF rather than merely left
+        out of the toolbar.
+          - Enter sends, Shift+Enter adds a line, Escape cancels an
+            edit - as a ProseMirror keymap, not a React onKeyDown, so it
+            sits in the same priority chain as everything else the
+            editor binds. It runs BEHIND the mention picker by design:
+            the picker listens in the capture phase and stops the event
+            when it has a highlighted entry, so Enter to accept a
+            mention can never also send the message.
+          - Old BBCode messages keep rendering (EntityRefPreview already
+            read both), and editing one converts it through toEditorHtml
+            exactly as notes did, saving back as HTML.
+        Verified in the browser on a REAL legacy thread: the existing
+        BBCode message with an NPC [ref] rendered with its mention
+        intact; typing "@Riverside" and pressing Enter accepted the
+        mention WITHOUT sending; bolding part of the line and sending
+        stored "<p>Party regrouped at <span ...ww-ref...>Riverside
+        Ambush</span> <strong>at dusk</strong></p>"; opening the legacy
+        message for editing showed it converted to an entityRef node and
+        saved back as HTML. The Play chat pane renders the same composer
+        (with the keyboard hint suppressed in the compact pane). The
+        legacy message was restored to its original BBCode afterwards
+        and the test messages removed.
+
+✅  N7  Client/src/components/world/BBCodeEditor.tsx now has NO callers -
+        notes were its last one.
+        DONE 2026-09-04. Deleted, after re-confirming the only remaining
+        mentions of it anywhere were prose in comments. Its one
+        exclusive dependency went with it: utils/bbcode.ts's
+        BBCODE_TOOLBAR_TAGS, the bracket-wrapping toolbar's tag list,
+        had no other caller either. The rest of utils/bbcode.ts stays -
+        bbcodeToHtml still renders chat messages and legacy note bodies,
+        and buildEntityRefTag still writes chat mentions.
+        Verified by tsc -b and the full build, both clean, and oxlint
+        still at its 10-warning baseline.
+
+✅  N6  The note editor has no unsaved-changes guard. It tracks `dirty`
+        and shows "Unsaved changes", and Cancel reverts, but navigating
+        away by the breadcrumb or the rail discards the draft silently.
+        DONE 2026-09-04, from the other side. A router-level block is not
+        available here - react-router v7's useBlocker needs a data
+        router and App.tsx runs a plain BrowserRouter - so instead of
+        stopping the DM leaving, the new hooks/useUnsavedDraft.ts makes
+        leaving harmless: while the editor is dirty it mirrors
+        {name, tags, folderId, body} to localStorage, and the next time
+        the same note (or "new") opens, an Alert offers "You have
+        unsaved edits to this note from N minutes ago - Restore /
+        Discard". That is strictly better than a confirm dialog, since
+        it also survives a crash, a closed tab and a reload; a
+        `beforeunload` handler still covers the one case the browser
+        does let us intercept. Drafts older than a week are ignored, and
+        every localStorage access is wrapped, so a full or blocked store
+        cannot break editing.
+        Save and Cancel both clear the stored draft - an explicit Cancel
+        is the DM saying "throw this away", and without that the next
+        visit would offer back exactly what they just discarded.
+        Verified in the browser doing precisely what the item describes:
+        typed a title and a body into a new note, left via the icon
+        rail's Maps button, came back - the recovery bar was there, and
+        Restore brought back both the title and the body verbatim and
+        re-armed "Unsaved changes". Cancel then removed the stored
+        draft. No test note and no leftover draft keys remained.
+
+
+--- I-M. MAPS LIBRARY + MAP PAGE ROUND (2026-09-22) -----------------
+
+Four things asked for on 2026-09-22, all verified in a real browser
+against the running stack (Playwright, native dev on :8006/:5173).
+
+✅  M1  The Maps page carried a context sidebar that listed every map
+        by name, directly above a table that lists every map by name.
+        DONE: MapsPage no longer passes `sidebar` to SectionLayout, so
+        the context rail is gone and the table gets the width.
+
+✅  M2  Two redundant page titles. The Maps page put an h4 "Maps"
+        under a breadcrumb trail already ending in "Maps", and the map
+        page put an h4 of the map's name under a trail already ending
+        in that name - ~56px of vertical space each, and on the map
+        page it came straight off the canvas.
+        DONE: both PageTitle calls removed. PageTitle itself stays -
+        every other page still uses it (I-U1); these two were the sites
+        where the breadcrumb already said it.
+
+✅  M3  Opening a map dropped you onto the RETIRED SHELL. MapPage was
+        the last caller of components/layout/AppShell.tsx - a bare
+        "WorldWatcher" AppBar with a castle icon, a tour button and a
+        theme toggle, from the pre-redesign UI. So the world brand,
+        campaign switcher, command palette and the whole icon rail
+        vanished the moment you opened a battlemap.
+        DONE: MapPage renders through SectionLayout like every other
+        page (no context sidebar - the map has its own right-hand rail).
+        Fullscreen drops the shell entirely rather than hiding a header
+        inside it, which is what `hideHeader` was doing before.
+        AppShell.tsx now has NO callers. Left in place rather than
+        deleted in this round; deleting it (and TutorialOverlay's
+        `data-tour="navbar-brand"` reference, which TopBar also carries)
+        is a separate, safe cleanup.
+
+✅  M4  "Add Map" was one tall scroll in an `sm` dialog: name, type,
+        story details, custom rows and floor uploads all stacked, with
+        the one genuinely required thing - an image - furthest from the
+        eye, and the grid settings absent entirely.
+        DONE: MapFormDialog is now a four-phase card on the same shape
+        PlaceBuilderDialog and EncounterBuilderDialog already use
+        (header icon + title + caption, alternativeLabel Stepper,
+        action.hover content, Back / Next footer).
+          1. Name & type - name, description, the five map kinds as
+             selectable cards with icons and one-line descriptions
+             (was a multi-select dropdown), indoor/outdoor toggle.
+          2. Floors & images - a real drop zone (drag several at once),
+             then per-floor rename, reorder, cover-star and remove.
+          3. Story & context - location, "what's happening here",
+             the custom label/value details. All optional, all fed into
+             the search index (M5).
+          4. Grid & review - grid on/off, square/hex, cell size, line
+             thickness and colour, drawn LIVE over the cover image at
+             the image's own pixel scale (the SVG's viewBox is the
+             image's natural size under the same `contain` fit, and the
+             hex geometry is MapOverlayLayer's), plus a summary table of
+             everything about to be created.
+        The stepper is nonLinear, so editing an existing map's grid is
+        two clicks rather than a four-screen march, and a step whose
+        required fields are missing labels itself in error.
+        ONE REAL BUG FOUND AND FIXED while verifying this: creating a
+        map with more than one floor failed with a 409 after the floors
+        had already been written. `addFiles` minted floor ids with
+        crypto.randomUUID() INSIDE a setFloors updater and called
+        setPrimaryFloorId from inside that same updater. StrictMode runs
+        an updater twice and keeps the second result, so state held
+        pass 2's floors while the cover id had latched onto pass 1's -
+        an id no floor had, hence the FK violation in
+        createMapOnBackend's primary_floor_id PATCH. Both handlers now
+        do their work outside the updater. The bug predates this round
+        (the old dialog had the identical pattern).
+
+✅  M5  Map search was `map.name.toLowerCase().includes(query)` behind
+        a toggle-hidden FilterBar - so a map you remembered by where it
+        sat, by what happens on it, or by a floor name was unfindable
+        unless you also remembered its title exactly, typo-free.
+        DONE, built on the random-table library's own primitives rather
+        than a second weaker copy:
+          - components/dm/mapSearch.ts indexes name, description,
+            location, activity, setting, kind labels, floor names and
+            custom details into one haystack, matched with
+            tableSearch.ts's shared strict-then-fuzzy token matcher, and
+            ranked through rankByUsefulness with `updatedAt` standing in
+            for the usage signals a map does not have.
+          - components/dm/MapSearchField.tsx is the maps-library twin of
+            RandomTableSearchField: always visible, live match count on
+            the field, grouped suggestions (Maps / Types / Locations)
+            with per-facet counts, picking a map opens it and picking a
+            facet applies it as a filter.
+          - The page gained a sort control (best match / recently
+            updated / name / most floors), a Filters panel with counts
+            on every chip (type, indoor-outdoor, location) and a badge
+            of how many are active, and an active-filter row that stays
+            visible when the panel is collapsed.
+          - TopBar's "New map" menu item lands on /maps?new=1; the page
+            now honours that param and strips it, instead of ignoring
+            it.
+        Verified in the browser: "haunted" finds the map whose only
+        match is in its description, and "smugling", "abandonned" and
+        "riversde" each find the right map through the fuzzy pass.
+
+✅  N8  A Notes folder could only hold one kind of file: a written
+        page. DONE 2026-09-22 - it now holds three, chosen from the
+        "New note" button's dropdown in NotesFolderExplorer:
+
+          - Text document - the existing TipTap note, unchanged.
+          - Whiteboard    - draggable sticky notes, text labels and
+                            frames on a pan/zoom canvas, joined by
+                            optional labelled arrows.
+          - Content tree  - a tidy-laid-out node tree (tech trees,
+                            family trees, hierarchies) with several
+                            roots allowed, collapsible branches, and
+                            free extra links for the edges a strict
+                            tree cannot carry (a marriage, a
+                            cross-branch prerequisite).
+
+        Model: notes gained `doc_type` ('text'|'whiteboard'|'tree',
+        CHECK-constrained, defaulting to 'text' so every existing row is
+        unchanged) and `canvas` JSONB (NOT NULL, '{}' default, matching
+        tags). Migration b6c1e4d8a725, and 001_schema.sql updated
+        alongside it. `doc_type` is deliberately NOT folded into `kind`:
+        kind says what a TEXT note is FOR (session prep, narrative),
+        doc_type says what the file IS, and a whiteboard filed as
+        session prep has to stay expressible.
+
+        Client: types/noteCanvas.ts holds both canvas shapes AND the
+        normalizers every read goes through (asWhiteboardCanvas /
+        asTreeCanvas) - same discipline as the Play stores, for the same
+        reason: a board saved before a field existed must still open.
+        components/notes/canvas/ holds useCanvasDoc (undo/redo +
+        debounced write-back; a canvas has no Save button because the
+        gesture is the commit), canvasShared.ts (pan/zoom, edge
+        geometry), treeLayout.ts (the tidy-tree pass), the two editors
+        and CanvasNoteWorkspace (the page frame). Plain DOM, not Konva -
+        these are boxes of editable text, which HTML does for free.
+
+        Verified in the browser end to end: created one of each type
+        from the dropdown; typed, dragged, arrow-connected and reloaded
+        a board; built a 4-node tree, collapsed and expanded a branch,
+        linked two nodes, switched to horizontal and reloaded; checked a
+        text note still edits and saves as before; and hand-injected a
+        legacy canvas (items missing every optional field, a node whose
+        parent id no longer exists, a link to a deleted node) - defaults
+        filled in, the orphan re-rooted, the dangling link dropped, no
+        crash. tsc -b clean, build clean, oxlint back at 10 warnings.
+
+        Two things fixed on the way, both pre-existing:
+          - Deep-linking ANY note (a reload, a bookmark) bounced to the
+            folder list: NoteDetailPage decided the note was missing on
+            the first render, before ensureSeeded had run. It now waits
+            for the campaign's notes to load before redirecting.
+          - Nothing else: the canvas types do not touch the Play page,
+            which filters notes by `kind` and so never sees them.
+
+❌  N9  Canvas notes are invisible to search. The command palette and
+        the notes search index read `body`, which is empty for a
+        whiteboard or a tree - so a sticky note that says "Kidnapped
+        heir" cannot be found by typing it. Both canvases would need a
+        text projection (item text / node titles+subtitles) fed into
+        whatever indexes notes.
+
+❌  N10 A whiteboard or tree cannot be opened in the Play page. Play's
+        note panes filter on kind === 'session_prep' | 'narrative', so a
+        clue board - arguably the thing you MOST want beside the
+        initiative tracker - is unreachable while running a session.
+        Needs a read-only (or lightly editable) canvas pane kind.
+
+⚠️  N11 The whiteboard has no multi-select. Everything is one item at a
+        time: no marquee drag, no shift-click, so moving a cluster of
+        stickies means moving each one. The content tree does not need
+        it (dragging a node already carries its branch).
+
+❌  N12 World Articles still have only the text type. The three file
+        types live in campaign Notes; the world wiki (ArticleForm /
+        ArticleDetailPage) is a separate editor and was left alone. If
+        articles should get boards and trees too, the canvas pieces are
+        already reusable - it is a doc_type column on `articles` plus
+        the same workspace frame.
+
+⚠️  N13 TagListField exists three times. NoteTagsField (shared by the
+        text and canvas note editors) is the fourth copy's replacement,
+        but ArticleForm.tsx and FactionFormDialog.tsx still each carry
+        their own. Folding those two in is a small, safe cleanup that
+        was deliberately left out of the N8 change.
+
+--- I-R. ICON RAIL ROUND (2026-09-22) -------------------------------
+
+Asked for on 2026-09-22, verified in a real browser against the running
+stack (Playwright, native dev on :8006/:5173), in both switch positions
+and against a hand-injected pre-field nav-memory record.
+
+✅  R1  The rail printed a cramped label under every icon whether you
+        wanted it or not. DONE: Settings > "Icon rail labels" (world AND
+        campaign Settings, one shared RailLabelsSettingItem row) now
+        drives it, persisted in useNavMemoryStore.railLabelsVisible and
+        OFF by default. Off = a 62px icon-only rail whose glyphs are
+        drawn BIG (28px in a 48px button) because with no label under
+        them the glyph is the whole button; on = the old 64px labelled
+        rail, 20px glyphs, unchanged. RailItem carries the icon as a
+        component, not an element, so one item definition serves both
+        sizes.
+
+✅  R2  Every rail icon names itself on hover in BOTH modes, and the
+        tooltip text is a SECOND string per item, not the label: the
+        label has ~56px to live in, the tooltip does not. World ->
+        "World Manager", Time -> "Calendar", Maps -> "Battle Maps",
+        Notes -> "DM Notes", Encounters -> "Random Tables &
+        Encounters"; Home, Atlas, Play, Settings say their own name.
+        Both strings live on RailItem in IconRail.tsx - `label` is also
+        what getSectionLabel reports to Resume cards, which is why it
+        stays short.
+
+✅  R3  The World and Notes icons flew out hover pills ("Create new
+        entry"; Folders / Plots / Quests) on the same gesture as the
+        tooltip, behind a 250ms delay, through a Popper that existed
+        only because the scrolling rail would clip an in-flow one.
+        DONE: hoverCreate, the Popper, the hover timer and the Grow are
+        all gone - hover names the icon and nothing else. Those
+        destinations are still reachable on the pages themselves.
+
+❌  R4  Random Tables shares the Encounters page and has no rail entry
+        of its own. The page already opens ON the unified table browser
+        (?view=management is the encounter half), so one button is
+        honest today and the tooltip names both - but if random tables
+        are to be a first-class standalone feature they want their own
+        route and rail icon, with Encounters kept as the second one.
+        Open question, deliberately not decided here.
+
+--- I-S. UI SCALE ROUND (2026-09-22) ---------------------------------
+
+The app was only comfortable at 67% BROWSER zoom on a 1536x864 viewport;
+at 100% it wanted ~1.5x the room it had. Asked for on 2026-09-22: make
+that density the app's own default.
+
+✅  S1  DONE: theme/uiScale.ts holds UI_SCALE (default 0.67, persisted
+        as useNavMemoryStore.uiScale) and `su(px)`. It scales:
+          - all typography, via the root font size - MUI's variants are
+            rem, so this reaches MUI's own internals and icon glyphs too
+          - every `sx` spacing prop, via theme.spacing (8 -> 8*scale)
+          - the px paddings MUI hardcodes in its components, via ~15
+            theme.components overrides (each is MUI's own default put
+            through `su` - a scale, not a redesign)
+          - the app's chrome constants, now all in theme/layout.ts
+        Measured at 0.67: top bar 57->39, icon rail 62->42, buttons
+        31->23, inputs 40->32, chips 32->20, MUI icons 24->18, root font
+        16->10.72. Settings > "UI scale" offers 50/55/60/67/75/85/100%,
+        defaulting to 0.6 - 0.67 matched the browser zoom the app had
+        been usable at, and one step tighter was what it wanted in
+        practice.
+
+✅  S2  CSS `zoom` and `transform: scale` were REJECTED, with evidence -
+        do not revisit without re-measuring. MUI v9 positions overlays
+        through @popperjs/core v2 (Tooltip, Menu, Select, Autocomplete)
+        and through Popover's own getBoundingClientRect math, and
+        neither compensates for a scaled ancestor. With zoom: 0.67 on
+        html OR body, a rail tooltip landed 84px above its icon and the
+        error grew with distance down the page; `height: 100vh` also
+        stopped meaning the viewport (579px tall in an 864px window).
+        Under the theme scale the same tooltip measures dy = 0.
+
+⚠️  S3  ~1000 hardcoded px values across ~140 files do NOT scale - they
+        are literal numbers in `sx`, not theme values, so a 0.67 app
+        still draws some fixed widths and icon sizes at full size. The
+        shell constants that mattered were lifted into theme/layout.ts;
+        the rest were left because the file-by-file risk is real and
+        there is no test suite. If the scale ever looks uneven on a
+        specific screen, that is this, and the fix is per-screen: route
+        the number through `su`.
+
+        Map and note-canvas geometry (grid size, token size, SVG_ORIGIN,
+        stage coordinates) is deliberately EXCLUDED from scaling - those
+        are model values that merely happen to be in px, and scaling
+        them would move tokens relative to the grid.
+
+✅  S4  The first cut of S1 left three things it had scaled AROUND, all
+        reported from a real screenshot and all the same root cause -
+        a hardcoded px that did not scale while its container did:
+          - The top bar WRAPPED. The palette button's placeholder and
+            "Change Session" each took two lines on the Play page (the
+            widest this bar gets). Toolbar is `overflow: hidden` now,
+            the palette label is `noWrap` over `minWidth: 0`, the Ctrl-K
+            chip and the button are `flexShrink: 0`, and the brand's
+            fixed 160/30px went through `su`. At an 801px viewport the
+            placeholder now ellipsizes instead of wrapping.
+          - The rail's CAMPAIGN heading was clipped to "AMPAIGN": a 9px
+            word in a 42px rail. WORLD and CAMPAIGN now render in BOTH
+            rail modes (asked for explicitly - a first cut hid them in
+            icon-only mode and that was wrong), sized from
+            RAIL_HEADING_FONT_SIZE with a 6px floor.
+            Because that floor stops the type shrinking while `su(62)`
+            keeps going, BOTH rail widths are held open by
+            RAIL_MIN_WIDTH, which is DERIVED from the heading's own
+            metrics rather than eyeballed - an eyeballed 36px constant
+            was tried first and was 8px short at scale 0.6. Verified by
+            measuring "CAMPAIGN" at all 7 scales x both modes: fits
+            every time, with 6-8px of margin.
+          - The short labels under the icons were a fixed 10px, so
+            "Encounters" clipped at small scales. Now
+            RAIL_ITEM_LABEL_FONT_SIZE, same floor.
 
 #####################################################################
 PART F - CLIENT / MAP / APP-WIDE KNOWN GAPS
@@ -535,7 +1610,7 @@ acting on any of them.
           background-image center. Visually identical whenever the image
           is centered in the stage, which is the normal case.
 ❌  F1.2  Hex/square grids are purely visual - no snapping for tokens or
-          shapes.
+          shapes. (Make the snapping optional for the tokens)
 ❌  F1.3  Hobgoblin, Merfolk and Pixie have no real token art; a fallback
           initial-letter avatar shows on the map, in the initiative bar
           and in every list.
@@ -557,13 +1632,26 @@ acting on any of them.
 
 --- F2. NOTES, ARTICLES, WORLD MANAGER -------------------------------
 
-❌  F2.1  Notes' "Plots" toggle and the World Manager's "Characters" item
-          are both bare ComingSoon placeholders - relocated, never built.
-          No requirement has asked for real functionality yet.
-❌  F2.2  Note bodies use the same hand-rolled BBCode editor as Articles,
-          with no interactive checkboxes - so the session-prep
+⚠️  F2.1  NARROWED 2026-09-21. The World Manager's "Characters" item is no
+          longer a placeholder - it renders a real category-scoped
+          article table (ArticleCategory 'character'), as does the new
+          "Deities" item, both under a People heading that is itself the
+          combined character+deity view. Notes' "Plots" toggle is still a
+          bare ComingSoon placeholder. Note that the per-party PC roster
+          the old Characters placeholder described (level / class / HP +
+          links into each character sheet) was never built and is no
+          longer described anywhere in the UI; it would be a separate
+          feature from the Characters article table, not a resumption
+          of it.
+⚠️  F2.2  NARROWED 2026-09-04. Note bodies no longer use the hand-rolled
+          BBCode textarea - the Notes page and Play's quick edit both run
+          the same rich text editor as Articles (TipTapArticleEditor,
+          with "@"-mentions), and legacy BBCode bodies convert on open
+          and save back as HTML. What is still missing is the original
+          second half: interactive checkboxes, so the session-prep
           "checklist" is a styled list of prompts to fill in, not
-          tickable boxes.
+          tickable boxes. StarterKit ships taskList/taskItem - it is an
+          extension + toolbar button, not new machinery.
 ❌  F2.3  The article folder tree supports one level of add / rename /
           delete but not drag-to-reorder or re-parent. There is no manual
           "move to folder" either; folder is only settable from the
@@ -580,6 +1668,21 @@ acting on any of them.
           neither deletes nor unlinks the article - it just becomes a
           dangling reference. Worth deciding on cleanup behaviour if it
           starts to hurt.
+❌  F2.7  The World Manager sidebar's group names have drifted from the
+          ArticleGroup taxonomy the templates themselves declare.
+          types/article.ts says every category belongs to one of People /
+          Places / **Powers & Things** / **Story**, and two places
+          already consume that: ArticleTypePicker groups its create-new
+          cards by it, and Play's PlacesSubWindow derives PLACE_CATEGORIES
+          from getArticleTemplatesByGroup('Places'). The sidebar instead
+          uses People / Places / Factions / **Codex**, where Codex merges
+          Powers & Things' item+spell with Story's plot+event. Net effect:
+          you create a "Powers & Things > Item" and then find it under
+          "Codex > Items". Reachability is fine (fixed 2026-09-21, see
+          below) - this is purely that the two vocabularies disagree.
+          Either rename the sidebar groups to the declared four, or move
+          ArticleGroup to match the sidebar, but pick one source of truth.
+          Cheap while item/spell/plot/event all still have zero articles.
 
 --- F3. SHELL, RIGHT PANEL, NAVIGATION -------------------------------
 
@@ -587,6 +1690,13 @@ acting on any of them.
           wires a row click to a selection + detail view (Faction /
           Quest / NPC / Encounter / Map / Bastion), so it permanently
           shows the empty "select an item" state.
+          NOTE 2026-09-21: Faction detail itself is no longer missing -
+          FactionCardDialog gives factions the same popout card NPCs get
+          from CreatureStatBlockDialog, opened from a table row (name or
+          eye) and from the diplomacy graph's detail panel. That is a
+          dialog, not the right panel, so this item stands as written;
+          but decide whether the right panel is still wanted for these
+          six now that the dialog pattern covers two of them.
 ❌  F3.2  Context sidebars are real navigation, but only Encounters'
           actually drives the wrapped section's internal state (its menu
           view, via a lifted prop). Quests' status-group counts and Maps'

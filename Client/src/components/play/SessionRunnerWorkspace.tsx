@@ -3,10 +3,12 @@ import Box from '@mui/material/Box';
 import { PaneWindow } from './layout/PaneWindow';
 import { SplitPane } from './layout/SplitPane';
 import { PaneDragProvider } from './layout/paneDrag';
-import { PLAY_LAYOUTS } from './layout/playLayoutTrees';
+import { KIND_LABELS } from './layout/WindowKindSwitcher';
+import { getLayoutTree } from '../../store/usePlayLayoutStore';
 import type { LayoutNode, PaneSlot } from './layout/playLayoutTrees';
 import { usePlayLayoutStore, getPlayLayoutState } from '../../store/usePlayLayoutStore';
 import { usePlayItemsStore } from '../../store/usePlayItemsStore';
+import { RIGHT_PANEL_HANDLE_WIDTH } from '../../theme/layout';
 import type { Note } from '../../types/note';
 
 interface SessionRunnerWorkspaceProps {
@@ -52,11 +54,14 @@ export function SessionRunnerWorkspace({ worldId, campaignId, sessionNote, switc
   const closePane = usePlayLayoutStore((s) => s.closePane);
   const dismissPane = usePlayLayoutStore((s) => s.dismissPane);
   const swapPanes = usePlayLayoutStore((s) => s.swapPanes);
+  const splitPane = usePlayLayoutStore((s) => s.splitPane);
   const swapItemsSlots = usePlayItemsStore((s) => s.swapSlots);
 
   const layoutState = getPlayLayoutState(byCampaignId, campaignId);
-  const { layoutId, locked, paneSizes, collapsedPanes, windowAssignment, dismissedPanes } = layoutState;
-  const layoutDef = PLAY_LAYOUTS[layoutId];
+  const { layoutId, locked, paneSizes, collapsedPanes, windowAssignment, dismissedPanes, lastKindBySlot } = layoutState;
+  // The DM's edited tree when there is one, else the preset - see getLayoutTree. The six
+  // layouts are starting points now, not the only reachable shapes (checklist I-P1).
+  const baseTree = getLayoutTree(layoutState, layoutId);
   const assignment = windowAssignment[layoutId] ?? {};
 
   const dismissed = useMemo(
@@ -69,7 +74,7 @@ export function SessionRunnerWorkspace({ worldId, campaignId, sessionNote, switc
     [dismissedPanes, layoutId],
   );
 
-  const tree = useMemo(() => pruneDismissed(layoutDef.root, dismissed) ?? layoutDef.root, [layoutDef.root, dismissed]);
+  const tree = useMemo(() => pruneDismissed(baseTree, dismissed) ?? baseTree, [baseTree, dismissed]);
   const liveSlots = useMemo(() => visibleSlots(tree), [tree]);
   const canClose = liveSlots.length > 1;
 
@@ -87,17 +92,37 @@ export function SessionRunnerWorkspace({ worldId, campaignId, sessionNote, switc
     window.open(`/w/${worldId}/c/${campaignId}/encounters?view=random_tables`, '_blank');
   };
 
+  // Collapse used to be chat-only. It applies to every window kind now (checklist I-P11), but
+  // never to an empty placeholder - there is nothing there to shrink - and a slot that is no
+  // longer in the layout must not keep a stale collapsed flag.
+  const collapsible = liveSlots.filter((slot) => (assignment[slot] ?? 'session') !== 'empty');
+  const requestedCollapsed = collapsible.filter((slot) => collapsedPanes[layoutId]?.[slot]);
+
+  // THE INVARIANT IS ENFORCED ON READ, NOT ONLY ON WRITE. collapsedPanes is now stored per
+  // layout (it used to be one flat per-campaign map, which is what let a stale flag collapse an
+  // entire two-pane workspace into two 44px strips - a Play page that looks blank), but a
+  // belt-and-braces floor here means no persisted state, however it got written, can ever leave
+  // the DM with nothing to read.
   const collapsedSlots = new Set<PaneSlot>(
-    (Object.entries(collapsedPanes) as [PaneSlot, boolean | undefined][])
-      .filter(([slot, isCollapsed]) => isCollapsed && assignment[slot] === 'chat')
-      .map(([slot]) => slot),
+    requestedCollapsed.length >= collapsible.length ? requestedCollapsed.slice(1) : requestedCollapsed,
   );
+  /** Collapsing the last expanded pane would leave a workspace of strips with nothing in it. */
+  const canCollapse = collapsible.filter((slot) => !collapsedSlots.has(slot)).length > 1;
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <Box sx={{ flexGrow: 1, minHeight: 0 }}>
+      {/* The details panel's floating handle is pinned to the viewport's right edge and takes no
+          layout space, so without this inset it lands on top of the rightmost pane's close
+          button - which, in the triple and quad layouts, is exactly where a pane header sits. */}
+      <Box sx={{ flexGrow: 1, minHeight: 0, pr: `${RIGHT_PANEL_HANDLE_WIDTH}px` }}>
         <PaneDragProvider
           enabled={!locked}
+          slots={liveSlots}
+          labelForSlot={(slot) => {
+            const kind = assignment[slot] ?? 'session';
+            return kind === 'empty' ? 'Empty window' : KIND_LABELS[kind];
+          }}
+          onSplit={(slot, side) => splitPane(campaignId, layoutId, slot, side)}
           onSwap={(a, b) => {
             swapPanes(campaignId, layoutId, a, b);
             // An Items window's tab set, pins and open rows belong to the window, not to the
@@ -120,8 +145,10 @@ export function SessionRunnerWorkspace({ worldId, campaignId, sessionNote, switc
                 collapsed={collapsedSlots.has(slot)}
                 locked={locked}
                 canClose={canClose}
+                canCollapse={canCollapse}
                 onSetKind={(kind) => setWindowKind(campaignId, layoutId, slot, kind)}
-                onToggleCollapse={() => toggleCollapsed(campaignId, slot)}
+                onToggleCollapse={() => toggleCollapsed(campaignId, layoutId, slot)}
+                rememberedKind={lastKindBySlot[layoutId]?.[slot]}
                 onClose={() => closePane(campaignId, layoutId, slot)}
                 onDismiss={() => dismissPane(campaignId, layoutId, slot)}
                 worldId={worldId}

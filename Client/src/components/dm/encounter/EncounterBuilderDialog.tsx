@@ -213,7 +213,7 @@ export function EncounterBuilderDialog({ open, campaignId, initialType, partySiz
       createdAt: now, updatedAt: now, primaryType: pillar, categoryId: generator?.categoryId ?? null, status: 'ready',
       readAloud: resultText(results.read_aloud) || null, objective: objective || null,
       partyLevelMin: partyLevel, partyLevelMax: partyLevel, partySize, scalingNotes: 'Adjust the linked creature quantity to match party size and current resources.',
-      locationId: null, rewards: reward ? [{ kind: 'generated', description: reward, quantity: 1 }] : [], tagIds: constraintTagIds,
+      locationId: null, generatorId: null, rewards: reward ? [{ kind: 'generated', itemId: null, description: reward, quantity: 1, sortOrder: 0 }] : [], tagIds: constraintTagIds,
       npcs: pillar === 'social' && actor && primaryActor ? [{ id: crypto.randomUUID(), npcId: actor.id, name: actor.name, imageSrc: actor.tokenImage, attitude: 'indifferent', agenda: 'wants_information', secret: null, leverage: null, rpCues: null, sortOrder: 0 }] : [],
       combatBlock: null, socialBlock: null, explorationBlock: null,
     };

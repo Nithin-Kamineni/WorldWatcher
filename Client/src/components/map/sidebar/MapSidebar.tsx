@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import IconButton from '@mui/material/IconButton';
@@ -9,17 +9,29 @@ import LayersIcon from '@mui/icons-material/Layers';
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import WidgetsOutlinedIcon from '@mui/icons-material/WidgetsOutlined';
 import { TokenLibraryPanel } from './TokenLibraryPanel';
 import { FloorSwitcherPanel } from './FloorSwitcherPanel';
 import { InitiativePanel } from './InitiativePanel';
+import { ItemsWindow } from '../../play/items/ItemsWindow';
 import type { MapFloor } from '../../../types/map';
 import type { InitiativeState } from '../../../types/initiative';
 import type { PlacedToken } from '../../../types/token';
 import type { ShortcutOverride } from '../../../store/useShortcutStore';
+import { MAP_RAIL_WIDTH, MAP_PANEL_WIDTH, MAP_WIDE_PANEL_WIDTH } from '../../../theme/layout';
 
-type SidebarSection = 'tokens' | 'floors' | 'initiative';
+export type SidebarSection = 'tokens' | 'floors' | 'initiative' | 'reference';
+
+/** A request from the page to open the sidebar on a given section. `nonce` is what makes a
+ * repeat of the same request register - double-clicking the same token twice must reopen the
+ * Reference panel the second time too. */
+export interface SidebarOpenRequest {
+  section: SidebarSection;
+  nonce: number;
+}
 
 interface MapSidebarProps {
+  worldId: string;
   campaignId: string;
   floors: MapFloor[];
   activeFloorId: string;
@@ -39,13 +51,19 @@ interface MapSidebarProps {
   ) => void;
   selectedTokenIds: string[];
   onTokenSelect: (token: PlacedToken, additive: boolean) => void;
+  onTokenStatsRequest: (token: PlacedToken) => void;
   shortcutOverrides: Record<string, ShortcutOverride>;
+  /** Set by the page to pull a section open - see SidebarOpenRequest. */
+  openRequest?: SidebarOpenRequest | null;
 }
 
-const RAIL_WIDTH = 56;
-const PANEL_WIDTH = 300;
+const RAIL_WIDTH = MAP_RAIL_WIDTH;
+const PANEL_WIDTH = MAP_PANEL_WIDTH;
+/** Reference needs more room than the token/floor lists: it carries a stat block, not a row. */
+const WIDE_PANEL_WIDTH = MAP_WIDE_PANEL_WIDTH;
 
 export function MapSidebar({
+  worldId,
   campaignId,
   floors,
   activeFloorId,
@@ -62,10 +80,18 @@ export function MapSidebar({
   onUpdateToken,
   selectedTokenIds,
   onTokenSelect,
+  onTokenStatsRequest,
   shortcutOverrides,
+  openRequest,
 }: MapSidebarProps) {
   const [collapsed, setCollapsed] = useState(true);
   const [section, setSection] = useState<SidebarSection>('tokens');
+
+  useEffect(() => {
+    if (!openRequest) return;
+    setSection(openRequest.section);
+    setCollapsed(false);
+  }, [openRequest]);
 
   const handleSectionClick = (next: SidebarSection) => {
     if (!collapsed && section === next) {
@@ -82,7 +108,7 @@ export function MapSidebar({
         <Paper
           elevation={0}
           sx={{
-            width: PANEL_WIDTH,
+            width: section === 'reference' ? WIDE_PANEL_WIDTH : PANEL_WIDTH,
             borderRight: 1,
             borderColor: 'divider',
             borderRadius: 0,
@@ -107,8 +133,16 @@ export function MapSidebar({
               onUpdateToken={onUpdateToken}
               selectedTokenIds={selectedTokenIds}
               onTokenSelect={onTokenSelect}
+              onTokenStatsRequest={onTokenStatsRequest}
               shortcutOverrides={shortcutOverrides}
             />
+          )}
+          {/* The Play page's Items window, on the map (checklist E13). Same store, its own
+              'map' surface, so what the DM pins here does not disturb either Play pane. */}
+          {section === 'reference' && (
+            <Box sx={{ height: '100%', display: 'flex' }}>
+              <ItemsWindow worldId={worldId} campaignId={campaignId} slot="map" />
+            </Box>
           )}
         </Paper>
       )}
@@ -159,6 +193,16 @@ export function MapSidebar({
             onClick={() => handleSectionClick('initiative')}
           >
             <FormatListNumberedIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+
+        <Tooltip title="Reference - stats, tables, encounters, places, factions" placement="left">
+          <IconButton
+            size="small"
+            color={!collapsed && section === 'reference' ? 'primary' : 'default'}
+            onClick={() => handleSectionClick('reference')}
+          >
+            <WidgetsOutlinedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       </Stack>

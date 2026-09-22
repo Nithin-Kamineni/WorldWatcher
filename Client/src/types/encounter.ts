@@ -182,7 +182,18 @@ export interface RandomTableRow {
 
 export type EncounterPrimaryType = 'combat' | 'social' | 'exploration';
 export type EncounterStatus = 'draft' | 'ready' | 'used';
-export interface EncounterReward { kind: string; description: string; quantity: number; }
+/** One encounter_rewards row. A reward of kind 'item' references a magic item by
+ * `itemId` rather than naming it in `description` - the reference-never-duplicate rule.
+ * `itemName`/`itemRarity` are hydrated by the server and read-only here. */
+export interface EncounterReward {
+  kind: string;
+  itemId: string | null;
+  description: string;
+  quantity: number;
+  sortOrder: number;
+  itemName?: string | null;
+  itemRarity?: string | null;
+}
 
 export interface Encounter {
   id: string;
@@ -225,6 +236,10 @@ export interface Encounter {
   partySize: number | null;
   scalingNotes: string | null;
   locationId: string | null;
+  /** Task 11.2: a composite generator this encounter rolls against (e.g. its
+   * complication comes from the NPC quick-roll generator), the generator counterpart
+   * of explorationBlock.wanderingTableId. */
+  generatorId: string | null;
   rewards: EncounterReward[];
   tagIds: string[];
   npcs: EncounterNpcEntry[];

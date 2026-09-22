@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -6,12 +6,15 @@ import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { ItemsSearchFilterBar, type FilterGroupDef } from './ItemsSearchFilterBar';
+import { ItemsBrowseSection, BROWSE_PAGE } from './ItemsBrowseSection';
 import { PinnableItemRow } from './PinnableItemRow';
 import { PlaceBuilderLauncher } from './BuilderLaunchers';
 import { getArticleCategoryIcon } from '../../world/articleIcons';
+import { rankByUsefulness, type UsefulnessSignals } from '../../dm/randomTables/tableSearch';
 import { useArticleStore, getArticlesForWorld } from '../../../store/useArticleStore';
+import { useItemUsageStore, getItemUsage } from '../../../store/useItemUsageStore';
 import { usePlayItemsStore, getPlayItemsState, getSlotItems } from '../../../store/usePlayItemsStore';
-import type { PaneSlot } from '../layout/playLayoutTrees';
+import type { ItemsSurface } from '../layout/playLayoutTrees';
 import { ARTICLE_TEMPLATES, getArticleTemplatesByGroup } from '../../../types/article';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../../theme/scrollbarSx';
 
@@ -19,7 +22,7 @@ interface PlacesSubWindowProps {
   worldId: string;
   campaignId: string;
   /** Which Items window this is - all pin/open/expand state below is scoped to it. */
-  slot: PaneSlot;
+  slot: ItemsSurface;
 }
 
 const PLACE_CATEGORIES = new Set(getArticleTemplatesByGroup('Places').map((t) => t.category));
@@ -39,17 +42,35 @@ export function PlacesSubWindow({ worldId, campaignId, slot }: PlacesSubWindowPr
   const places = getArticlesForWorld(articles, worldId).filter((a) => PLACE_CATEGORIES.has(a.category));
 
   const byCampaignId = usePlayItemsStore((s) => s.byCampaignId);
-  const focusItem = usePlayItemsStore((s) => s.focusItem);
+  const focusItemAction = usePlayItemsStore((s) => s.focusItem);
   const pinItem = usePlayItemsStore((s) => s.pinItem);
   const unpinItem = usePlayItemsStore((s) => s.unpinItem);
-  const toggleExpanded = usePlayItemsStore((s) => s.toggleExpanded);
+  const toggleExpandedAction = usePlayItemsStore((s) => s.toggleExpanded);
   const slotState = getSlotItems(getPlayItemsState(byCampaignId, campaignId), slot);
   const pinned = slotState.pinnedByKind.places;
   const current = slotState.currentByKind.places;
   const expanded = slotState.expandedByKind.places;
 
+  // Opening a place, and reading one open, are both usefulness signals - so every such action
+  // goes through these rather than calling the store directly (checklist I-P8).
+  const usageByCampaignId = useItemUsageStore((s) => s.byCampaignId);
+  const recordUse = useItemUsageStore((s) => s.recordUse);
+  const recordOpen = useItemUsageStore((s) => s.recordOpen);
+  const usage = getItemUsage(usageByCampaignId, campaignId, 'places');
+
+  const focusItem = (id: string) => {
+    recordOpen(campaignId, 'places', id);
+    focusItemAction(campaignId, slot, 'places', id);
+  };
+  const toggleExpanded = (id: string) => {
+    if (!expanded.includes(id)) recordUse(campaignId, 'places', id);
+    toggleExpandedAction(campaignId, slot, 'places', id);
+  };
+
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [limit, setLimit] = useState(BROWSE_PAGE);
+  const showMore = useCallback(() => setLimit((n) => n + BROWSE_PAGE), []);
 
   const categoryGroup: FilterGroupDef[] = useMemo(
     () => [
@@ -64,13 +85,29 @@ export function PlacesSubWindow({ worldId, campaignId, slot }: PlacesSubWindowPr
 
   const hasQuery = search.trim() !== '' || categoryFilter.length > 0;
 
-  const filtered = !hasQuery
-    ? []
-    : places.filter((a) => {
-        if (categoryFilter.length > 0 && !categoryFilter.includes(a.category)) return false;
-        if (!search.trim()) return true;
-        return a.name.toLowerCase().includes(search.trim().toLowerCase());
-      });
+  // A narrowed result set is a fresh list - re-collapse it to the first page.
+  useEffect(() => {
+    setLimit(BROWSE_PAGE);
+  }, [search, categoryFilter]);
+
+  // Ranked by what this campaign has actually opened and pinned, never alphabetically, and
+  // never gated behind "type something first": the tavern the party is standing in has to be
+  // reachable without remembering its name (checklist I-P8).
+  const usefulness: UsefulnessSignals = useMemo(() => ({ usage, pinnedIds: pinned }), [usage, pinned]);
+
+  const matched = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const narrowed = places.filter((a) => {
+      if (categoryFilter.length > 0 && !categoryFilter.includes(a.category)) return false;
+      return !q || a.name.toLowerCase().includes(q);
+    });
+    return rankByUsefulness(narrowed, search, usefulness);
+    // `places` is derived from the article store on every render - depend on its stable id form
+    // so this does not re-rank the whole catalog constantly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [places.map((a) => a.id).join(','), search, categoryFilter, usefulness]);
+
+  const visible = matched.slice(0, limit);
 
   // Opening an item puts its row at the top of this pane, which is off-screen if the DM was
   // scrolled down the browse list - scroll back up so the click visibly lands.
@@ -110,7 +147,7 @@ export function PlacesSubWindow({ worldId, campaignId, slot }: PlacesSubWindowPr
                   pinned={isPinned}
                   onTogglePin={() => (isPinned ? unpinItem(campaignId, slot, 'places', place.id) : pinItem(campaignId, slot, 'places', place.id))}
                   expanded={isExpanded}
-                  onToggleExpand={() => toggleExpanded(campaignId, slot, 'places', place.id)}
+                  onToggleExpand={() => toggleExpanded(place.id)}
                   onOpenNewTab={() => window.open(`/w/${worldId}/manager/entry/${place.id}`, '_blank')}
                 >
                   <Stack spacing={0.5}>
@@ -138,21 +175,18 @@ export function PlacesSubWindow({ worldId, campaignId, slot }: PlacesSubWindowPr
 
         <PlaceBuilderLauncher worldId={worldId} campaignId={campaignId} slot={slot} />
 
-        <Typography variant="overline" color="text.secondary" sx={{ pl: 0.5 }}>
-          Browse
-        </Typography>
-        {!hasQuery ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            Search or filter to browse places.
-          </Typography>
-        ) : filtered.length === 0 ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            No places match.
-          </Typography>
-        ) : (
+        <ItemsBrowseSection
+          matched={matched.length}
+          total={places.length}
+          narrowed={hasQuery}
+          noun="places"
+          emptyLabel="No places in this world yet."
+          limit={limit}
+          onShowMore={showMore}
+        >
           <List dense disablePadding>
-            {filtered.map((a) => (
-              <ListItemButton key={a.id} onClick={() => focusItem(campaignId, slot, 'places', a.id)} sx={{ borderRadius: 1.5 }}>
+            {visible.map((a) => (
+              <ListItemButton key={a.id} onClick={() => focusItem(a.id)} sx={{ borderRadius: 1.5 }}>
                 <ListItemText
                   primary={a.name}
                   secondary={ARTICLE_TEMPLATES[a.category].label}
@@ -161,7 +195,7 @@ export function PlacesSubWindow({ worldId, campaignId, slot }: PlacesSubWindowPr
               </ListItemButton>
             ))}
           </List>
-        )}
+        </ItemsBrowseSection>
       </Box>
     </Box>
   );

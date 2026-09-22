@@ -47,7 +47,9 @@ export function PaneDropZone({ slot, label }: PaneDropZoneProps) {
         alignItems: 'center',
         justifyContent: 'center',
         transition: 'background-color .12s, box-shadow .12s',
-        bgcolor: (theme) => (over ? alpha(theme.palette.primary.main, 0.22) : 'transparent'),
+        // Mode-aware: the same 22% primary that reads as a clear snap tint over a light pane
+        // barely registers over a dark one, so dark mode gets a stronger wash (checklist I-U5).
+        bgcolor: (theme) => (over ? alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.34 : 0.2) : 'transparent'),
         boxShadow: (theme) => (over ? `inset 0 0 0 2px ${theme.palette.primary.main}` : 'none'),
       }}
     >

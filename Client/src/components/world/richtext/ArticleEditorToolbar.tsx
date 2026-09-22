@@ -27,6 +27,7 @@ import FormatAlignCenterIcon from '@mui/icons-material/FormatAlignCenter';
 import FormatAlignRightIcon from '@mui/icons-material/FormatAlignRight';
 import FormatAlignJustifyIcon from '@mui/icons-material/FormatAlignJustify';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
+import ChecklistIcon from '@mui/icons-material/Checklist';
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import FormatQuoteIcon from '@mui/icons-material/FormatQuote';
 import CodeIcon from '@mui/icons-material/Code';
@@ -70,10 +71,38 @@ function ToolbarIconButton({
   return (
     <Tooltip title={title}>
       <span>
-        <IconButton size="small" color={active ? 'primary' : 'default'} disabled={disabled} onClick={onClick}>
+        <IconButton size="small" aria-label={title} color={active ? 'primary' : 'default'} disabled={disabled} onClick={onClick}>
           {children}
         </IconButton>
       </span>
+    </Tooltip>
+  );
+}
+
+/** A formatting toggle that a screen reader can actually announce.
+ *
+ * The whole ribbon was bare ToggleButtons holding an icon and nothing else - no tooltip, no
+ * label - so every one of them read as "button", and the toggles never reported whether they
+ * were on. MUI's Tooltip renders a visual label but does not set aria-label, which is the same
+ * trap the Play chrome fell into (checklist I-U6). */
+function FormatToggle({
+  label,
+  value,
+  selected,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  selected: boolean;
+  onChange: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip title={label}>
+      <ToggleButton size="small" value={value} aria-label={label} aria-pressed={selected} selected={selected} onChange={onChange}>
+        {children}
+      </ToggleButton>
     </Tooltip>
   );
 }
@@ -96,7 +125,7 @@ function ColorSwatchPopover({
   return (
     <>
       <Tooltip title={title}>
-        <IconButton size="small" ref={anchorRef} onClick={() => setOpen(true)}>
+        <IconButton size="small" aria-label={title} ref={anchorRef} onClick={() => setOpen(true)}>
           {icon}
         </IconButton>
       </Tooltip>
@@ -198,8 +227,9 @@ function LinkPopover({ editor }: { editor: Editor }) {
 }
 
 /** Docs/Word-style formatting ribbon driven entirely by the given editor instance's commands -
- * this is what replaces BBCodeEditor's small bracket-wrapping toolbar (utils/bbcode.ts's
- * BBCODE_TOOLBAR_TAGS) with real WYSIWYG controls. Only rendered while editing -
+ * this is what replaced BBCodeEditor's small bracket-wrapping toolbar with real WYSIWYG
+ * controls - both that component and its BBCODE_TOOLBAR_TAGS are gone. Only rendered while
+ * editing -
  * TipTapArticleEditor omits it in read-only mode. */
 export function ArticleEditorToolbar({ editor }: { editor: Editor }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -215,6 +245,7 @@ export function ArticleEditorToolbar({ editor }: { editor: Editor }) {
       superscript: e.isActive('superscript'),
       bulletList: e.isActive('bulletList'),
       orderedList: e.isActive('orderedList'),
+      taskList: e.isActive('taskList'),
       blockquote: e.isActive('blockquote'),
       codeBlock: e.isActive('codeBlock'),
       inTable: e.isActive('table'),
@@ -316,39 +347,24 @@ export function ArticleEditorToolbar({ editor }: { editor: Editor }) {
 
       <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
 
-      <ToggleButton size="small" value="bold" selected={state.bold} onChange={() => editor.chain().focus().toggleBold().run()}>
+      <FormatToggle label="Bold" value="bold" selected={state.bold} onChange={() => editor.chain().focus().toggleBold().run()}>
         <FormatBoldIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton size="small" value="italic" selected={state.italic} onChange={() => editor.chain().focus().toggleItalic().run()}>
+      </FormatToggle>
+      <FormatToggle label="Italic" value="italic" selected={state.italic} onChange={() => editor.chain().focus().toggleItalic().run()}>
         <FormatItalicIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="underline"
-        selected={state.underline}
-        onChange={() => editor.chain().focus().toggleUnderline().run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Underline" value="underline" selected={state.underline} onChange={() => editor.chain().focus().toggleUnderline().run()}>
         <FormatUnderlinedIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton size="small" value="strike" selected={state.strike} onChange={() => editor.chain().focus().toggleStrike().run()}>
+      </FormatToggle>
+      <FormatToggle label="Strikethrough" value="strike" selected={state.strike} onChange={() => editor.chain().focus().toggleStrike().run()}>
         <StrikethroughSIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="subscript"
-        selected={state.subscript}
-        onChange={() => editor.chain().focus().toggleSubscript().run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Subscript" value="subscript" selected={state.subscript} onChange={() => editor.chain().focus().toggleSubscript().run()}>
         <SubscriptIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="superscript"
-        selected={state.superscript}
-        onChange={() => editor.chain().focus().toggleSuperscript().run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Superscript" value="superscript" selected={state.superscript} onChange={() => editor.chain().focus().toggleSuperscript().run()}>
         <SuperscriptIcon fontSize="small" />
-      </ToggleButton>
+      </FormatToggle>
 
       <ColorSwatchPopover
         title="Text color"
@@ -367,73 +383,46 @@ export function ArticleEditorToolbar({ editor }: { editor: Editor }) {
 
       <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
 
-      <ToggleButton
-        size="small"
-        value="left"
-        selected={state.align === 'left'}
-        onChange={() => editor.chain().focus().setTextAlign('left').run()}
-      >
+      <FormatToggle label="Align left" value="left" selected={state.align === 'left'} onChange={() => editor.chain().focus().setTextAlign('left').run()}>
         <FormatAlignLeftIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="center"
-        selected={state.align === 'center'}
-        onChange={() => editor.chain().focus().setTextAlign('center').run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Align center" value="center" selected={state.align === 'center'} onChange={() => editor.chain().focus().setTextAlign('center').run()}>
         <FormatAlignCenterIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="right"
-        selected={state.align === 'right'}
-        onChange={() => editor.chain().focus().setTextAlign('right').run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Align right" value="right" selected={state.align === 'right'} onChange={() => editor.chain().focus().setTextAlign('right').run()}>
         <FormatAlignRightIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="justify"
-        selected={state.align === 'justify'}
-        onChange={() => editor.chain().focus().setTextAlign('justify').run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Justify" value="justify" selected={state.align === 'justify'} onChange={() => editor.chain().focus().setTextAlign('justify').run()}>
         <FormatAlignJustifyIcon fontSize="small" />
-      </ToggleButton>
+      </FormatToggle>
 
       <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
 
-      <ToggleButton
-        size="small"
-        value="bulletList"
-        selected={state.bulletList}
-        onChange={() => editor.chain().focus().toggleBulletList().run()}
-      >
+      <FormatToggle label="Bulleted list" value="bulletList" selected={state.bulletList} onChange={() => editor.chain().focus().toggleBulletList().run()}>
         <FormatListBulletedIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="orderedList"
-        selected={state.orderedList}
-        onChange={() => editor.chain().focus().toggleOrderedList().run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Numbered list" value="orderedList" selected={state.orderedList} onChange={() => editor.chain().focus().toggleOrderedList().run()}>
         <FormatListNumberedIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="blockquote"
-        selected={state.blockquote}
-        onChange={() => editor.chain().focus().toggleBlockquote().run()}
-      >
+      </FormatToggle>
+      {/* Tickable checklist - the thing a session-prep sheet most wants, and tickable from the
+          reading view too, not only from here (checklist I-N2). */}
+      <Tooltip title="Checklist">
+        <ToggleButton
+          size="small"
+          value="taskList"
+          aria-label="Checklist"
+          selected={state.taskList}
+          onChange={() => editor.chain().focus().toggleTaskList().run()}
+        >
+          <ChecklistIcon fontSize="small" />
+        </ToggleButton>
+      </Tooltip>
+      <FormatToggle label="Quote" value="blockquote" selected={state.blockquote} onChange={() => editor.chain().focus().toggleBlockquote().run()}>
         <FormatQuoteIcon fontSize="small" />
-      </ToggleButton>
-      <ToggleButton
-        size="small"
-        value="codeBlock"
-        selected={state.codeBlock}
-        onChange={() => editor.chain().focus().toggleCodeBlock().run()}
-      >
+      </FormatToggle>
+      <FormatToggle label="Code block" value="codeBlock" selected={state.codeBlock} onChange={() => editor.chain().focus().toggleCodeBlock().run()}>
         <CodeIcon fontSize="small" />
-      </ToggleButton>
+      </FormatToggle>
       <ToolbarIconButton title="Horizontal rule" onClick={() => editor.chain().focus().setHorizontalRule().run()}>
         <HorizontalRuleIcon fontSize="small" />
       </ToolbarIconButton>

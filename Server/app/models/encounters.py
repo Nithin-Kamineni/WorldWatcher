@@ -49,7 +49,11 @@ class Encounter(Base):
     party_size: Mapped[Optional[int]] = mapped_column(Integer)
     scaling_notes: Mapped[Optional[str]] = mapped_column(Text)
     location_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("locations.id"))
-    rewards: Mapped[Optional[Any]] = mapped_column(JSONB)
+    # Task 11.2: the generator half of "random tables/generators must be referenceable FROM
+    # encounters". wandering_table_id (on the exploration block) covers a single table; this
+    # covers a composite generator - e.g. an encounter whose complication is rolled from the
+    # NPC quick-roll generator rather than from one flat table.
+    generator_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("generators.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -227,3 +231,34 @@ class EncounterTableCreature(Base):
     # either depending on how the source book wrote that row.
     quantity_formula: Mapped[str] = mapped_column(Text, nullable=False, default="1")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class EncounterReward(Base):
+    """Task 11.1: what an encounter pays out, one row per reward.
+
+    This used to be a JSONB array on encounters, which meant a reward of kind
+    'item' named a magic item in free text - a restatement of a row that
+    already exists in `items`, and the clearest breach of this codebase's
+    "reference, never duplicate" rule. item_id is now an FK, so renaming or
+    re-statting a magic item propagates to every encounter that hands it out,
+    and only the encounter-specific metadata (quantity, and any wording the
+    item row can't carry) lives here.
+    """
+
+    __tablename__ = "encounter_rewards"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    encounter_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="CASCADE"), nullable=False
+    )
+    # currency | item | information | favor | experience | other
+    kind: Mapped[str] = mapped_column(Text, nullable=False, default="other")
+    # Set only for kind='item'. Nullable so the other kinds work, and so a DM can write down
+    # an item the compendium doesn't hold yet without being blocked.
+    item_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("items.id"))
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

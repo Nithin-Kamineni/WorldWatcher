@@ -355,7 +355,13 @@ export interface ApiNote {
   folder_id: string | null;
   name: string;
   kind: 'session_prep' | 'narrative' | null;
+  /** 'text' | 'whiteboard' | 'tree' - which editor the note opens in. Optional on the wire so
+   * a response from a server that predates the canvas note types still parses. */
+  doc_type?: string | null;
   body: string;
+  /** The whiteboard/tree document (JSONB), shape-checked client-side by
+   * types/noteCanvas.ts's normalizers rather than typed here. */
+  canvas?: unknown;
   tags: unknown;
   created_at: string;
   updated_at: string;
@@ -365,6 +371,17 @@ export interface ApiChatMessage {
   id: string;
   text: string;
   createdAt: number;
+  editedAt?: number;
+}
+
+export interface ApiItemUsage {
+  id: string;
+  campaign_id: string;
+  kind: string;
+  item_id: string;
+  rolls: number;
+  opens: number;
+  last_used_at: string;
 }
 
 export interface ApiSessionChat {
@@ -778,10 +795,25 @@ export interface ApiEncounter {
   party_size: number | null;
   scaling_notes: string | null;
   location_id: string | null;
-  rewards: unknown;
+  /** Task 11.2 - the composite-generator counterpart of the exploration block's
+   * wandering_table_id. */
+  generator_id: string | null;
+  /** Task 11.1 - rows from encounter_rewards. item_id FKs a magic item for kind='item';
+   * item_name/item_rarity are hydrated by the server from that row. */
+  rewards: ApiEncounterReward[];
   created_at: string;
   updated_at: string;
   tag_ids: string[];
+}
+
+export interface ApiEncounterReward {
+  kind: string;
+  item_id: string | null;
+  description: string;
+  quantity: number;
+  sort_order: number;
+  item_name: string | null;
+  item_rarity: string | null;
 }
 
 export interface ApiEncounterTableCreature {

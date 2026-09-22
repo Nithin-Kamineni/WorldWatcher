@@ -34,3 +34,4 @@ Thumbs.db
 # not meant to live in version control (5etools-img alone is multiple GB).
 Database/external-data/
 Database/Maintainance/assets/
+Prompt Images

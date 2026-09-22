@@ -16,6 +16,7 @@ import { AppStatsWidget } from '../../components/home/AppStatsWidget';
 import { useWorldStore, getWorldById, getCampaignsForWorld } from '../../store/useWorldStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
 import { useNavMemoryStore } from '../../store/useNavMemoryStore';
+import { PageTitle, SectionTitle } from '../../components/shell/PageTitle';
 
 export function WorldHomePage() {
   const { worldId } = useParams<{ worldId: string }>();
@@ -49,9 +50,7 @@ export function WorldHomePage() {
 
   return (
     <SectionLayout worldId={world.id}>
-      <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
-        {world.name}
-      </Typography>
+      <PageTitle sx={{ mb: 0.5 }}>{world.name}</PageTitle>
       {world.description && (
         <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 640 }}>
           {world.description}
@@ -62,9 +61,7 @@ export function WorldHomePage() {
 
       <CampaignsSection worldId={world.id} worldName={world.name} worldCampaigns={worldCampaigns} activeCampaignId={activeCampaignId} />
 
-      <Typography variant="h6" sx={{ fontWeight: 700, mt: 5, mb: 2 }}>
-        Dashboard
-      </Typography>
+      <SectionTitle sx={{ mt: 5, mb: 2 }}>Dashboard</SectionTitle>
       <Box
         sx={{
           display: 'grid',

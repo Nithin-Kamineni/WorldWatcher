@@ -48,7 +48,7 @@ function PlacedTokenNode({
     onTokenContextMenu(token, e.evt.clientX, e.evt.clientY);
   };
 
-  const handleClick = (e: KonvaEventObject<MouseEvent>) => {
+  const handleClick = (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     onTokenSelect(token, e.evt.ctrlKey || e.evt.metaKey);
   };
 

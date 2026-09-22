@@ -80,6 +80,26 @@ export const useNoteStore = create<NoteStoreState>((set, get) => ({
           fetchedFolders = [apiNoteFolderToNoteFolder(sessionsFolder), apiNoteFolderToNoteFolder(narrativesFolder)];
         }
 
+        // "DM Notes" (issues.txt 10.b.3) lives INSIDE Sessions and holds the DM's chat threads.
+        // Seeded separately from the two roots above because campaigns created before it
+        // existed already have folders, so the `length === 0` branch would never run for them.
+        const sessionsRoot = fetchedFolders.find((f) => f.defaultKind === 'session');
+        if (sessionsRoot && !fetchedFolders.some((f) => f.defaultKind === 'dm_notes')) {
+          const created = await notesApi.createNoteFolder(
+            noteFolderToApiPayload({
+              id: crypto.randomUUID(),
+              campaignId,
+              parentId: sessionsRoot.id,
+              name: 'DM Notes',
+              isDefault: true,
+              defaultKind: 'dm_notes',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            }),
+          );
+          fetchedFolders = [...fetchedFolders, apiNoteFolderToNoteFolder(created)];
+        }
+
         set((state) => ({
           notes: [...state.notes.filter((n) => n.campaignId !== campaignId), ...fetchedNotes],
           folders: [...state.folders.filter((f) => f.campaignId !== campaignId), ...fetchedFolders],
@@ -164,4 +184,11 @@ export function getFoldersForCampaign(folders: NoteFolder[], campaignId: string 
 
 export function getNoteById(notes: Note[], id: string | undefined): Note | undefined {
   return notes.find((n) => n.id === id);
+}
+
+/** The campaign's protected "DM Notes" folder - the one that lists chat threads instead of
+ * notes. Undefined only in the window before ensureSeeded has created it. */
+export function getDmNotesFolder(folders: NoteFolder[], campaignId: string | undefined): NoteFolder | undefined {
+  if (!campaignId) return undefined;
+  return folders.find((f) => f.campaignId === campaignId && f.defaultKind === 'dm_notes');
 }

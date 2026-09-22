@@ -20,6 +20,12 @@ Three sources, three shapes:
    map_floors.locked_encounter_id) - if so it's left in place (its
    resolution_type/tables JSONB become dead weight but nothing breaks).
 
+HISTORICAL - this script no longer runs against a current database. The two
+source tables it reads (`random_encounter_tables`, `situational_tables`) were
+dropped in Alembic migration a8e2d5c1f9b3 once this migration had been applied.
+It is kept as the record of how the old rows were mapped into random_tables; to
+run it you would need a database restored to before that migration.
+
 2. `random_encounter_tables` (1 row, "Sky fish") - a DM-built table whose
    entries already point at real Encounter ids. Those old ids include some
    of the *containers* from step 1 (i.e. it was built to cascade into

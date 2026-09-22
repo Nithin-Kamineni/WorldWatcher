@@ -13,7 +13,10 @@ import AddCommentIcon from '@mui/icons-material/AddCommentOutlined';
 import ForumIcon from '@mui/icons-material/ForumOutlined';
 import NotesDisabledIcon from '@mui/icons-material/BlockOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import NoteAddIcon from '@mui/icons-material/NoteAddOutlined';
 import { useSessionChatStore, getChatsForNote } from '../../store/useSessionChatStore';
+import { useNoteStore, getFoldersForCampaign } from '../../store/useNoteStore';
+import { SESSION_TEMPLATES } from '../../types/noteTemplates';
 import type { Note } from '../../types/note';
 import type { SessionChat } from '../../types/sessionChat';
 
@@ -45,6 +48,10 @@ function newChatName(): string {
   return `Chat — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 }
 
+function todayLabel(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 /** Single-page session picker (issues.txt 1.1/1.2) - two columns, session prep on the left and
  * its notes thread on the right, both pre-selected to their most-recently-updated item (the
  * right column falls back to "No notes thread" when none exist yet). One "Start running"
@@ -55,6 +62,8 @@ export function SessionRunnerSetupScreen({ worldId, campaignId, sessionNotes, on
   const chats = useSessionChatStore((s) => s.chats);
   const fetchChatsForNote = useSessionChatStore((s) => s.fetchChatsForNote);
   const addChat = useSessionChatStore((s) => s.addChat);
+  const noteFolders = useNoteStore((s) => s.folders);
+  const addNote = useNoteStore((s) => s.addNote);
 
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(sessionNotes[0]?.id ?? null);
   const [chatChoice, setChatChoice] = useState<ChatChoice | null>(null);
@@ -96,6 +105,31 @@ export function SessionRunnerSetupScreen({ worldId, campaignId, sessionNotes, on
     onComplete(selectedNoteId, chat.id);
   };
 
+  /** Same session-prep note the Notes explorer's "New session prep" makes - offered here so a
+   * DM with an empty campaign can start running without a detour through another page. */
+  const handleCreateSessionNote = () => {
+    const folders = getFoldersForCampaign(noteFolders, campaignId);
+    const targetFolder = folders.find((f) => f.isDefault && f.defaultKind === 'session');
+    const name = `Session — ${todayLabel()}`;
+    const note: Note = {
+      id: crypto.randomUUID(),
+      campaignId,
+      folderId: targetFolder?.id ?? null,
+      name,
+      kind: 'session_prep',
+      docType: 'text',
+      body: SESSION_TEMPLATES[0].build(name),
+      canvas: null,
+      tags: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    addNote(note);
+    // Straight into the workspace on the new note - the point of the button is to skip a step,
+    // not to hand the DM back to this same screen with one card on it.
+    onComplete(note.id, null);
+  };
+
   if (sessionNotes.length === 0) {
     return (
       <Box sx={{ maxWidth: 640, mx: 'auto', py: 4 }}>
@@ -110,12 +144,18 @@ export function SessionRunnerSetupScreen({ worldId, campaignId, sessionNotes, on
           <Typography variant="h6" sx={{ mb: 0.5 }}>
             No session prep notes yet
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Create one in Notes → Folders → Sessions, then come back here to run it.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+            Start one here and you are running in a click - it lands in Notes → Sessions like any
+            other, ready to fill in as you go.
           </Typography>
-          <Button variant="contained" onClick={() => navigate(`/w/${worldId}/c/${campaignId}/notes?tab=folders`)}>
-            Go to Notes
-          </Button>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ justifyContent: 'center' }}>
+            <Button variant="contained" startIcon={<NoteAddIcon />} onClick={handleCreateSessionNote}>
+              Create a session note
+            </Button>
+            <Button variant="text" onClick={() => navigate(`/w/${worldId}/c/${campaignId}/notes?tab=folders`)}>
+              Go to Notes
+            </Button>
+          </Stack>
         </Paper>
       </Box>
     );

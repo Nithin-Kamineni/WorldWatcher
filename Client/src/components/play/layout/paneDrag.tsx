@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { PaneSlot } from './playLayoutTrees';
+import type { PaneSlot, SplitSide } from './playLayoutTrees';
 
 /** The MIME-ish key the pane drag writes into the DataTransfer. Checked on drop so a drag that
  * started somewhere else (a file, a link, a tab strip) can never rearrange the workspace. */
@@ -16,6 +16,18 @@ interface PaneDragContextValue {
   setHoverSlot: (slot: PaneSlot | null) => void;
   /** Completes a drag: swaps the dragged pane with `target`. */
   dropOn: (target: PaneSlot) => void;
+  /** The panes currently on screen, in layout order - what the keyboard "Move window" menu
+   * offers as swap targets. */
+  slots: PaneSlot[];
+  /** What each pane is showing ("Items", "DM Notes"…), so that menu can name its targets
+   * rather than saying "pane 2". */
+  labelForSlot: (slot: PaneSlot) => string;
+  /** Swaps two panes outright, with no drag involved - the keyboard and touch path
+   * (checklist I-P2). */
+  swap: (a: PaneSlot, b: PaneSlot) => void;
+  /** Splits a pane, putting a new empty one on the given side - what turns the six presets into
+   * starting points rather than the only reachable arrangements (checklist I-P1). */
+  split: (slot: PaneSlot, side: SplitSide) => void;
 }
 
 const NOOP_CONTEXT: PaneDragContextValue = {
@@ -26,6 +38,10 @@ const NOOP_CONTEXT: PaneDragContextValue = {
   endDrag: () => {},
   setHoverSlot: () => {},
   dropOn: () => {},
+  slots: [],
+  labelForSlot: () => '',
+  swap: () => {},
+  split: () => {},
 };
 
 const PaneDragContext = createContext<PaneDragContextValue>(NOOP_CONTEXT);
@@ -38,6 +54,11 @@ interface PaneDragProviderProps {
   /** False while the layout is locked - drag handles go inert rather than disappearing. */
   enabled: boolean;
   onSwap: (a: PaneSlot, b: PaneSlot) => void;
+  /** Panes currently on screen, in layout order. */
+  slots: PaneSlot[];
+  /** Human name for what a pane is showing. */
+  labelForSlot: (slot: PaneSlot) => string;
+  onSplit: (slot: PaneSlot, side: SplitSide) => void;
   children: ReactNode;
 }
 
@@ -45,7 +66,7 @@ interface PaneDragProviderProps {
  * Kept in React state rather than only in the DataTransfer because every pane needs to react to
  * it - the drag source dims, and every *other* pane has to raise a drop catcher and show its
  * snap tint, which is only possible if they all know a drag is in flight. */
-export function PaneDragProvider({ enabled, onSwap, children }: PaneDragProviderProps) {
+export function PaneDragProvider({ enabled, onSwap, slots, labelForSlot, onSplit, children }: PaneDragProviderProps) {
   const [draggingSlot, setDraggingSlot] = useState<PaneSlot | null>(null);
   const [hoverSlot, setHoverSlot] = useState<PaneSlot | null>(null);
   /** Mirrors draggingSlot so dropOn can read the source without being re-created per drag -
@@ -85,8 +106,12 @@ export function PaneDragProvider({ enabled, onSwap, children }: PaneDragProvider
       endDrag,
       setHoverSlot,
       dropOn,
+      slots,
+      labelForSlot,
+      swap: onSwap,
+      split: onSplit,
     }),
-    [draggingSlot, hoverSlot, enabled, beginDrag, endDrag, dropOn],
+    [draggingSlot, hoverSlot, enabled, beginDrag, endDrag, dropOn, slots, labelForSlot, onSwap, onSplit],
   );
 
   return <PaneDragContext.Provider value={value}>{children}</PaneDragContext.Provider>;

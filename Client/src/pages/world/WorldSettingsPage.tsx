@@ -15,8 +15,11 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { SectionLayout } from '../../components/shell/SectionLayout';
 import { Breadcrumbs } from '../../components/layout/Breadcrumbs';
 import { ShortcutsSettingsDialog } from '../../components/settings/ShortcutsSettingsDialog';
+import { RailLabelsSettingItem } from '../../components/settings/RailLabelsSettingItem';
+import { UiScaleSettingItem } from '../../components/settings/UiScaleSettingItem';
 import { useWorldStore, getWorldById } from '../../store/useWorldStore';
 import { useThemeMode } from '../../theme/ThemeModeContext';
+import { PageTitle } from '../../components/shell/PageTitle';
 
 const COMING_SOON_SECTIONS = ['Profile', 'Publishing', 'Players / invites', 'World settings', 'Integrations'];
 
@@ -30,20 +33,20 @@ export function WorldSettingsPage() {
   return (
     <SectionLayout worldId={worldId!}>
       <Breadcrumbs items={[{ label: world?.name ?? '…' }, { label: 'Settings' }]} />
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }}>
-        Settings
-      </Typography>
+      <PageTitle sx={{ mb: 2 }}>Settings</PageTitle>
       <Paper variant="outlined" sx={{ borderRadius: 3, maxWidth: 480, overflow: 'hidden' }}>
         <List disablePadding>
           <ListItemButton disableRipple sx={{ cursor: 'default' }}>
             <ListItemText primary="Appearance" secondary="Light / dark theme" />
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Typography variant="body2" color="text.secondary">
                 {mode === 'dark' ? 'Dark' : 'Light'}
               </Typography>
               <Switch checked={mode === 'dark'} onChange={toggleMode} size="small" />
             </Stack>
           </ListItemButton>
+          <UiScaleSettingItem />
+          <RailLabelsSettingItem />
           <ListItemButton onClick={() => setShortcutsOpen(true)}>
             <ListItemIcon sx={{ minWidth: 36 }}>
               <KeyboardIcon fontSize="small" />

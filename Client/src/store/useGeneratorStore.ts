@@ -27,6 +27,8 @@ interface GeneratorState {
   createGenerator: (payload: Record<string, unknown>) => Promise<GeneratorDetail | null>;
   updateGenerator: (id: string, payload: Record<string, unknown>) => Promise<GeneratorDetail | null>;
   replaceComponents: (id: string, components: GeneratorComponent[]) => Promise<GeneratorDetail | null>;
+  /** Task 11.4: clone-to-edit for curated generators - see cloneTable on useRandomTableStore. */
+  cloneGenerator: (id: string, campaignId?: string | null) => Promise<GeneratorDetail | null>;
   deleteGenerator: (id: string) => Promise<void>;
   roll: (id: string, params?: Record<string, string>) => Promise<GeneratorRollResult | null>;
 }
@@ -99,6 +101,17 @@ export const useGeneratorStore = create<GeneratorState>((set, get) => ({
       return detail;
     } catch (err) {
       console.error(`Failed to replace components for generator ${id}`, err);
+      return null;
+    }
+  },
+
+  cloneGenerator: async (id, campaignId) => {
+    try {
+      const detail = apiGeneratorDetailToDetail(await generatorsApi.cloneGenerator(id, campaignId));
+      set((state) => ({ detailById: { ...state.detailById, [detail.id]: detail } }));
+      return detail;
+    } catch (err) {
+      console.error(`Failed to clone generator ${id}`, err);
       return null;
     }
   },

@@ -3,6 +3,16 @@ import Box from '@mui/material/Box';
 import type { LayoutNode, PaneSlot, SplitDirection } from './playLayoutTrees';
 
 const DIVIDER_HIT_SIZE = 10;
+/**
+ * Dividers overhang their track by half the hit size, so an outer divider's grab strip bleeds
+ * a few pixels into the track holding a nested split - and where a vertical and a horizontal
+ * divider cross, those strips overlap. Every divider used to sit at the same z-index, so DOM
+ * order decided the winner, and the nested one is always later: grabbing the crossing point
+ * silently resized the wrong axis. Outer dividers now stack above inner ones, which matches
+ * what the pointer is on (the outer divider runs through that pixel; the inner one only
+ * reaches it via its overhang) and makes the hover tint show which axis you are about to drag.
+ */
+const DIVIDER_BASE_Z = 10;
 const COLLAPSED_SIZE = 44;
 const MIN_TRACK_PX = 160;
 
@@ -14,6 +24,8 @@ interface SplitPaneProps {
   locked: boolean;
   onResize: (key: string, sizes: number[]) => void;
   renderLeaf: (slot: PaneSlot, parentDirection: SplitDirection) => ReactNode;
+  /** How deep this node sits in the layout tree; 0 at the root. Only drives divider stacking. */
+  depth?: number;
 }
 
 function isCollapsedNode(node: LayoutNode, collapsedSlots: Set<PaneSlot>): boolean {
@@ -23,9 +35,9 @@ function isCollapsedNode(node: LayoutNode, collapsedSlots: Set<PaneSlot>): boole
 /** One generic recursive renderer for all 6 Play-page layouts (see playLayoutTrees.ts) - walks
  * a static row/column split tree, rendering a draggable divider between each pair of adjacent,
  * non-collapsed children. Sizes are flex-grow weights (not required to sum to 1); a collapsed
- * leaf (chat-only, see usePlayLayoutStore.collapsedPanes) gets a fixed pixel flex-basis instead
+ * leaf (see usePlayLayoutStore.collapsedPanes) gets a fixed pixel flex-basis instead
  * and its dividers are hidden, since a fixed-size pane has nothing to drag. */
-export function SplitPane({ layoutId, node, paneSizes, collapsedSlots, locked, onResize, renderLeaf }: SplitPaneProps) {
+export function SplitPane({ layoutId, node, paneSizes, collapsedSlots, locked, onResize, renderLeaf, depth = 0 }: SplitPaneProps) {
   if (node.type === 'leaf') return <>{renderLeaf(node.slot, 'row')}</>;
   return (
     <SplitContainer
@@ -36,6 +48,7 @@ export function SplitPane({ layoutId, node, paneSizes, collapsedSlots, locked, o
       locked={locked}
       onResize={onResize}
       renderLeaf={renderLeaf}
+      depth={depth}
     />
   );
 }
@@ -48,6 +61,7 @@ function SplitContainer({
   locked,
   onResize,
   renderLeaf,
+  depth = 0,
 }: Omit<SplitPaneProps, 'node'> & { node: Extract<LayoutNode, { type: 'split' }> }) {
   const key = `${layoutId}:${node.path}`;
   const storedSizes = paneSizes[key];
@@ -142,13 +156,14 @@ function SplitContainer({
               locked={locked}
               onResize={onResize}
               renderLeaf={(slot) => renderLeaf(slot, node.direction)}
+              depth={depth + 1}
             />
             {showDivider && (
               <Box
                 onMouseDown={(e) => startDrag(i, e)}
                 sx={{
                   position: 'absolute',
-                  zIndex: 2,
+                  zIndex: DIVIDER_BASE_Z - depth,
                   cursor: node.direction === 'row' ? 'col-resize' : 'row-resize',
                   '&:hover': { bgcolor: 'primary.main', opacity: 0.5 },
                   ...(node.direction === 'row'

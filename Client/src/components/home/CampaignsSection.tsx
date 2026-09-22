@@ -116,6 +116,7 @@ export function CampaignsSection({ worldId, worldName, worldCampaigns, activeCam
                   </ButtonBase>
                   <IconButton
                     size="small"
+                    aria-label={`Edit ${c.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       setEditingCampaignId(c.id);

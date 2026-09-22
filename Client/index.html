@@ -2,11 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Favicon set is the d20 mascot cropped out of app-icon.png and squared, rendered at
-         each size rather than left for the browser to shrink. The full illustration is a wide
-         composition (scrolls right, potions left) whose subject only fills ~60% of a square
-         box, which is why the tab icon looked small; cropping to the die fills it. Regenerate
-         all five from app-icon.png if the brand changes. -->
+<!-- The brand mark is an original vector: a d20 seen face-on with an eye in its top face -
+         a die for the game, a watching eye for the Watcher. It replaced a watermarked stock
+         illustration (checklist I-U7), which was both a licensing problem and unreadable at
+         16px.
+
+         app-icon.svg is the MASTER and is offered first - browsers that take an SVG favicon
+         get a crisp one at any density. Every PNG below is generated from the same geometry,
+         so they cannot drift; regenerate the whole set together if the mark changes. The 16px
+         file is deliberately a simplified variant (no facet lines, no pupil, a fatter stroke
+         and a slightly larger die) because at that size the full drawing turns to mush - which
+         is the entire reason these are authored per size rather than left to the browser. -->
+    <link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />

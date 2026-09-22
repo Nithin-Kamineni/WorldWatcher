@@ -17,6 +17,7 @@ import WhatshotIcon from '@mui/icons-material/Whatshot';
 import PlaceIcon from '@mui/icons-material/Place';
 import GroupsIcon from '@mui/icons-material/Groups';
 import TableChartIcon from '@mui/icons-material/TableChart';
+import MapIcon from '@mui/icons-material/MapOutlined';
 import type { EntityRefType } from '../../utils/bbcode';
 import type { MentionableEntity } from '../../hooks/useMentionableEntities';
 
@@ -28,9 +29,10 @@ const CATEGORY_META: Record<EntityRefType, { label: string; icon: ReactElement }
   place: { label: 'Places', icon: <PlaceIcon fontSize="small" /> },
   faction: { label: 'Factions', icon: <GroupsIcon fontSize="small" /> },
   situational_table: { label: 'Tables', icon: <TableChartIcon fontSize="small" /> },
+  map: { label: 'Maps', icon: <MapIcon fontSize="small" /> },
 };
 
-const CATEGORY_ORDER: EntityRefType[] = ['npc', 'creature', 'spell', 'encounter', 'place', 'faction', 'situational_table'];
+const CATEGORY_ORDER: EntityRefType[] = ['npc', 'creature', 'spell', 'encounter', 'place', 'map', 'faction', 'situational_table'];
 
 export interface MentionPickerHandle {
   moveHighlight: (delta: number) => void;
@@ -47,11 +49,12 @@ interface MentionPickerProps {
 }
 
 /** Floating @-mention search popover - anchored at the caret position where "@" was typed
- * (BBCodeEditor computes this via getCaretCoordinates). Filtering is driven entirely by the
+ * (useMentionInput computes this via getCaretCoordinates for a textarea, useTipTapMentions
+ * via editor.view.coordsAtPos for the rich text editor). Filtering is driven entirely by the
  * `@query` text typed directly in the textarea (like Slack/GitHub mentions) plus an optional
  * category chip click, so focus never has to leave the textarea while typing. Keyboard
- * navigation (Up/Down/Enter/Escape) is handled by BBCodeEditor's textarea keydown listener via
- * the imperative handle, for the same reason. */
+ * navigation (Up/Down/Enter/Escape) is handled by the caller's own keydown listener via the
+ * imperative handle below, for the same reason. */
 export const MentionPicker = forwardRef<MentionPickerHandle, MentionPickerProps>(function MentionPicker(
   { open, anchorPosition, query, entities, onSelect, onClose },
   ref,

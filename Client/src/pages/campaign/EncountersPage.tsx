@@ -9,11 +9,9 @@ export function EncountersPage() {
   const { worldId, campaignId } = useParams<{ worldId: string; campaignId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedView = searchParams.get('view');
-  const view: EncounterView = requestedView === 'generators'
-    ? 'random_tables'
-    : requestedView === 'management' || requestedView === 'random_tables'
-      ? requestedView
-      : 'menu';
+  // The page opens ON the unified browser - there is no landing menu any more (checklist
+  // I-U2). `?view=generators` is an old link shape kept working.
+  const view: EncounterView = requestedView === 'management' ? 'management' : 'random_tables';
   const openEncounterId = searchParams.get('encounter') ?? undefined;
   const openTableId = searchParams.get('table') ?? undefined;
 
@@ -26,7 +24,7 @@ export function EncountersPage() {
 
   const setView = (next: EncounterView) =>
     setSearchParams((prev) => {
-      if (next === 'menu') prev.delete('view');
+      if (next === 'random_tables') prev.delete('view');
       else prev.set('view', next);
       return prev;
     });

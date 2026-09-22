@@ -21,6 +21,9 @@ import ShieldIcon from '@mui/icons-material/Shield';
 import NotesIcon from '@mui/icons-material/Notes';
 import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
+import AssignmentIndOutlinedIcon from '@mui/icons-material/AssignmentIndOutlined';
+import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
+import { SectionHeader } from '../../shell/SectionHeader';
 import type { InitiativeState } from '../../../types/initiative';
 import type { PlacedToken } from '../../../types/token';
 import { TokenThumbnail } from '../TokenThumbnail';
@@ -43,6 +46,8 @@ interface InitiativePanelProps {
   onUpdateToken: (tokenId: string, changes: TokenCombatChanges) => void;
   selectedTokenIds: string[];
   onTokenSelect: (token: PlacedToken, additive: boolean) => void;
+  /** Opens this combatant's creature in the sidebar's Reference panel (checklist E13). */
+  onTokenStatsRequest: (token: PlacedToken) => void;
   shortcutOverrides: Record<string, ShortcutOverride>;
 }
 
@@ -63,6 +68,7 @@ export function InitiativePanel({
   onUpdateToken,
   selectedTokenIds,
   onTokenSelect,
+  onTokenStatsRequest,
   shortcutOverrides,
 }: InitiativePanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -71,12 +77,7 @@ export function InitiativePanel({
 
   return (
     <Stack sx={{ height: '100%' }}>
-      <Box sx={{ p: 2 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-          Initiative
-        </Typography>
-      </Box>
-      <Divider />
+      <SectionHeader icon={<FormatListNumberedIcon fontSize="small" />} title="Initiative" />
 
       {initiative.status === 'idle' && (
         <Box sx={{ p: 2 }}>
@@ -223,6 +224,20 @@ export function InitiativePanel({
                         </Tooltip>
                       </Stack>
                     )}
+                    <Tooltip title={token.creatureId ? 'Open stat block in Reference' : 'No linked creature to show'}>
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={!token.creatureId}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onTokenStatsRequest(token);
+                          }}
+                        >
+                          <AssignmentIndOutlinedIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
                     <IconButton
                       size="small"
                       onClick={(e) => {

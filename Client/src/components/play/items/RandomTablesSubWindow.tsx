@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
@@ -14,6 +14,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CasinoIcon from '@mui/icons-material/Casino';
 import { ItemsSearchFilterBar, type FilterGroupDef } from './ItemsSearchFilterBar';
+import { ItemsBrowseSection, BROWSE_PAGE } from './ItemsBrowseSection';
 import { PinnableItemRow } from './PinnableItemRow';
 import { AllBuilderLaunchers } from './BuilderLaunchers';
 import { RollResultView } from '../../dm/randomTables/RollResultView';
@@ -33,9 +34,9 @@ import { useCategoryStore, categoryPath } from '../../../store/useCategoryStore'
 import { useTagStore } from '../../../store/useTagStore';
 import { useTableFormatStore } from '../../../store/useTableFormatStore';
 import { usePlayItemsStore, getPlayItemsState, getSlotItems } from '../../../store/usePlayItemsStore';
-import { useTableUsageStore, getTableUsage } from '../../../store/useTableUsageStore';
+import { useItemUsageStore, getItemUsage } from '../../../store/useItemUsageStore';
 import { useQuickChatSend } from '../../../hooks/useQuickChatSend';
-import type { PaneSlot } from '../layout/playLayoutTrees';
+import type { ItemsSurface } from '../layout/playLayoutTrees';
 import type { RandomTable, RollResult } from '../../../types/randomTable';
 import { thinScrollbarSx, FLOATING_SCROLLBAR_CLASS } from '../../../theme/scrollbarSx';
 
@@ -44,13 +45,8 @@ interface RandomTablesSubWindowProps {
   campaignId: string;
   /** Which Items window this is. Every pin/open/expand below is scoped to it, so a second
    * Items window browses tables completely independently of this one. */
-  slot: PaneSlot;
+  slot: ItemsSurface;
 }
-
-/** How many browse rows are rendered at once. The library runs to thousands of tables and this
- * pane is a narrow session-time list, not a catalog browser - the count line always states the
- * full match total so the cap never hides how big the result set really is. */
-const BROWSE_PAGE = 40;
 
 /** Random Tables sub-window (issues.txt 10.c.3).
  *
@@ -69,7 +65,7 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
   const resultKey = `play:${campaignId}`;
   const results = useRandomTableStore((s) => s.resultSets[resultKey]?.results ?? EMPTY_RANDOM_TABLE_RESULTS);
   const searching = useRandomTableStore((s) => s.resultSets[resultKey]?.searching ?? false);
-  const search = useRandomTableStore((s) => s.search);
+  const ensureSearch = useRandomTableStore((s) => s.ensureSearch);
   const roll = useRandomTableStore((s) => s.roll);
   const details = useRandomTableStore((s) => s.detailById);
   const fetchDetail = useRandomTableStore((s) => s.fetchDetail);
@@ -91,15 +87,15 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
   const current = slotState.currentByKind['random-tables'];
   const expanded = slotState.expandedByKind['random-tables'];
 
-  const usageByCampaignId = useTableUsageStore((s) => s.byCampaignId);
-  const recordRoll = useTableUsageStore((s) => s.recordRoll);
-  const recordOpen = useTableUsageStore((s) => s.recordOpen);
-  const usage = getTableUsage(usageByCampaignId, campaignId);
+  const usageByCampaignId = useItemUsageStore((s) => s.byCampaignId);
+  const recordUse = useItemUsageStore((s) => s.recordUse);
+  const recordOpen = useItemUsageStore((s) => s.recordOpen);
+  const usage = getItemUsage(usageByCampaignId, campaignId, 'random-tables');
 
   /** Opening a table is itself a usefulness signal, so every "show me this one" goes through
    * here rather than calling the store action directly. */
   const focusItem = (tableId: string) => {
-    recordOpen(campaignId, tableId);
+    recordOpen(campaignId, 'random-tables', tableId);
     focusItemAction(campaignId, slot, 'random-tables', tableId);
   };
 
@@ -108,7 +104,8 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
-  const [showAll, setShowAll] = useState(false);
+  const [limit, setLimit] = useState(BROWSE_PAGE);
+  const showMore = useCallback(() => setLimit((n) => n + BROWSE_PAGE), []);
   const [rolling, setRolling] = useState<Record<string, boolean>>({});
   const [rollResults, setRollResults] = useState<Record<string, RollResult>>({});
 
@@ -118,19 +115,22 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
     fetchFormats();
   }, [fetchCategoryTree, fetchTags, fetchFormats]);
 
-  // One unfiltered load of the *whole* library - every narrowing below happens on the client,
+  // One unfiltered load of the *whole* library, shared by every surface on this result key -
+  // two Items windows and the map page's Reference sidebar used to fetch it separately, three
+  // times over, all writing the same result set (checklist I-U4). Every narrowing below happens
+  // on the client,
   // which is what lets the facets show counts instead of only hiding rows. Scope is 'all'
   // rather than this campaign's own_or_global slice so this sub-window searches everything the
   // @-mention picker can offer (useMentionableEntities uses the same scope); a mention of
   // another campaign's homebrew table therefore resolves to a real row here instead of
   // silently opening nothing.
   useEffect(() => {
-    void search({ scope: 'all', limit: 20000 }, resultKey);
-  }, [search, resultKey]);
+    void ensureSearch({ scope: 'all', limit: 20000 }, resultKey);
+  }, [ensureSearch, resultKey]);
 
   // A narrowed result set is a fresh list - re-collapse it to the first page.
   useEffect(() => {
-    setShowAll(false);
+    setLimit(BROWSE_PAGE);
   }, [query, categoryFilter, tagFilter]);
 
   const index = useMemo(() => buildTableSearchIndex(results, categoryFlat, tags), [results, categoryFlat, tags]);
@@ -232,7 +232,7 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
     setRolling((prev) => ({ ...prev, [tableId]: false }));
     if (result) {
       setRollResults((prev) => ({ ...prev, [tableId]: result }));
-      recordRoll(campaignId, tableId);
+      recordUse(campaignId, 'random-tables', tableId);
     }
     return result;
   };
@@ -243,7 +243,7 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
   };
 
   const hasNarrowing = query.trim() !== '' || categoryFilter.length > 0 || tagFilter.length > 0;
-  const visible = showAll ? matched : matched.slice(0, BROWSE_PAGE);
+  const visible = matched.slice(0, limit);
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -351,68 +351,49 @@ export function RandomTablesSubWindow({ worldId, campaignId, slot }: RandomTable
             the search bar instead. */}
         {!hasNarrowing && <AllBuilderLaunchers worldId={worldId} campaignId={campaignId} slot={slot} />}
 
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', pl: 0.5, mt: 1 }}>
-          <Typography variant="overline" color="text.secondary">
-            Browse
-          </Typography>
-          <Chip
-            size="small"
-            variant="outlined"
-            label={hasNarrowing ? `${matched.length} of ${results.length}` : `${results.length} tables`}
-            sx={{ height: 18, fontSize: 10.5 }}
-          />
-        </Stack>
-
-        {results.length === 0 ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            {searching ? 'Loading the table library…' : 'No tables in this campaign yet.'}
-          </Typography>
-        ) : matched.length === 0 ? (
-          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
-            No tables match.
-          </Typography>
-        ) : (
-          <>
-            <List dense disablePadding>
-              {visible.map((t) => (
-                <ListItemButton
-                  key={t.id}
-                  onClick={() => focusItem(t.id)}
-                  sx={{ borderRadius: 1.5, pr: 0.5 }}
-                >
-                  <ListItemText
-                    primary={
-                      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                        <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {t.name}
-                        </Box>
-                        {t.isSystem && <Chip label="system" size="small" variant="outlined" sx={{ height: 16, fontSize: '0.6rem', flexShrink: 0 }} />}
-                      </Stack>
-                    }
-                    secondary={taglineFor(t)}
-                    slotProps={{ primary: { sx: { fontSize: 13.5 } }, secondary: { sx: { fontSize: 11.5 } } }}
-                  />
-                  <Tooltip title="Roll this table now">
-                    <IconButton
-                      size="small"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void rollFromBrowse(t.id);
-                      }}
-                    >
-                      {rolling[t.id] ? <CircularProgress size={15} /> : <CasinoIcon fontSize="small" />}
-                    </IconButton>
-                  </Tooltip>
-                </ListItemButton>
-              ))}
-            </List>
-            {matched.length > visible.length && (
-              <Button size="small" fullWidth onClick={() => setShowAll(true)} sx={{ mt: 0.5 }}>
-                Show all {matched.length}
-              </Button>
-            )}
-          </>
-        )}
+        <ItemsBrowseSection
+          matched={matched.length}
+          total={results.length}
+          narrowed={hasNarrowing}
+          noun="tables"
+          emptyLabel={searching ? 'Loading the table library…' : 'No tables in this campaign yet.'}
+          limit={limit}
+          onShowMore={showMore}
+        >
+          <List dense disablePadding>
+            {visible.map((t) => (
+              <ListItemButton
+                key={t.id}
+                onClick={() => focusItem(t.id)}
+                sx={{ borderRadius: 1.5, pr: 0.5 }}
+              >
+                <ListItemText
+                  primary={
+                    <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                      <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.name}
+                      </Box>
+                      {t.isSystem && <Chip label="system" size="small" variant="outlined" sx={{ height: 16, fontSize: '0.6rem', flexShrink: 0 }} />}
+                    </Stack>
+                  }
+                  secondary={taglineFor(t)}
+                  slotProps={{ primary: { sx: { fontSize: 13.5 } }, secondary: { sx: { fontSize: 11.5 } } }}
+                />
+                <Tooltip title="Roll this table now">
+                  <IconButton
+                    size="small"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void rollFromBrowse(t.id);
+                    }}
+                  >
+                    {rolling[t.id] ? <CircularProgress size={15} /> : <CasinoIcon fontSize="small" />}
+                  </IconButton>
+                </Tooltip>
+              </ListItemButton>
+            ))}
+          </List>
+        </ItemsBrowseSection>
       </Box>
     </Box>
   );

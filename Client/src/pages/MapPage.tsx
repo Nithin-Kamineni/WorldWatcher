@@ -5,21 +5,20 @@ import useImage from 'use-image';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
-import Typography from '@mui/material/Typography';
 import Fab from '@mui/material/Fab';
 import Tooltip from '@mui/material/Tooltip';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-import { AppShell } from '../components/layout/AppShell';
+import { SectionLayout } from '../components/shell/SectionLayout';
 import { Breadcrumbs } from '../components/layout/Breadcrumbs';
 import { MapCanvas } from '../components/map/MapCanvas';
 import { InitiativeBar } from '../components/map/InitiativeBar';
-import { MapSidebar } from '../components/map/sidebar/MapSidebar';
+import { MapSidebar, type SidebarOpenRequest } from '../components/map/sidebar/MapSidebar';
+import { usePlayItemsStore, compositeId } from '../store/usePlayItemsStore';
 import { MapToolbar } from '../components/map/toolbar/MapToolbar';
 import { TokenManagerPopover, type TokenManagerTab } from '../components/map/toolbar/TokenManagerPopover';
-import { CreatureStatBlockDialog } from '../components/dm/CreatureStatBlockDialog';
 import { ShortcutQuickBar } from '../components/map/ShortcutQuickBar';
 import { MapNumberInputPopover } from '../components/map/MapNumberInputPopover';
 import { MapTextInputPopover } from '../components/map/MapTextInputPopover';
@@ -68,7 +67,7 @@ type QuickInputPopoverState =
 const QUICK_POPOVER_ANCHOR = () => ({ top: Math.round(window.innerHeight * 0.3), left: Math.round(window.innerWidth / 2) });
 
 export function MapPage() {
-  const { campaignId, mapId } = useParams<{ campaignId: string; mapId: string }>();
+  const { worldId, campaignId, mapId } = useParams<{ worldId: string; campaignId: string; mapId: string }>();
   const campaigns = useCampaignStore((state) => state.campaigns);
   const campaignsLoaded = useCampaignStore((state) => state.campaignsLoaded);
   const fetchCampaigns = useCampaignStore((state) => state.fetchCampaigns);
@@ -99,8 +98,9 @@ export function MapPage() {
   const [tokenManagerFocusId, setTokenManagerFocusId] = useState<string | null>(null);
   const [tokenManagerTab, setTokenManagerTab] = useState<TokenManagerTab>('floor');
   const [fitResetEpoch, setFitResetEpoch] = useState(0);
-  const [statsCreature, setStatsCreature] = useState<Creature | null>(null);
   const [noStatsWarning, setNoStatsWarning] = useState(false);
+  /** Bumped to pull the sidebar open on a section - see MapSidebar's SidebarOpenRequest. */
+  const [sidebarOpenRequest, setSidebarOpenRequest] = useState<SidebarOpenRequest | null>(null);
   const [undoStack, setUndoStack] = useState<MapFloor[]>([]);
   const [redoStack, setRedoStack] = useState<MapFloor[]>([]);
   const [selectedTokenIds, setSelectedTokenIds] = useState<string[]>([]);
@@ -260,17 +260,17 @@ export function MapPage() {
     return unsubscribe;
   }, [campaignId, map?.id, activeFloor?.id, applyRemoteFloorPatch]);
 
-  if (!campaignId) {
+  if (!worldId || !campaignId) {
     return <Navigate to="/dashboard" replace />;
   }
 
   if (!campaignsLoaded || !mapsLoaded) {
     return (
-      <AppShell>
+      <SectionLayout worldId={worldId} campaignId={campaignId}>
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <CircularProgress />
         </Box>
-      </AppShell>
+      </SectionLayout>
     );
   }
 
@@ -693,6 +693,17 @@ export function MapPage() {
    * caches (creatureBrowse, creaturePickerBrowse) and, as a last resort, an on-demand fetch -
    * a token dropped from the global/compendium catalog carries a valid creatureId that may
    * only be resolvable there, not in creaturesByCampaignId (see handleDropFavoriteCreature). */
+  /** Lands a creature in the sidebar's Reference panel, Stats sub-window, and pulls the panel
+   * open (checklist E13). Preferred over the modal stat block because the map stays live
+   * underneath - the DM can read the stat block and keep moving tokens in the same breath.
+   * The modal is still there for the compendium-side callers. */
+  const showCreatureInReference = (creature: Creature) => {
+    const items = usePlayItemsStore.getState();
+    items.openTab(campaignId, 'map', 'stats');
+    items.focusItemInTab(campaignId, 'map', 'stats', compositeId('creature', creature.id));
+    setSidebarOpenRequest({ section: 'reference', nonce: Date.now() });
+  };
+
   const handleTokenStatsRequest = async (token: PlacedToken) => {
     const creatures = getCreaturesForCampaign(creaturesByCampaignId, campaignId);
     const encounters = getEncountersForCampaign(encountersByCampaignId, campaignId);
@@ -704,13 +715,13 @@ export function MapPage() {
           useCreatureStore.getState().creaturesById[token.creatureId])
         : undefined);
     if (cached) {
-      setStatsCreature(cached);
+      showCreatureInReference(cached);
       return;
     }
     if (token.creatureId) {
       const fetched = await useCreatureStore.getState().fetchCreatureById(token.creatureId);
       if (fetched) {
-        setStatsCreature(fetched);
+        showCreatureInReference(fetched);
         return;
       }
     }
@@ -940,21 +951,20 @@ export function MapPage() {
     shortcuts: shortcutComboMap,
   };
 
-  return (
-    <AppShell fullHeight disableGutters hideHeader={isFullscreen}>
+  /* No page title above the canvas: the breadcrumb trail already ends in the map's name, and
+     an h4 repeating it cost ~56px of the one thing this page never has enough of - canvas. */
+  const mapWorkspace = (
+    <>
       {!isFullscreen && (
-        <Box sx={{ px: { xs: 2, sm: 3 }, pt: 3 }}>
+        <Box sx={{ px: { xs: 2, sm: 3 }, pt: 2, pb: 1 }}>
           <Breadcrumbs
             items={[
-              { label: 'Dashboard', to: '/dashboard' },
+              { label: getWorldById(worlds, campaign.worldId)?.name ?? '…', to: `/w/${campaign.worldId}/home` },
               { label: campaign.name, to: `/w/${campaign.worldId}/c/${campaign.id}/home` },
               { label: 'Maps', to: `/w/${campaign.worldId}/c/${campaign.id}/maps` },
               { label: map.name },
             ]}
           />
-          <Typography variant="h5" component="h1" noWrap sx={{ mb: 2, maxWidth: '80%' }}>
-            {map.name}
-          </Typography>
         </Box>
       )}
 
@@ -1066,6 +1076,7 @@ export function MapPage() {
         </Stack>
 
         <MapSidebar
+          worldId={campaign.worldId}
           campaignId={campaignId}
           floors={map.floors}
           activeFloorId={activeFloor?.id ?? ''}
@@ -1082,7 +1093,9 @@ export function MapPage() {
           onUpdateToken={handleUpdateFloorToken}
           selectedTokenIds={selectedTokenIds}
           onTokenSelect={handleTokenSelect}
+          onTokenStatsRequest={handleTokenStatsRequest}
           shortcutOverrides={shortcutOverrides}
+          openRequest={sidebarOpenRequest}
         />
       </Stack>
 
@@ -1116,7 +1129,6 @@ export function MapPage() {
         encounterActive={activeFloor?.initiative.status === 'active'}
       />
 
-      <CreatureStatBlockDialog open={!!statsCreature} creature={statsCreature} onClose={() => setStatsCreature(null)} />
 
       <Snackbar open={noStatsWarning} autoHideDuration={3000} onClose={() => setNoStatsWarning(false)}>
         <Alert severity="warning" onClose={() => setNoStatsWarning(false)} sx={{ width: '100%' }}>
@@ -1193,6 +1205,19 @@ export function MapPage() {
       )}
 
       <ShortcutsSettingsDialog open={shortcutsDialogOpen} onClose={() => setShortcutsDialogOpen(false)} />
-    </AppShell>
+    </>
+  );
+
+  /* Fullscreen drops the shell entirely rather than hiding a header inside it - the point of
+     the mode is that nothing but the canvas is on screen. Everywhere else the map renders in
+     the same shell as the rest of the app (TopBar + icon rail), which is what it was missing:
+     it was still on the retired AppShell, so opening a map replaced the whole navigation with
+     a bare "WorldWatcher" bar from an older version of the UI. */
+  return isFullscreen ? (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>{mapWorkspace}</Box>
+  ) : (
+    <SectionLayout worldId={worldId} campaignId={campaignId} disableContentPadding>
+      {mapWorkspace}
+    </SectionLayout>
   );
 }

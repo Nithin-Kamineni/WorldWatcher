@@ -2,6 +2,10 @@ import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { TopBar } from './TopBar';
 import { IconRail, getSectionLabel } from './IconRail';
 import { RightPanel } from './RightPanel';
@@ -9,6 +13,8 @@ import { CommandPalette } from './CommandPalette';
 import { useNavMemoryStore } from '../../store/useNavMemoryStore';
 import { useWorldStore, getWorldById } from '../../store/useWorldStore';
 import { useCampaignStore, getCampaignById } from '../../store/useCampaignStore';
+import { SIDEBAR_WIDTH, COLLAPSED_SIDEBAR_WIDTH } from '../../theme/layout';
+
 
 interface SectionLayoutProps {
   worldId: string;
@@ -38,6 +44,8 @@ export function SectionLayout({ worldId, campaignId, sidebar, right, children, d
   const activeCampaignByWorldId = useNavMemoryStore((s) => s.activeCampaignByWorldId);
   const setActiveCampaign = useNavMemoryStore((s) => s.setActiveCampaign);
   const setLastLocation = useNavMemoryStore((s) => s.setLastLocation);
+  const sidebarCollapsed = useNavMemoryStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useNavMemoryStore((s) => s.setSidebarCollapsed);
   const worlds = useWorldStore((s) => s.worlds);
   const campaigns = useCampaignStore((s) => s.campaigns);
 
@@ -72,24 +80,57 @@ export function SectionLayout({ worldId, campaignId, sidebar, right, children, d
       <TopBar worldId={worldId} campaignId={effectiveCampaignId} />
       <Box sx={{ flexGrow: 1, display: 'flex', minHeight: 0 }}>
         <IconRail worldId={worldId} campaignId={effectiveCampaignId} />
-        {sidebar && (
-          <Box
-            sx={{
-              width: 220,
-              flexShrink: 0,
-              borderRight: 1,
-              borderColor: 'divider',
-              overflowY: 'auto',
-              p: 1.5,
-              display: { xs: 'none', sm: 'block' },
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-              '&::-webkit-scrollbar': { display: 'none' },
-            }}
-          >
-            {sidebar}
-          </Box>
-        )}
+        {sidebar &&
+          (sidebarCollapsed ? (
+            <Box
+              sx={{
+                width: COLLAPSED_SIDEBAR_WIDTH,
+                flexShrink: 0,
+                borderRight: 1,
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                display: { xs: 'none', sm: 'flex' },
+                flexDirection: 'column',
+                alignItems: 'center',
+                pt: 1,
+              }}
+            >
+              <Tooltip title="Show sidebar" placement="right">
+                <IconButton size="small" aria-label="Show sidebar" onClick={() => setSidebarCollapsed(false)}>
+                  <ChevronRightIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                width: SIDEBAR_WIDTH,
+                flexShrink: 0,
+                borderRight: 1,
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                overflowY: 'auto',
+                p: 1.25,
+                display: { xs: 'none', sm: 'flex' },
+                flexDirection: 'column',
+                scrollbarWidth: 'none',
+                msOverflowStyle: 'none',
+                '&::-webkit-scrollbar': { display: 'none' },
+              }}
+            >
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.25, flexShrink: 0 }}>
+                <Tooltip title="Hide sidebar" placement="right">
+                  <IconButton size="small" aria-label="Hide sidebar" onClick={() => setSidebarCollapsed(true)}>
+                    <ChevronLeftIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              {/* minHeight lets a sidebar push trailing content to the bottom with a flexGrow
+                  spacer (the World manager pins "Recently edited" there) while still scrolling
+                  normally once its content outgrows the panel. */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 'min-content' }}>{sidebar}</Box>
+            </Box>
+          ))}
         <Box
           sx={
             disableContentPadding

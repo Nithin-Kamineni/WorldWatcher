@@ -23,18 +23,35 @@ export function queryTokens(query: string): string[] {
   return normalizeSearchText(query).split(/\s+/).filter(Boolean);
 }
 
-function haystack(table: RandomTable, categoryLabel: string, tagLabels: string): string {
+/** The minimum an entity needs to be searched, faceted and counted here.
+ *
+ * Task 11.3 asked for ONE browse screen over both random tables and encounters. Rather than
+ * duplicate the index/facet/count logic per kind, the helpers below take this structural
+ * shape, which both RandomTable and Encounter already satisfy - a table adds sourceBook and
+ * triggerSituation, an encounter adds neither, and both are read optionally. */
+export interface BrowsableEntity {
+  id: string;
+  name: string;
+  description?: string | null;
+  categoryId: string | null;
+  tagIds: string[];
+  /** Table-only, folded into the match text when present. */
+  sourceBook?: string | null;
+  triggerSituation?: string | null;
+}
+
+function haystack(table: BrowsableEntity, categoryLabel: string, tagLabels: string): string {
   return normalizeSearchText([table.name, table.description ?? '', table.sourceBook ?? '', table.triggerSituation ?? '', categoryLabel, tagLabels].join(' \u0000 '));
 }
 
 export interface TableSearchIndex {
-  /** Table id -> the text every token is matched against. */
+  /** Entity id -> the text every token is matched against. */
   text: Map<string, string>;
 }
 
 /** Builds the match text once per (library, category, tag) change so typing a character does
  * not re-derive category paths and tag labels for every table in the library. */
-export function buildTableSearchIndex(tables: RandomTable[], flatCategories: Category[], tags: Tag[]): TableSearchIndex {
+export function buildTableSearchIndex(tables: BrowsableEntity[], flatCategories: Category[], tags: Tag[]): TableSearchIndex {
   const categoryById = new Map(flatCategories.map((category) => [category.id, category]));
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
   const pathCache = new Map<string, string>();
@@ -120,7 +137,7 @@ export function tokenMatchesFuzzy(token: string, text: string): boolean {
 /** Every token must match. Runs a strict substring pass first and only falls back to the fuzzy
  * pass when that finds nothing, so a correctly-typed query is never diluted by near-misses and
  * the (much more expensive) edit-distance work only happens when it can actually help. */
-export function filterTablesByQuery(tables: RandomTable[], query: string, index: TableSearchIndex): RandomTable[] {
+export function filterTablesByQuery<T extends BrowsableEntity>(tables: T[], query: string, index: TableSearchIndex): T[] {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return tables;
   const strict = tables.filter((table) => {
@@ -143,17 +160,21 @@ export function rankTablesByQuery(tables: RandomTable[], query: string, signals:
   return rankTablesByUsefulness(tables, query, signals);
 }
 
-/** How useful a table has proven to be, and how well it matches what was typed - see
- * rankTablesByUsefulness. */
-export interface TableUsefulnessSignals {
-  /** Per-campaign roll/open counters, from useTableUsageStore. */
+/** How useful an item has proven to be, for any of the Items window's five kinds - see
+ * rankByUsefulness. */
+export interface UsefulnessSignals {
+  /** Per-campaign, per-kind use/open counters, from useItemUsageStore. */
   usage?: Record<string, { rolls: number; opens: number; lastUsedAt: number }>;
-  /** Tables the DM has pinned in the Play window - an explicit "keep this to hand". */
+  /** Items the DM has pinned in the Play window - an explicit "keep this to hand". */
   pinnedIds?: Iterable<string>;
-  /** The campaign being played, so its own homebrew outranks the shared system library. */
-  campaignId?: string;
   /** Overrides "now" in the recency term - tests and stable snapshots. */
   now?: number;
+}
+
+/** The table-flavoured signals: everything above, plus the campaign whose homebrew should
+ * outrank the shared system library. */
+export interface TableUsefulnessSignals extends UsefulnessSignals {
+  campaignId?: string;
 }
 
 const DAY_MS = 86_400_000;
@@ -162,7 +183,7 @@ const DAY_MS = 86_400_000;
  * query). The tiers are the ones rankTablesByQuery already used, spread out far enough that a
  * usefulness bonus can reorder ties and near-ties without ever letting a barely-relevant
  * favourite jump ahead of a direct name hit. */
-function relevanceScore(table: RandomTable, tokens: string[]): number {
+function relevanceScore(table: { name: string }, tokens: string[]): number {
   if (tokens.length === 0) return 0;
   const name = normalizeSearchText(table.name);
   const query = tokens.join(' ');
@@ -176,13 +197,15 @@ function relevanceScore(table: RandomTable, tokens: string[]): number {
   return 30;
 }
 
-/** "How likely is this the table the DM wants", independent of what they typed - capped well
- * below one relevance tier so it breaks ties and nudges neighbours rather than overriding the
- * text match. Rolls count for more than opens (a rolled table did real work at the table), and
- * both decay in favour of tables touched recently. */
-export function usefulnessScore(table: RandomTable, signals: TableUsefulnessSignals): number {
+/** "How likely is this the item the DM wants", independent of what they typed, from usage
+ * alone - capped well below one relevance tier so it breaks ties and nudges neighbours rather
+ * than overriding the text match. A recorded *use* counts for more than a mere open (rolling a
+ * table, running an encounter, reading a stat block open is real work at the table), and both
+ * decay in favour of items touched recently. Kind-agnostic: every Items sub-window scores its
+ * rows through this. */
+export function usageScore(id: string, signals: UsefulnessSignals): number {
   const pinned = signals.pinnedIds instanceof Set ? signals.pinnedIds : new Set(signals.pinnedIds ?? []);
-  const use = signals.usage?.[table.id];
+  const use = signals.usage?.[id];
   const now = signals.now ?? Date.now();
   let score = 0;
   if (use) {
@@ -192,7 +215,14 @@ export function usefulnessScore(table: RandomTable, signals: TableUsefulnessSign
     else if (age < 7 * DAY_MS) score += 3.5;
     else if (age < 30 * DAY_MS) score += 1.5;
   }
-  if (pinned.has(table.id)) score += 8;
+  if (pinned.has(id)) score += 8;
+  return score;
+}
+
+/** The table-specific half on top of usageScore: whose library it came from, and whether it is
+ * a finished table or a bare imported stub. */
+export function usefulnessScore(table: RandomTable, signals: TableUsefulnessSignals): number {
+  let score = usageScore(table.id, signals);
   // Homebrew written for this campaign is more likely to be wanted than a generic system table.
   if (signals.campaignId && table.campaignId === signals.campaignId) score += 3;
   else if (!table.isSystem) score += 1.5;
@@ -201,6 +231,23 @@ export function usefulnessScore(table: RandomTable, signals: TableUsefulnessSign
   if (table.description) score += 1;
   if (table.triggerSituation) score += 1;
   return score;
+}
+
+/** The ordering every non-table Items sub-window uses, for search results *and* for plain
+ * browsing - the generic sibling of rankTablesByUsefulness, on the same relevance scale.
+ *
+ * Alphabetical order is the one thing a mid-session DM never wants: it puts "Abandoned Cart
+ * Contents" above the weather table they roll every in-game morning, and "Acolyte" above the
+ * boss the party is currently fighting. So with a query, rows are ranked by how well they match
+ * blended with how useful they have proven; with no query, purely by usefulness, and only then
+ * alphabetically - which is what lets a sub-window opened mid-fight lead with something the DM
+ * actually wants instead of an empty pane (checklist I-P8). */
+export function rankByUsefulness<T extends { id: string; name: string }>(items: T[], query: string, signals: UsefulnessSignals = {}): T[] {
+  const tokens = queryTokens(query);
+  return items
+    .map((item) => ({ item, score: relevanceScore(item, tokens) + usageScore(item.id, signals) }))
+    .sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name))
+    .map((scored) => scored.item);
 }
 
 /** The ordering used by both random-table surfaces, for search results *and* for plain browsing.
@@ -217,6 +264,17 @@ export function rankTablesByUsefulness(tables: RandomTable[], query: string, sig
     score: relevanceScore(table, tokens) + usefulnessScore(table, signals),
   }));
   return scored.sort((a, b) => b.score - a.score || a.table.name.localeCompare(b.table.name)).map((entry) => entry.table);
+}
+
+/** Ranking for a kind that carries no usage signals of its own (encounters, in the unified
+ * browse). Same relevance tiers as the table ranker, so the two halves of one result list are
+ * ordered on the same scale, then alphabetical - there is nothing else to go on. */
+export function rankByRelevance<T extends BrowsableEntity>(entities: T[], query: string): T[] {
+  const tokens = queryTokens(query);
+  return entities
+    .map((entity) => ({ entity, score: relevanceScore(entity, tokens) }))
+    .sort((a, b) => b.score - a.score || a.entity.name.localeCompare(b.entity.name))
+    .map((scored) => scored.entity);
 }
 
 /** Every id in the selected category's subtree (the category itself included), or null when
@@ -239,7 +297,7 @@ export function subtreeCategoryIds(flatCategories: Category[], selectedId: strin
 
 /** Tables per category, rolled up into every ancestor so a parent branch reports its whole
  * subtree rather than only the tables filed directly on it. */
-export function computeCategoryCounts(tables: RandomTable[], flatCategories: Category[]): Map<string, number> {
+export function computeCategoryCounts(tables: BrowsableEntity[], flatCategories: Category[]): Map<string, number> {
   const counts = new Map<string, number>();
   const byId = new Map(flatCategories.map((category) => [category.id, category]));
   tables.forEach((table) => {
@@ -255,7 +313,7 @@ export function computeCategoryCounts(tables: RandomTable[], flatCategories: Cat
 }
 
 /** Tables carrying each tag. */
-export function computeTagCounts(tables: RandomTable[]): Map<string, number> {
+export function computeTagCounts(tables: BrowsableEntity[]): Map<string, number> {
   const counts = new Map<string, number>();
   tables.forEach((table) => {
     table.tagIds.forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1));

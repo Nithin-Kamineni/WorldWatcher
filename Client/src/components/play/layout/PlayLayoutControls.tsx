@@ -13,6 +13,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
 import { LayoutGlyph } from './LayoutGlyph';
 import { ALL_LAYOUT_IDS, PLAY_LAYOUTS, QUICK_LAYOUT_IDS, type PaneSlot, type PlayLayoutId } from './playLayoutTrees';
+import { primaryForeground } from '../../../theme/theme';
 
 interface PlayLayoutControlsProps {
   layoutId: PlayLayoutId;
@@ -48,6 +49,8 @@ function LayoutButton({
       <span>
         <IconButton
           size="small"
+          aria-label={def.label}
+          aria-pressed={active}
           onClick={onClick}
           disabled={disabled}
           sx={{
@@ -55,7 +58,7 @@ function LayoutButton({
             border: 1,
             borderColor: active ? 'primary.main' : 'divider',
             bgcolor: active ? 'action.selected' : 'transparent',
-            color: active ? 'primary.main' : 'text.secondary',
+            color: (theme) => (active ? primaryForeground(theme) : theme.palette.text.secondary),
           }}
         >
           <LayoutGlyph layoutId={id} emptySlots={active ? emptySlots : undefined} />
@@ -104,6 +107,7 @@ export function PlayLayoutControls({
           <span>
             <IconButton
               size="small"
+              aria-label="More layouts"
               disabled={locked}
               onClick={(e) => setMoreAnchor(e.currentTarget)}
               sx={{
@@ -111,7 +115,7 @@ export function PlayLayoutControls({
                 border: 1,
                 borderColor: moreActive ? 'primary.main' : 'divider',
                 bgcolor: moreActive ? 'action.selected' : 'transparent',
-                color: moreActive ? 'primary.main' : 'text.secondary',
+                color: (theme) => (moreActive ? primaryForeground(theme) : theme.palette.text.secondary),
               }}
             >
               {moreActive ? <LayoutGlyph layoutId={layoutId} emptySlots={closedSlots} /> : <MoreHorizIcon fontSize="small" />}
@@ -125,7 +129,7 @@ export function PlayLayoutControls({
       {hasDismissedPanes && onRestorePanes && (
         <Tooltip title="Bring closed windows back">
           <span>
-            <IconButton size="small" onClick={onRestorePanes} disabled={locked} color="primary">
+            <IconButton size="small" aria-label="Bring closed windows back" onClick={onRestorePanes} disabled={locked} color="primary">
               <GridViewOutlinedIcon fontSize="small" />
             </IconButton>
           </span>
@@ -133,14 +137,20 @@ export function PlayLayoutControls({
       )}
 
       <Tooltip title={locked ? 'Unlock layout' : 'Lock layout (prevents accidental changes)'}>
-        <IconButton size="small" onClick={onToggleLock} color={locked ? 'primary' : 'default'}>
+        <IconButton
+          size="small"
+          aria-label={locked ? 'Unlock layout' : 'Lock layout'}
+          aria-pressed={locked}
+          onClick={onToggleLock}
+          color={locked ? 'primary' : 'default'}
+        >
           {locked ? <LockIcon fontSize="small" /> : <LockOpenOutlinedIcon fontSize="small" />}
         </IconButton>
       </Tooltip>
 
       <Tooltip title="Reset this layout (sizes, closed windows and window types)">
         <span>
-          <IconButton size="small" onClick={onResetLayout} disabled={locked}>
+          <IconButton size="small" aria-label="Reset this layout" onClick={onResetLayout} disabled={locked}>
             <RestartAltIcon fontSize="small" />
           </IconButton>
         </span>
@@ -175,7 +185,7 @@ export function PlayLayoutControls({
                   py: 0.75,
                   borderRadius: 2,
                   cursor: 'pointer',
-                  color: selected ? 'primary.main' : 'text.secondary',
+                  color: (theme) => (selected ? primaryForeground(theme) : theme.palette.text.secondary),
                   bgcolor: selected ? 'action.selected' : 'transparent',
                   '&:hover': { bgcolor: 'action.hover' },
                 }}

@@ -33,9 +33,11 @@ import { useNavMemoryStore } from '../../store/useNavMemoryStore';
 import { useWorldStore } from '../../store/useWorldStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
 import { usePlayUiStore, getPlayState } from '../../store/usePlayUiStore';
+import { usePlayItemsStore } from '../../store/usePlayItemsStore';
 import { usePlayLayoutStore, getPlayLayoutState } from '../../store/usePlayLayoutStore';
-
-export const TOP_BAR_HEIGHT = 56;
+import { SECTION_HEADER_HEIGHT } from '../../theme/headerScale';
+import { TOP_BAR_HEIGHT } from '../../theme/layout';
+import { su } from '../../theme/uiScale';
 
 interface TopBarProps {
   worldId?: string;
@@ -62,6 +64,7 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
   const setLayout = usePlayLayoutStore((s) => s.setLayout);
   const toggleLock = usePlayLayoutStore((s) => s.toggleLock);
   const resetLayout = usePlayLayoutStore((s) => s.resetLayout);
+  const clearCampaignItems = usePlayItemsStore((s) => s.clearCampaignSlots);
   const restoreDismissedPanes = usePlayLayoutStore((s) => s.restoreDismissedPanes);
 
   const inPlaySession = !!campaignId && location.pathname.endsWith('/play') && !!getPlayState(playByCampaignId, campaignId).sessionNoteId;
@@ -94,13 +97,29 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
         elevation={0}
         sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}
       >
-        <Toolbar variant="dense" sx={{ height: TOP_BAR_HEIGHT, minHeight: `${TOP_BAR_HEIGHT}px !important`, gap: 1.5 }}>
+        {/* `overflow: hidden` + every child shrinking to a minWidth of 0 is what keeps this
+            a ONE-LINE bar. Without it a crowded toolbar wraps its children's text instead of
+            shrinking them - the search placeholder and "Change Session" were each taking two
+            lines on the Play page, which is the widest this bar ever gets. */}
+        <Toolbar
+          variant="dense"
+          sx={{ height: TOP_BAR_HEIGHT, minHeight: `${TOP_BAR_HEIGHT}px !important`, gap: 1.5, overflow: 'hidden' }}
+        >
           <Box data-tour="navbar-brand">
             {worldId ? (
               <WorldBrand worldId={worldId} />
             ) : (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box component="img" src="/app-icon.png" alt="" sx={{ width: 58, height: 58, borderRadius: 1.25, objectFit: 'cover' }} />
+                {/* The SVG master, not a PNG - it is a two-colour vector, so it stays crisp on
+                    any display instead of being a bitmap scaled to taste. Sized to the app's one
+                    header scale rather than by eye: it was 58px inside a 56px TOP_BAR_HEIGHT,
+                    literally taller than the bar holding it (checklist I-U8). */}
+                <Box
+                  component="img"
+                  src="/app-icon.svg"
+                  alt=""
+                  sx={{ width: SECTION_HEADER_HEIGHT, height: SECTION_HEADER_HEIGHT, borderRadius: 1.25, objectFit: 'cover' }}
+                />
                 <Typography variant="h6" sx={{ fontWeight: 700 }}>
                   World Watcher
                 </Typography>
@@ -114,7 +133,8 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
             onClick={() => setPaletteOpen(true)}
             sx={{
               flexGrow: 1,
-              maxWidth: 480,
+              minWidth: 0,
+              maxWidth: su(480),
               display: 'flex',
               alignItems: 'center',
               gap: 1,
@@ -127,13 +147,15 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
               justifyContent: 'flex-start',
             }}
           >
-            <SearchIcon fontSize="small" />
-            <Typography variant="body2" sx={{ flexGrow: 1, textAlign: 'left' }}>
+            <SearchIcon fontSize="small" sx={{ flexShrink: 0 }} />
+            <Typography variant="body2" noWrap sx={{ flexGrow: 1, minWidth: 0, textAlign: 'left' }}>
               Ask or search anything…
             </Typography>
             <Box
               sx={{
-                fontSize: 11,
+                fontSize: su(11),
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
                 border: 1,
                 borderColor: 'divider',
                 borderRadius: 0.75,
@@ -150,7 +172,13 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
           {inPlaySession && campaignId && layoutState ? (
             <>
               <Tooltip title="Back to session setup">
-                <Button size="small" variant="outlined" startIcon={<ArrowBackIcon />} onClick={() => endSession(campaignId)}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ArrowBackIcon />}
+                  sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+                  onClick={() => endSession(campaignId)}
+                >
                   Change Session
                 </Button>
               </Tooltip>
@@ -162,7 +190,14 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
                 hasDismissedPanes={hasDismissedPanes}
                 onSelectLayout={(id) => setLayout(campaignId, id)}
                 onToggleLock={() => toggleLock(campaignId)}
-                onResetLayout={() => resetLayout(campaignId)}
+                onResetLayout={() => {
+                  resetLayout(campaignId);
+                  // Reset used to clear the layout and leave every Items window still holding
+                  // its pins and opened rows, which is not what "reset this layout" reads as
+                  // (checklist I-P7). The map page's Reference surface is left alone - it is
+                  // not part of this layout.
+                  clearCampaignItems(campaignId);
+                }}
                 onRestorePanes={() => restoreDismissedPanes(campaignId, layoutState.layoutId)}
               />
             </>
@@ -171,6 +206,7 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
               {worldId && (
                 <Tooltip title="Create new">
                   <ButtonBase
+                    aria-label="Create new"
                     onClick={(e) => setNewMenuAnchor(e.currentTarget)}
                     sx={{
                       display: 'flex',
@@ -193,6 +229,7 @@ export function TopBar({ worldId, campaignId }: TopBarProps) {
               <Tooltip title={lastVisitedMap ? `Resume ${lastVisitedMap.mapName}` : 'Run - jump into Play or Maps'}>
                 <span>
                   <ButtonBase
+                    aria-label={lastVisitedMap ? `Resume ${lastVisitedMap.mapName}` : 'Run - jump into Play or Maps'}
                     onClick={(e) => setRunMenuAnchor(e.currentTarget)}
                     disabled={!campaignId && !lastVisitedMap}
                     sx={{
