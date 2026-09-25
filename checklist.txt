@@ -2256,3 +2256,151 @@ and a button that puts it back.
            editor's legacy conversion wraps it in <p> on open. It is
            self-limiting - the second save records only what you actually
            edited - but it does mean one noisy row per legacy article.
+
+
+PART I-DIPL - FACTIONS GRAPH SCALE + BACKEND LIFETIME (2026-09-22)
+=====================================================================
+
+Reported together: "the factions graph is very weird at the default zoom
+of 100%", and "the backend keeps stopping for some weird reason".
+
+✅  DIPL1  DONE: the diplomacy graph drew in TWO coordinate systems.
+           The rings/connectors are an SVG viewBox (0 0 680 680), which
+           rescales itself to whatever the round Paper actually is; the
+           nodes were absolutely-positioned HTML at FIXED px (112 centre,
+           44-80 ring). Squeeze the Paper and only half the picture
+           shrinks. On the reporter's ~950px-wide window the canvas came
+           out ~395px, so the rings drew at 58% while the portraits
+           stayed 100% - measured from the screenshot as a node/ring
+           ratio of 1.21 against a designed 0.70.
+           FactionsRelationsGraph now measures the canvas with a
+           ResizeObserver and multiplies every authored size by
+           canvasWidth/680. Verified in the browser at 951px and 1920px
+           viewports and at UI scale 0.6 and 1.0: centre node measures
+           0.1641 of the canvas against a designed 0.1647, and a
+           pairwise rect sweep over all 9 nodes/labels reports zero
+           overlaps in every combination.
+           The scale is multiplied in, NOT applied as CSS transform/zoom
+           - same reason as I-S: MUI positions overlays from real rects.
+
+✅  DIPL2  DONE, and it is most of why DIPL1 was visible at all: the
+           detail-panel column was always mounted with width md:300,
+           so it held 300px whether or not a faction was selected. It is
+           now rendered only when there is a selection, and the row
+           breaks to a column at lg rather than md.
+
+✅  DIPL3  DONE: label collisions. Portrait and label were one centred
+           block, which pushed the artwork ABOVE the ring point and
+           dropped the name onto the inner ring; ring labels were
+           `noWrap` at exactly node width ("Independent dragon…").
+           The portrait is now centred on its own point with the label
+           hanging below it, clamped to two lines, over a text shadow.
+           Connectors are trimmed to the portrait rims instead of being
+           drawn centre-to-centre under the artwork.
+
+✅  DIPL4  DONE: FactionDetailPanel named both sides on all ten bar rows
+           in an 84px column, so every row read "Confederacy of Indep…".
+           The two names appear once, in a colour-keyed legend above the
+           bars; the bars get that width back.
+
+✅  DIPL5  DONE: the backend never crashed. Both historical logs end
+           mid-request with no traceback and no shutdown line - it was
+           KILLED, because uvicorn was a child of the shell/agent session
+           that started it. Nothing restarted it, and app.main's lifespan
+           opens a DB connection at startup, so if Postgres is not up
+           uvicorn EXITS rather than retrying.
+           scripts/dev-backend.ps1 supervises it: port read from
+           Client/.env, venv Python, restart-with-backoff, logs in
+           Server/logs/, -Detached / -Status / -Stop, and -Install for a
+           per-user scheduled task that brings it back at logon. Verified
+           by killing the server: back up and answering /health in ~2s.
+
+✅  DIPL6  DONE: the CORS allowlist was 5173-only, so Vite falling back
+           to 5174 made every request fail while looking exactly like a
+           dead backend. core/config.py and Server/.env now allow
+           5173-5180 on localhost and 127.0.0.1. Server/.env's WW_PORT
+           (8000) and config.py's default (8000) were also stale against
+           the client's 8006; both say 8006 now.
+
+❗  DIPL7  Two Vite dev servers were running during this work (5173 and
+           5174, started 12 hours apart) and a preview server on 4173.
+           They were left alone. If the app ever shows stale behaviour,
+           check which one the browser tab is actually on.
+
+
+#####################################################################
+PART I-OVW - WORLD MANAGER OVERVIEW (2026-09-25)
+#####################################################################
+Clicking World Manager dropped you into People - a quarter of the world,
+chosen by accident (it replaced an all-articles view that had lost its
+sidebar entry). It now lands on an Overview: the world's CONTENT, as
+opposed to World Home, which is about RUNNING it (campaigns, quests,
+weather). components/world/WorldOverview.tsx, folder=overview.
+
+✅  OVW1  DONE: search across everything - articles, NPCs, factions in
+          memory, plus monsters / spells / magic items searched on the
+          server (fetched 12, name matches ranked ahead of description
+          matches, 4 shown). Arrow keys + Enter. A hit deep-links: NPC /
+          faction hits pre-fill that section's search (?q=, filter bar
+          opened, Factions on its table view since the graph does not
+          filter), compendium hits open the entry (?open=).
+✅  OVW2  DONE: CompendiumSection's openCreatureId/SpellId/ItemId only
+          looked in the campaign's OWN rows, so a deep link to any global
+          SRD entry never opened. It now falls back to fetch*ById. This
+          also fixes the same link from the Play page's Items window.
+✅  OVW3  DONE: "Continue where you left off" - latest change per entity
+          from entity_revisions (deleted ones skipped), falling back to
+          updated_at for worlds with no history yet.
+✅  OVW4  DONE: one card per group with per-sub-type counts (compendium
+          counts are the server's totals) and a per-group New menu, plus
+          a Recent activity column linking to the full history.
+
+❌  OVW5  "Needs attention": stub articles (empty body), NPCs with no
+          faction / location, articles nothing links to. Check which of
+          those relations actually exist as fields before promising any -
+          Character's affiliation/location are free-text fieldValues
+          today, which is itself a "reference, never duplicate" smell.
+❌  OVW6  NPCs have no detail route, so an NPC hit lands on the NPC list
+          filtered to that name rather than on the NPC itself. An
+          openNpcId on NpcsSection (it already has viewingCreature state)
+          would close that.
+
+
+#####################################################################
+PART I-MAP2 - MAP + SHELL POLISH ROUND (2026-09-25)
+#####################################################################
+Six asks from zz.txt. Done items are kept brief; the open ones are the
+point of this section.
+
+✅  MP1  Corners: theme shape.borderRadius su(14) -> 2 (unscaled). Every
+         sx borderRadius n multiplies it, so the common 2/3/4 went from
+         17/25/34px to 4/6/8px. Paper/Button/OutlinedInput 4, Dialog 6.
+✅  MP2  Map fullscreen (Fab + F11) is the browser Fullscreen API now, and
+         isFullscreen follows `fullscreenchange`, so Esc brings the shell
+         back. Leaving the map page exits fullscreen.
+✅  MP3  Grid covers the whole map at 90/270 - it only ruled the unrotated
+         canvas rect. mapFit.gridBoundsFor; lattice stays origin-anchored.
+✅  MP4  Token placement size = relative size x map.gridSize (was x a fixed
+         20px, clamped 10-50 - a Medium token was 2/7 of a 70px square).
+         Per-token size is edited in squares.
+✅  MP5  3D dice for d4-d20 (store is a notation request log; results are
+         dice-box groups with per-die rolls). Dice panel in the map
+         sidebar with count/modifier + history; `d` shortcut opens it.
+         Toolbar DiceRollerPopover (a fake rolling animation) deleted.
+✅  MP6  Manage tokens moved from the toolbar popover into the sidebar
+         Tokens panel: On map / Library / Encounters. Right-click and the
+         quick-edit hotkey open it on that token's row.
+
+❌  MP7  EXISTING placed tokens keep their old px size (mostly 20 on
+         70-80px grids), so they still look small until resized to 1 in
+         the Tokens panel. A one-off map_tokens UPDATE (size 20 -> grid
+         size where grid_size != 20) would fix them all - not done
+         without asking, it rewrites user data.
+❌  MP8  Changing a map's grid size does not rescale tokens already on it.
+         Wants a debounced, single-history-entry rescale across floors.
+❌  MP9  Sunken Grotto Floor 1 has authoredStage 4693x2912 - pinned by a
+         Playwright session at 33% zoom (see FOG13's migration note), so
+         everything on it renders at ~0.3x in a normal window.
+❌  MP10 Pressing F11 while a map dialog is open (shortcuts blocked) falls
+         through to the browser's native F11, which hides browser chrome
+         but not the app shell and fires no fullscreenchange.

@@ -80,9 +80,25 @@ export interface PlacedToken {
   ac?: number;
 }
 
+/** Stage px of one square when a map has no usable grid size - the only place a token's size
+ * is not derived from the grid. */
 export const DEFAULT_TOKEN_SIZE = 20;
-export const MIN_TOKEN_SIZE = 10;
-export const MAX_TOKEN_SIZE = 50;
+
+function squarePx(gridSize: number | null | undefined): number {
+  return gridSize && gridSize > 0 ? gridSize : DEFAULT_TOKEN_SIZE;
+}
+
+/** Grid-relative size (1 = one square) -> the stage-px diameter a PlacedToken stores. */
+export function tokenSizeFromSquares(squares: number, gridSize: number | null | undefined): number {
+  const clamped = Math.min(MAX_RELATIVE_SIZE, Math.max(MIN_RELATIVE_SIZE, Number.isFinite(squares) ? squares : 1));
+  return clamped * squarePx(gridSize);
+}
+
+/** The inverse, for editing a placed token's size in squares. Rounded to 0.05 so a token
+ * placed at 1 square reads back as 1, not 0.99999. */
+export function tokenSizeToSquares(size: number, gridSize: number | null | undefined): number {
+  return Math.round((size / squarePx(gridSize)) * 20) / 20;
+}
 export const DEFAULT_TOKEN_OUTLINE_COLOR = '#f5c542';
 export const TOKEN_OUTLINE_WIDTH = 2;
 /** fallback max/current HP given to any token placed on the map without linked creature stats */

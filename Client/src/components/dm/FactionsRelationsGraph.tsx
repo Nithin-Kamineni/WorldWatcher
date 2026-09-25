@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -39,6 +39,20 @@ interface FactionsRelationsGraphProps {
   onViewFactionCard?: (faction: Faction) => void;
 }
 
+/** The coordinate system the whole graph is authored in. Ring radii, node diameters, label
+ * sizes and connector gaps are all expressed against this and then multiplied by the live
+ * `scale` below, so the picture keeps its proportions at any width.
+ *
+ * It used to be only HALF that way, and that was the bug: the rings are an SVG `viewBox`,
+ * which rescales itself to whatever the Paper ends up being, while the nodes were
+ * absolutely-positioned HTML at FIXED px. A normal window (icon rail + world sidebar + the
+ * 300px detail panel) leaves this about 400px, so the rings drew at 59% while the portraits
+ * stayed at 100% - the centre node swallowed its own label, ring nodes crowded the middle,
+ * and names collided. Both halves now read the same scale.
+ *
+ * The scale is *measured and multiplied in*, never applied as a CSS `transform`/`zoom`, for
+ * the same reason `theme/uiScale.ts` gives: MUI positions Tooltips and Popovers from real
+ * rects and does not compensate for a scaled ancestor. */
 const CANVAS_SIZE = 680;
 const CENTER = CANVAS_SIZE / 2;
 /** Secondary (outer) ring - farther from center, thinner connector. */
@@ -46,6 +60,14 @@ const OUTER_RING_RADIUS = 260;
 /** Primary (inner) ring - closer to center, thicker connector. */
 const INNER_RING_RADIUS = 160;
 const CENTER_NODE_SIZE = 112;
+/** Gap (in canvas units) left between a connector's end and the portrait it points at, so
+ * lines stop at the rim instead of running underneath the artwork. */
+const CONNECTOR_GAP = 6;
+/** Label type sizes in canvas units, and the floor they are never allowed to fall below -
+ * a proportionally-correct 6px name is still an unreadable one. */
+const RING_LABEL_SIZE = 13;
+const CENTER_LABEL_SIZE = 15;
+const MIN_LABEL_PX = 10;
 
 export function FactionsRelationsGraph({ campaignId, search, influenceFilter, onViewFactionCard }: FactionsRelationsGraphProps) {
   const theme = useTheme();
@@ -67,6 +89,29 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
     fetchFactionsForCampaign(campaignId);
     fetchRelationsForCampaign(campaignId);
   }, [campaignId, fetchFactionsForCampaign, fetchRelationsForCampaign]);
+
+  /** Live width of the round canvas, and the factor every authored size is multiplied by.
+   * Starts at the authored size so the first paint is proportionate even before the
+   * observer fires. A callback ref rather than `useRef` + `useEffect([])`: the canvas is not
+   * in the tree on the first render (the "no factions yet" branch returns before it), so an
+   * effect keyed on `[]` would observe nothing and never run again. */
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const [canvasWidth, setCanvasWidth] = useState(CANVAS_SIZE);
+  const canvasRef = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (width > 0) setCanvasWidth(width);
+    });
+    observer.observe(el);
+    observerRef.current = observer;
+  }, []);
+  const scale = canvasWidth / CANVAS_SIZE;
+  /** Authored canvas units -> real px. */
+  const cu = (n: number) => n * scale;
+  const labelPx = (n: number) => Math.max(MIN_LABEL_PX, Math.round(n * scale));
 
   const [centerId, setCenterId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -210,14 +255,23 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
         </Collapse>
       </Stack>
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
+      {/* Centred rather than left-hugging: the canvas has a hard 680px cap, so on a wide
+        * content area it otherwise sits in the corner of a large empty rectangle. */}
+      <Stack
+        direction={{ xs: 'column', lg: 'row' }}
+        spacing={3}
+        sx={{ alignItems: { xs: 'center', lg: 'flex-start' }, justifyContent: 'center' }}
+      >
         <Paper
+          ref={canvasRef}
           elevation={3}
           sx={{
             position: 'relative',
-            width: '100%',
-            maxWidth: CANVAS_SIZE,
+            /* Capped by the viewport as well as by the column, because a circle that runs off
+             * the bottom of the window is the other way this reads as broken. */
+            width: `min(100%, ${CANVAS_SIZE}px, 68vh)`,
             aspectRatio: '1 / 1',
+            flexShrink: 0,
             mx: 'auto',
             borderRadius: '50%',
             bgcolor: 'background.paper',
@@ -292,15 +346,26 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
                   // varies weight within that tier.
                   const strokeWidth =
                     relation?.importance === 'primary' ? 3 + (strength / 100) * 2 : 1 + (strength / 100) * 1;
+                  // Trim both ends back to the rim of the portrait they touch. Drawn centre-to-
+                  // centre the line runs under the artwork, which at a small canvas reads as a
+                  // stray line poking out of a circle.
+                  const dx = pos.x - CENTER;
+                  const dy = pos.y - CENTER;
+                  const dist = Math.hypot(dx, dy) || 1;
+                  const ux = dx / dist;
+                  const uy = dy / dist;
+                  const fromCenter = CENTER_NODE_SIZE / 2 + CONNECTOR_GAP;
+                  const toNode = getFactionInfluenceOption(f.influence).ringNodeSize / 2 + CONNECTOR_GAP;
                   return (
                     <line
                       key={f.id}
-                      x1={CENTER}
-                      y1={CENTER}
-                      x2={pos.x}
-                      y2={pos.y}
+                      x1={CENTER + ux * fromCenter}
+                      y1={CENTER + uy * fromCenter}
+                      x2={pos.x - ux * toNode}
+                      y2={pos.y - uy * toNode}
                       stroke={meta.color}
                       strokeWidth={strokeWidth}
+                      strokeLinecap="round"
                       strokeOpacity={dimmed ? 0.15 : 0.85}
                     />
                   );
@@ -316,8 +381,18 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
                   position: 'absolute',
                   left: '50%',
                   top: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  width: CENTER_NODE_SIZE,
+                  // Only the PORTRAIT is centred on the hub; the label hangs below it. Centring
+                  // the portrait+label block instead (what this used to do) pushed the artwork
+                  // above the hub and dropped the name straight onto the inner ring.
+                  transform: `translate(-50%, -${cu(CENTER_NODE_SIZE) / 2}px)`,
+                  // 1.6x the portrait, not wider: a long name on one line ("Confederacy of
+                  // Independent Kingdoms" measures 240px) reaches past the inner ring and
+                  // crosses the nodes sitting at the lower diagonals. Wrapping it keeps it
+                  // inside the gap between the hub and that ring.
+                  width: cu(CENTER_NODE_SIZE * 1.6),
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
                   cursor: 'pointer',
                   textAlign: 'center',
                 }}
@@ -325,20 +400,40 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
                 <TokenThumbnail
                   src={center.imageSrc}
                   name={center.name}
-                  size={CENTER_NODE_SIZE}
-                  border="3px solid"
+                  size={cu(CENTER_NODE_SIZE)}
+                  border={`${Math.max(2, cu(3))}px solid`}
                   sx={{
                     borderColor: 'primary.main',
-                    boxShadow: (theme) => `0 0 0 6px ${theme.palette.background.paper}, 0 0 24px ${theme.palette.primary.main}55`,
+                    boxShadow: (theme) =>
+                      `0 0 0 ${Math.max(3, cu(6))}px ${theme.palette.background.paper}, 0 0 ${Math.max(
+                        8,
+                        cu(24),
+                      )}px ${theme.palette.primary.main}55`,
                   }}
                 />
                 <Typography
-                  variant="caption"
-                  sx={{ display: 'block', mt: 0.5, fontWeight: 700, lineHeight: 1.2 }}
+                  sx={{
+                    mt: `${Math.max(4, cu(8))}px`,
+                    fontSize: `${labelPx(CENTER_LABEL_SIZE)}px`,
+                    fontWeight: 700,
+                    lineHeight: 1.25,
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 2,
+                    overflow: 'hidden',
+                    textShadow: (theme) => `0 1px 3px ${theme.palette.background.default}`,
+                  }}
                 >
                   {center.name}
                 </Typography>
-                <Typography variant="caption" color="text.secondary">
+                <Typography
+                  color="text.secondary"
+                  sx={{
+                    fontSize: `${labelPx(RING_LABEL_SIZE)}px`,
+                    lineHeight: 1.25,
+                    textShadow: (theme) => `0 1px 3px ${theme.palette.background.default}`,
+                  }}
+                >
                   Power {center.powerLabel || center.power}
                 </Typography>
               </Box>
@@ -352,9 +447,9 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
             const meta = relation ? RELATION_TYPE_META[relation.type] : RELATION_TYPE_META.neutral;
             const dimmed = !matchesSearch(f) && query.length > 0;
             const isSelected = f.id === selectedId;
-            const nodeSize = getFactionInfluenceOption(f.influence).ringNodeSize;
+            const nodeSize = cu(getFactionInfluenceOption(f.influence).ringNodeSize);
             return (
-              <Tooltip key={f.id} title="Click for details · Double-click to focus">
+              <Tooltip key={f.id} title={`${f.name} · click for details, double-click to focus`}>
                 <Box
                   onClick={() => setSelectedId((cur) => (cur === f.id ? null : f.id))}
                   onDoubleClick={() => {
@@ -365,22 +460,50 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
                     position: 'absolute',
                     left: `${(pos.x / CANVAS_SIZE) * 100}%`,
                     top: `${(pos.y / CANVAS_SIZE) * 100}%`,
-                    width: nodeSize,
+                    // As with the hub: the portrait sits on the ring point, the name hangs below.
+                    transform: `translate(-50%, -${nodeSize / 2}px)`,
+                    // Names get a box wider than their portrait so they wrap to two lines
+                    // instead of being cut to "Independent dragon…".
+                    width: Math.max(nodeSize * 2.2, cu(110)),
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
                     cursor: 'pointer',
                     textAlign: 'center',
                     opacity: dimmed ? 0.35 : 1,
-                    transition: 'opacity 160ms ease, transform 160ms ease',
-                    transform: isSelected ? 'translate(-50%, -50%) scale(1.08)' : 'translate(-50%, -50%)',
+                    transition: 'opacity 160ms ease',
                   }}
                 >
                   <TokenThumbnail
                     src={f.imageSrc}
                     name={f.name}
                     size={nodeSize}
-                    border={`3px solid ${meta.color}`}
-                    sx={isSelected ? { boxShadow: (theme) => `0 0 0 4px ${theme.palette.background.paper}` } : undefined}
+                    border={`${Math.max(2, cu(3))}px solid ${meta.color}`}
+                    sx={{
+                      transition: 'transform 160ms ease, box-shadow 160ms ease',
+                      transform: isSelected ? 'scale(1.1)' : 'none',
+                      boxShadow: (theme) =>
+                        isSelected
+                          ? `0 0 0 ${Math.max(2, cu(4))}px ${theme.palette.background.paper}, 0 0 ${Math.max(
+                              6,
+                              cu(18),
+                            )}px ${meta.color}88`
+                          : `0 0 0 ${Math.max(2, cu(4))}px ${theme.palette.background.paper}`,
+                    }}
                   />
-                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5, lineHeight: 1.15 }} noWrap>
+                  <Typography
+                    sx={{
+                      mt: `${Math.max(3, cu(6))}px`,
+                      fontSize: `${labelPx(RING_LABEL_SIZE)}px`,
+                      fontWeight: isSelected ? 700 : 500,
+                      lineHeight: 1.2,
+                      display: '-webkit-box',
+                      WebkitBoxOrient: 'vertical',
+                      WebkitLineClamp: 2,
+                      overflow: 'hidden',
+                      textShadow: (theme) => `0 1px 3px ${theme.palette.background.default}`,
+                    }}
+                  >
                     {f.name}
                   </Typography>
                 </Box>
@@ -389,8 +512,11 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
           })}
         </Paper>
 
-        <Stack spacing={2} sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0 }}>
-          {center && selected && (
+        {/* Rendered only when something is selected. A column that was always mounted held
+          * its 300px whether or not it had anything in it, which is most of what squeezed the
+          * canvas down to the size that exposed the scale bug above. */}
+        {center && selected && (
+          <Stack spacing={2} sx={{ width: { xs: '100%', lg: 320 }, maxWidth: 360, flexShrink: 0 }}>
             <FactionDetailPanel
               center={center}
               selected={selected}
@@ -399,8 +525,8 @@ export function FactionsRelationsGraph({ campaignId, search, influenceFilter, on
               onEditRelation={() => setRelationDialogOpen(true)}
               onViewCard={onViewFactionCard ? () => onViewFactionCard(selected) : undefined}
             />
-          )}
-        </Stack>
+          </Stack>
+        )}
       </Stack>
 
       <FactionFormDialog

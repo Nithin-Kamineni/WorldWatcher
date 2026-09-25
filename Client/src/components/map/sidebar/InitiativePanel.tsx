@@ -27,7 +27,7 @@ import { SectionHeader } from '../../shell/SectionHeader';
 import type { InitiativeState } from '../../../types/initiative';
 import type { PlacedToken } from '../../../types/token';
 import { TokenThumbnail } from '../TokenThumbnail';
-import { TokenEffectsEditor } from '../toolbar/TokenEffectsEditor';
+import { TokenEffectsEditor } from './TokenEffectsEditor';
 import { formatCombo } from '../../../types/shortcut';
 import { getEffectiveCombo, type ShortcutOverride } from '../../../store/useShortcutStore';
 

@@ -10,7 +10,9 @@ import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import WidgetsOutlinedIcon from '@mui/icons-material/WidgetsOutlined';
-import { TokenLibraryPanel } from './TokenLibraryPanel';
+import CasinoIcon from '@mui/icons-material/Casino';
+import { TokensPanel, type TokenChanges } from './TokensPanel';
+import { DicePanel } from '../../dice/DicePanel';
 import { FloorSwitcherPanel } from './FloorSwitcherPanel';
 import { InitiativePanel } from './InitiativePanel';
 import { ItemsWindow } from '../../play/items/ItemsWindow';
@@ -18,9 +20,11 @@ import type { MapFloor } from '../../../types/map';
 import type { InitiativeState } from '../../../types/initiative';
 import type { PlacedToken } from '../../../types/token';
 import type { ShortcutOverride } from '../../../store/useShortcutStore';
+import { useTokenManagerUiStore, type TokenManagerTab } from '../../../store/useTokenManagerUiStore';
+import type { EncounterCreatureEntry } from '../../../types/encounter';
 import { MAP_RAIL_WIDTH, MAP_PANEL_WIDTH, MAP_WIDE_PANEL_WIDTH } from '../../../theme/layout';
 
-export type SidebarSection = 'tokens' | 'floors' | 'initiative' | 'reference';
+export type SidebarSection = 'tokens' | 'floors' | 'initiative' | 'dice' | 'reference';
 
 /** A request from the page to open the sidebar on a given section. `nonce` is what makes a
  * repeat of the same request register - double-clicking the same token twice must reopen the
@@ -28,6 +32,10 @@ export type SidebarSection = 'tokens' | 'floors' | 'initiative' | 'reference';
 export interface SidebarOpenRequest {
   section: SidebarSection;
   nonce: number;
+  /** For `tokens`: which tab to land on (right-clicking a token forces 'floor'). */
+  tokenTab?: TokenManagerTab;
+  /** For `tokens`: the row to highlight and scroll to. */
+  focusTokenId?: string | null;
 }
 
 interface MapSidebarProps {
@@ -45,10 +53,14 @@ interface MapSidebarProps {
   onStartEncounter: () => void;
   onNextTurn: () => void;
   onEndEncounter: () => void;
-  onUpdateToken: (
-    tokenId: string,
-    changes: Partial<Pick<PlacedToken, 'hp' | 'concentrating' | 'deathSaves' | 'notes' | 'effects'>>,
-  ) => void;
+  onUpdateToken: (tokenId: string, changes: TokenChanges & Partial<Pick<PlacedToken, 'notes'>>) => void;
+  onDeleteToken: (tokenId: string) => void;
+  lockedEncounterId: string | null | undefined;
+  onLockEncounter: (encounterId: string | null) => void;
+  resolvedEncounterRoster: EncounterCreatureEntry[] | null;
+  onSetResolvedEncounterRoster: (roster: EncounterCreatureEntry[] | null) => void;
+  /** This map's square, in stage px - token sizes are edited in squares. */
+  gridSize: number;
   selectedTokenIds: string[];
   onTokenSelect: (token: PlacedToken, additive: boolean) => void;
   onTokenStatsRequest: (token: PlacedToken) => void;
@@ -78,6 +90,12 @@ export function MapSidebar({
   onNextTurn,
   onEndEncounter,
   onUpdateToken,
+  onDeleteToken,
+  lockedEncounterId,
+  onLockEncounter,
+  resolvedEncounterRoster,
+  onSetResolvedEncounterRoster,
+  gridSize,
   selectedTokenIds,
   onTokenSelect,
   onTokenStatsRequest,
@@ -86,10 +104,16 @@ export function MapSidebar({
 }: MapSidebarProps) {
   const [collapsed, setCollapsed] = useState(true);
   const [section, setSection] = useState<SidebarSection>('tokens');
+  // Restores whichever tab the DM was last on, rather than always resetting to "On map" -
+  // right-clicking a specific token still forces 'floor', since that is a jump to its row.
+  const [tokenTab, setTokenTab] = useState<TokenManagerTab>(() => useTokenManagerUiStore.getState().lastTab);
+  const [focusTokenId, setFocusTokenId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!openRequest) return;
     setSection(openRequest.section);
+    if (openRequest.tokenTab) setTokenTab(openRequest.tokenTab);
+    setFocusTokenId(openRequest.focusTokenId ?? null);
     setCollapsed(false);
   }, [openRequest]);
 
@@ -108,14 +132,31 @@ export function MapSidebar({
         <Paper
           elevation={0}
           sx={{
-            width: section === 'reference' ? WIDE_PANEL_WIDTH : PANEL_WIDTH,
+            width: section === 'reference' || section === 'tokens' ? WIDE_PANEL_WIDTH : PANEL_WIDTH,
             borderRight: 1,
             borderColor: 'divider',
             borderRadius: 0,
             overflow: 'hidden',
           }}
         >
-          {section === 'tokens' && <TokenLibraryPanel campaignId={campaignId} />}
+          {section === 'tokens' && (
+            <TokensPanel
+              campaignId={campaignId}
+              placedTokens={placedTokens}
+              onUpdateToken={onUpdateToken}
+              onDeleteToken={onDeleteToken}
+              focusTokenId={focusTokenId}
+              tab={tokenTab}
+              onTabChange={setTokenTab}
+              lockedEncounterId={lockedEncounterId}
+              onLockEncounter={onLockEncounter}
+              resolvedEncounterRoster={resolvedEncounterRoster}
+              onSetResolvedEncounterRoster={onSetResolvedEncounterRoster}
+              encounterActive={initiative.status === 'active'}
+              gridSize={gridSize}
+            />
+          )}
+          {section === 'dice' && <DicePanel />}
           {section === 'floors' && (
             <FloorSwitcherPanel floors={floors} activeFloorId={activeFloorId} onSelectFloor={onSelectFloor} />
           )}
@@ -166,7 +207,7 @@ export function MapSidebar({
 
         <Box sx={{ width: '70%', borderTop: 1, borderColor: 'divider', my: 0.5 }} />
 
-        <Tooltip title="Tokens" placement="left">
+        <Tooltip title="Tokens - on this map, library, encounters" placement="left">
           <IconButton
             size="small"
             color={!collapsed && section === 'tokens' ? 'primary' : 'default'}
@@ -193,6 +234,16 @@ export function MapSidebar({
             onClick={() => handleSectionClick('initiative')}
           >
             <FormatListNumberedIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+
+        <Tooltip title="Dice" placement="left">
+          <IconButton
+            size="small"
+            color={!collapsed && section === 'dice' ? 'primary' : 'default'}
+            onClick={() => handleSectionClick('dice')}
+          >
+            <CasinoIcon fontSize="small" />
           </IconButton>
         </Tooltip>
 

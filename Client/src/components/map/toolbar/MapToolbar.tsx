@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import IconButton from '@mui/material/IconButton';
@@ -31,9 +31,6 @@ import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
 import NearMeIcon from '@mui/icons-material/NearMe';
 import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
-import CasinoIcon from '@mui/icons-material/Casino';
-import GroupsIcon from '@mui/icons-material/Groups';
-import { DiceRollerPopover } from './DiceRollerPopover';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import Button from '@mui/material/Button';
@@ -82,7 +79,6 @@ interface MapToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  onOpenTokenManager: (anchorEl: HTMLElement) => void;
   // --- fog of war ---
   fogEnabled: boolean;
   onToggleFog: () => void;
@@ -167,7 +163,6 @@ export function MapToolbar({
   canRedo,
   onUndo,
   onRedo,
-  onOpenTokenManager,
   fogEnabled,
   onToggleFog,
   playerPreview,
@@ -191,12 +186,10 @@ export function MapToolbar({
   const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
   const [shapesAnchor, setShapesAnchor] = useState<HTMLElement | null>(null);
   const [gridAnchor, setGridAnchor] = useState<HTMLElement | null>(null);
-  const [diceAnchor, setDiceAnchor] = useState<HTMLElement | null>(null);
   const [fogAnchor, setFogAnchor] = useState<HTMLElement | null>(null);
   const [detectMode, setDetectMode] = useState<WallDetectMode>('painted');
   const [detectSensitivity, setDetectSensitivity] = useState(50);
   const [collapsed, setCollapsed] = useState(false);
-  const tokenManagerButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleToolClick = (tool: MapToolMode) => {
     onSelectTool(activeTool === tool ? 'select' : tool);
@@ -206,7 +199,6 @@ export function MapToolbar({
     setColorAnchor(null);
     setShapesAnchor(null);
     setGridAnchor(null);
-    setDiceAnchor(null);
     setFogAnchor(null);
     setCollapsed((c) => !c);
   };
@@ -358,23 +350,6 @@ export function MapToolbar({
       <Tooltip title="Rotate 90°">
         <IconButton size="small" onClick={onRotate}>
           <Rotate90DegreesCwIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-
-      <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: 'rgba(255,255,255,0.3)' }} />
-
-      <Tooltip title="Manage tokens">
-        <IconButton
-          ref={tokenManagerButtonRef}
-          size="small"
-          onClick={() => tokenManagerButtonRef.current && onOpenTokenManager(tokenManagerButtonRef.current)}
-        >
-          <GroupsIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-      <Tooltip title="Roll dice">
-        <IconButton size="small" onClick={(e) => setDiceAnchor(e.currentTarget)}>
-          <CasinoIcon fontSize="small" />
         </IconButton>
       </Tooltip>
 
@@ -728,7 +703,6 @@ export function MapToolbar({
         </Box>
       </Popover>
 
-      <DiceRollerPopover anchorEl={diceAnchor} onClose={() => setDiceAnchor(null)} />
     </Paper>
   );
 }

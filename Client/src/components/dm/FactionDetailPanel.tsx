@@ -24,19 +24,36 @@ interface FactionDetailPanelProps {
   onViewCard?: () => void;
 }
 
+/** The two sides are named ONCE, in the legend above the bars, rather than on all ten bar
+ * rows - at 84px every row read "Confederacy of Indep…", which told you nothing and cost the
+ * bars a third of their width. Colour carries the identity instead. */
+function ComparisonLegend({ centerName, selectedName }: { centerName: string; selectedName: string }) {
+  return (
+    <Stack spacing={0.25}>
+      {[
+        { name: centerName, color: 'primary.main' },
+        { name: selectedName, color: 'info.main' },
+      ].map((row) => (
+        <Stack key={row.name} direction="row" spacing={0.75} sx={{ alignItems: 'center', minWidth: 0 }}>
+          <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: row.color, flexShrink: 0 }} />
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+            {row.name}
+          </Typography>
+        </Stack>
+      ))}
+    </Stack>
+  );
+}
+
 function ComparisonBar({
   label,
   centerValue,
   selectedValue,
-  centerName,
-  selectedName,
   maxValue = 100,
 }: {
   label: string;
   centerValue: number;
   selectedValue: number;
-  centerName: string;
-  selectedName: string;
   maxValue?: number;
 }) {
   return (
@@ -45,13 +62,10 @@ function ComparisonBar({
         {label.toUpperCase()}
       </Typography>
       {[
-        { name: centerName, value: centerValue, color: 'primary.main' },
-        { name: selectedName, value: selectedValue, color: 'info.main' },
+        { key: 'center', value: centerValue, color: 'primary.main' },
+        { key: 'selected', value: selectedValue, color: 'info.main' },
       ].map((row) => (
-        <Stack key={row.name} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Typography variant="caption" sx={{ width: 84, flexShrink: 0 }} noWrap>
-            {row.name}
-          </Typography>
+        <Stack key={row.key} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Box sx={{ flexGrow: 1, height: 8, borderRadius: 4, bgcolor: 'action.hover', overflow: 'hidden' }}>
             <Box
               sx={{
@@ -79,7 +93,7 @@ export function FactionDetailPanel({ center, selected, relation, onClose, onEdit
     <Paper
       elevation={6}
       sx={{
-        width: 300,
+        width: '100%',
         flexShrink: 0,
         borderRadius: 4,
         border: '1px solid',
@@ -129,6 +143,8 @@ export function FactionDetailPanel({ center, selected, relation, onClose, onEdit
       </Box>
 
       <Stack spacing={2} sx={{ p: 2 }}>
+        <ComparisonLegend centerName={center.name} selectedName={selected.name} />
+
         {relation && relation.treaties.length > 0 && (
           <Stack spacing={0.75}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 0.4 }}>
@@ -152,37 +168,27 @@ export function FactionDetailPanel({ center, selected, relation, onClose, onEdit
           label="Power"
           centerValue={center.power}
           selectedValue={selected.power}
-          centerName={center.name}
-          selectedName={selected.name}
           maxValue={Math.max(center.power, selected.power) * 1.2}
         />
         <ComparisonBar
           label="Military strength"
           centerValue={center.military}
           selectedValue={selected.military}
-          centerName={center.name}
-          selectedName={selected.name}
         />
         <ComparisonBar
           label="Naval strength"
           centerValue={center.naval}
           selectedValue={selected.naval}
-          centerName={center.name}
-          selectedName={selected.name}
         />
         <ComparisonBar
           label="Economic strength"
           centerValue={center.economy}
           selectedValue={selected.economy}
-          centerName={center.name}
-          selectedName={selected.name}
         />
         <ComparisonBar
           label="Reputation / prestige"
           centerValue={center.reputation}
           selectedValue={selected.reputation}
-          centerName={center.name}
-          selectedName={selected.name}
         />
       </Stack>
     </Paper>

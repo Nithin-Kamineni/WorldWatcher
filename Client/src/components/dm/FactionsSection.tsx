@@ -27,6 +27,8 @@ import { FACTION_INFLUENCE_OPTIONS, type Faction, type FactionInfluence } from '
 
 interface FactionsSectionProps {
   campaignId: string;
+  /** Pre-fills the search box - the World manager's Overview sends a search hit here. */
+  initialSearch?: string;
   /** World this FactionsSection is rendered under, if any - threaded into FactionFormDialog
    * so it can offer the "also create a world article" checkbox (issue 4c/4g). */
   worldId?: string;
@@ -40,7 +42,7 @@ interface FactionsSectionProps {
   heading?: string;
 }
 
-export function FactionsSection({ campaignId, worldId, factionType, heading }: FactionsSectionProps) {
+export function FactionsSection({ campaignId, worldId, factionType, heading, initialSearch }: FactionsSectionProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -67,9 +69,12 @@ export function FactionsSection({ campaignId, worldId, factionType, heading }: F
     fetchRelationsForCampaign(campaignId);
   }, [campaignId, fetchFactionsForCampaign, fetchRelationsForCampaign]);
 
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [view, setView] = useState<'table' | 'graph'>('graph');
+  // Open when a search arrives pre-filled, so the filter narrowing the list is visible.
+  const [filterOpen, setFilterOpen] = useState(Boolean(initialSearch));
+  const [search, setSearch] = useState(initialSearch ?? '');
+  // A search hit from the World manager's Overview lands on the table, where the search
+  // actually narrows the list; the graph does not filter by name.
+  const [view, setView] = useState<'table' | 'graph'>(initialSearch ? 'table' : 'graph');
   const [influenceFilter, setInfluenceFilter] = useState<FactionInfluence[]>(
     FACTION_INFLUENCE_OPTIONS.filter((o) => o.value !== 'petty').map((o) => o.value),
   );

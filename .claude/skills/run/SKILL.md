@@ -27,9 +27,21 @@ will collide with a local install.
 
 ### 2. Backend
 
+```powershell
+./scripts/dev-backend.ps1 -Detached
+```
+
+That supervises uvicorn: it reads the port from `Client/.env`, starts the venv's
+Python, restarts the server whenever it exits (with backoff), and logs to
+`Server/logs/`. Use it instead of running uvicorn by hand - a bare
+
 ```bash
 cd Server && .venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8006
 ```
+
+is a child of your shell and dies with the session, which is why the backend
+kept "randomly stopping". `./scripts/dev-backend.ps1 -Status` says whether it is
+up; `-Install` registers a per-user scheduled task so it comes back at logon.
 
 Two rules that have burned this project before:
 
@@ -45,7 +57,7 @@ Two rules that have burned this project before:
 Confirm it is actually up before moving on:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8006/docs
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8006/health
 ```
 
 If the port is already taken, do **not** pick a new port silently. Bump both
@@ -60,7 +72,10 @@ cd Client && npm run dev
 ```
 
 Serves `http://localhost:5173`. Vite will pick the next free port if 5173 is
-taken — read the actual URL out of its output rather than assuming.
+taken — read the actual URL out of its output rather than assuming. The CORS
+allowlist covers 5173-5180 now, so a fallback port works; but a fallback also
+means a second dev server is already running and one of them is serving stale
+modules, so it is still worth checking.
 
 ## Path B — full Docker stack
 

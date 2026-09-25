@@ -270,11 +270,36 @@ Hub, not built locally. On first run the DB restores from
 **Native dev (what you want for iterating):**
 
 ```powershell
-# backend
-cd Server; .venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8006
+# backend - supervised and detached; survives the terminal that started it
+./scripts/dev-backend.ps1 -Detached
 # frontend
 cd Client; npm run dev        # http://localhost:5173
 ```
+
+### Why the backend kept "randomly stopping"
+
+It never crashed. Both old logs (`Server/server.log`, `server_restart.log`) end
+mid-request with no traceback and no shutdown line: the process was **killed**,
+because uvicorn was a child of whatever shell or agent session started it and
+died with it. Nothing brought it back, and `app.main`'s lifespan opens a DB
+connection at startup, so if Postgres is not up yet uvicorn *exits* rather than
+retrying.
+
+`scripts/dev-backend.ps1` is the answer to all of that. It reads the port from
+`Client/.env` (so the two cannot drift), starts uvicorn from the venv, restarts
+it whenever it exits with backoff, and logs to `Server/logs/`.
+
+```powershell
+./scripts/dev-backend.ps1 -Detached   # start, hand the prompt back
+./scripts/dev-backend.ps1 -Status     # listening? answering /health?
+./scripts/dev-backend.ps1 -Stop
+./scripts/dev-backend.ps1 -Install    # per-user scheduled task: up after every logon
+./scripts/dev-backend.ps1 -Uninstall
+```
+
+`-Install` is the only thing that makes it survive a reboot or a logoff, since a
+scheduled task runs under the Task Scheduler service rather than under any
+terminal. Everything else about the script works without it.
 
 ### Ports — read this before starting the backend
 
@@ -289,21 +314,29 @@ VITE_WS_BASE_URL=ws://localhost:8006/ws
 
 There is no Vite dev proxy, so the client talks to that absolute URL directly.
 If you must move the port, change `Client/.env` and restart Vite, otherwise the
-UI silently fails every request. `Server/.env` still says `WW_PORT=8000` and the
-README still says 8001 — both are stale; the `--port` flag is what matters.
+UI silently fails every request. `Server/.env` and `core/config.py` now both say
+8006 as well (they said 8000 long after the client moved); the README still says
+8001 and is stale. `dev-backend.ps1` reads the port out of `Client/.env`, so use
+it rather than retyping a `--port` flag.
 
 Always use `Server/.venv/Scripts/python.exe -m uvicorn`, never a bare
 `uvicorn`. Backgrounding a bare `uvicorn` here has silently run under the pyenv
 global Python instead of the venv, producing confusing import errors.
 
-**The CORS allowlist is 5173-only**, so if 5173 is already taken and Vite falls
-back to 5174 the app loads but *every* request fails with a CORS error and the
-page sits on a spinner. It looks exactly like a dead backend. The allowlist is
-`ww_cors_origins` in `core/config.py`, overridable without editing anything:
+**The CORS allowlist used to be 5173-only**, so if 5173 was already taken and
+Vite fell back to 5174 the app loaded but *every* request failed with a CORS
+error and the page sat on a spinner — which looks exactly like a dead backend.
+`ww_cors_origins` in `core/config.py` now covers **5173-5180 on both
+`localhost` and `127.0.0.1`**, so Vite's whole fallback range works. Note that
+`Server/.env` overrides the default, and it was updated to match; a stale
+`WW_CORS_ORIGINS` there will reintroduce the symptom. Override per-shell with:
 
 ```powershell
 $env:WW_CORS_ORIGINS="http://localhost:5173,http://localhost:5174"
 ```
+
+That fallback is still worth noticing for a second reason: two dev servers means
+one of them is serving stale modules. Check which port Vite actually printed.
 
 ## Verifying a change
 

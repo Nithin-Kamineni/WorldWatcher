@@ -41,8 +41,13 @@ export function getTheme(mode: PaletteMode): Theme {
         ? { default: '#17151d', paper: '#211e29' }
         : { default: '#f6f1e7', paper: '#ffffff' },
     },
+    // THE corner radius, and the unit every `sx={{ borderRadius: n }}` multiplies. Kept small
+    // and deliberately NOT put through `su`: the app's panels mostly say 2-4, which at the old
+    // su(14) base came out at 17-34px - pill-shaped windows. At 2px those are 4-8px, the
+    // squared-off look of a tool rather than a toy. A radius is not chrome size, so it does not
+    // shrink with UI_SCALE either (a 0.6 scale would turn 2px into a blurry 1.2px).
     shape: {
-      borderRadius: su(14),
+      borderRadius: 2,
     },
     // Every `sx` spacing prop in the app multiplies this, so one number moves all of them.
     spacing: 8 * UI_SCALE,
@@ -113,6 +118,7 @@ export function getTheme(mode: PaletteMode): Theme {
       },
       MuiOutlinedInput: {
         styleOverrides: {
+          root: { borderRadius: 4 },
           // `inputSizeSmall` is not a slot in MUI v9's OutlinedInput classes, so the small
           // variant is reached through its class from the input slot instead.
           input: {
@@ -170,6 +176,18 @@ export function getTheme(mode: PaletteMode): Theme {
           '*::-webkit-scrollbar-corner': { background: 'transparent' },
         },
       },
+      // Surfaces that take the bare theme radius get a little more than the 2px base, so a
+      // menu, popover or input does not look sharper than the cards around it.
+      MuiPaper: {
+        styleOverrides: {
+          rounded: { borderRadius: 4 },
+        },
+      },
+      MuiDialog: {
+        styleOverrides: {
+          paper: { borderRadius: 6 },
+        },
+      },
       MuiCard: {
         styleOverrides: {
           root: {
@@ -189,7 +207,7 @@ export function getTheme(mode: PaletteMode): Theme {
       MuiButton: {
         styleOverrides: {
           root: {
-            borderRadius: su(10),
+            borderRadius: 4,
             textTransform: 'none',
             fontWeight: 600,
           },

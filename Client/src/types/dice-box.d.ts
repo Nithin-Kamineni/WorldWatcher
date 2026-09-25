@@ -6,14 +6,27 @@
 declare module '@3d-dice/dice-box' {
   /** One die's outcome. The value is NOT generated - dice-box raycasts straight up from the
    * settled die against a collider-face map and reports whichever face is on top. */
-  export interface DiceBoxResult {
+  export interface DiceBoxDieResult {
     groupId: number;
     rollId: number;
-    sides: number;
+    sides: number | string;
     dieType: string;
     theme: string;
     themeColor: string;
     value: number;
+  }
+
+  /** One notation's worth of dice (`3d6+2` is one group of three). This, not a single die, is
+   * what `onRollComplete` hands back - from `getRollResults()` in the dist source. `value` is
+   * the sum of `rolls` PLUS `modifier`. With one die and no modifier the two look identical,
+   * which is how the d20-only version of the overlay got away with reading `value`. */
+  export interface DiceBoxResult {
+    groupId: number;
+    qty: number;
+    sides: number | string;
+    modifier?: number;
+    value: number;
+    rolls: DiceBoxDieResult[];
   }
 
   export interface DiceBoxConfig {

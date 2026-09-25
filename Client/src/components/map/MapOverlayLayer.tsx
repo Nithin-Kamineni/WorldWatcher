@@ -1,13 +1,15 @@
+import { useMemo } from 'react';
 import { Layer, Group, Line, Circle, Wedge, Rect, RegularPolygon, Text } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type { AoEShape } from '../../types/shape';
 import { AOE_SHAPE_OPACITY, CONE_ANGLE_DEGREES, DEFAULT_MARKER_WIDTH, STROKE_SHAPE_OPACITY, THIN_LINE_WIDTH } from '../../types/shape';
 import type { GridType } from '../../types/map';
 import type { StagePoint } from '../../utils/tokenDrag';
+import type { GridBounds } from '../../utils/mapFit';
 
 interface MapOverlayLayerProps {
-  stageWidth: number;
-  stageHeight: number;
+  /** The area to rule, in the Group's LOCAL (pre-rotation) space - see gridBoundsFor. */
+  gridBounds: GridBounds;
   gridEnabled: boolean;
   gridSize: number;
   gridColor: string;
@@ -106,29 +108,39 @@ function renderShape(shape: AoEShape, interactive: boolean, onErase?: (id: strin
   }
 }
 
-function buildSquareGridLines(width: number, height: number, gridSize: number) {
+/* Both builders keep the lattice ANCHORED AT THE ORIGIN and only widen how far it runs, so
+   extending the bounds never shifts a single line - every token already standing on a square
+   stays on that square. They used to start at 0 and stop at the canvas size, which is fine
+   unrotated but at 90/270 the canvas rectangle, turned about its centre, only covers a
+   centre band of the (now tall) visual area and of the rotated image. */
+function buildSquareGridLines(bounds: GridBounds, gridSize: number) {
   if (gridSize <= 0) return [];
   const lines: { points: number[]; key: string }[] = [];
-  for (let x = 0; x <= width; x += gridSize) {
-    lines.push({ key: `v-${x}`, points: [x, 0, x, height] });
+  const startX = Math.floor(bounds.minX / gridSize) * gridSize;
+  const startY = Math.floor(bounds.minY / gridSize) * gridSize;
+  for (let x = startX; x <= bounds.maxX; x += gridSize) {
+    lines.push({ key: `v-${x}`, points: [x, bounds.minY, x, bounds.maxY] });
   }
-  for (let y = 0; y <= height; y += gridSize) {
-    lines.push({ key: `h-${y}`, points: [0, y, width, y] });
+  for (let y = startY; y <= bounds.maxY; y += gridSize) {
+    lines.push({ key: `h-${y}`, points: [bounds.minX, y, bounds.maxX, y] });
   }
   return lines;
 }
 
-function buildHexCenters(width: number, height: number, gridSize: number) {
+function buildHexCenters(bounds: GridBounds, gridSize: number) {
   const hexRadius = gridSize / 2;
   if (hexRadius <= 0) return [];
   const hexWidth = Math.sqrt(3) * hexRadius;
   const hexHeight = 2 * hexRadius;
   const vertSpacing = hexHeight * 0.75;
   const centers: { x: number; y: number; key: string }[] = [];
-  let row = 0;
-  for (let y = 0; y - hexHeight < height; y += vertSpacing, row++) {
-    const xOffset = row % 2 === 1 ? hexWidth / 2 : 0;
-    for (let x = xOffset; x - hexWidth < width; x += hexWidth) {
+  // Rows are counted from the origin, not from the first visible row, so the odd-row offset
+  // lands on the same rows it always did.
+  for (let row = Math.floor((bounds.minY - hexHeight) / vertSpacing); row * vertSpacing - hexHeight < bounds.maxY; row++) {
+    const y = row * vertSpacing;
+    const xOffset = Math.abs(row % 2) === 1 ? hexWidth / 2 : 0;
+    const firstCol = Math.floor((bounds.minX - hexWidth - xOffset) / hexWidth);
+    for (let x = xOffset + firstCol * hexWidth; x - hexWidth < bounds.maxX; x += hexWidth) {
       centers.push({ x, y, key: `hex-${row}-${x}` });
     }
   }
@@ -136,8 +148,7 @@ function buildHexCenters(width: number, height: number, gridSize: number) {
 }
 
 export function MapOverlayLayer({
-  stageWidth,
-  stageHeight,
+  gridBounds,
   gridEnabled,
   gridSize,
   gridColor,
@@ -153,6 +164,17 @@ export function MapOverlayLayer({
   flippedVertical,
   rotation,
 }: MapOverlayLayerProps) {
+  // Memoised: a large map is a few hundred Konva nodes, and this layer re-renders with the
+  // page on every token move.
+  const squareLines = useMemo(
+    () => (gridEnabled && gridType === 'square' ? buildSquareGridLines(gridBounds, gridSize) : []),
+    [gridEnabled, gridType, gridBounds, gridSize],
+  );
+  const hexCenters = useMemo(
+    () => (gridEnabled && gridType === 'hex' ? buildHexCenters(gridBounds, gridSize) : []),
+    [gridEnabled, gridType, gridBounds, gridSize],
+  );
+
   const rulerDx = rulerLine ? rulerLine.end.x - rulerLine.start.x : 0;
   const rulerDy = rulerLine ? rulerLine.end.y - rulerLine.start.y : 0;
   const rulerDistance = Math.hypot(rulerDx, rulerDy);
@@ -172,23 +194,21 @@ export function MapOverlayLayer({
         scaleX={flippedHorizontal ? -1 : 1}
         scaleY={flippedVertical ? -1 : 1}
       >
-        {gridEnabled && gridType === 'square' &&
-          buildSquareGridLines(stageWidth, stageHeight, gridSize).map((line) => (
-            <Line key={line.key} points={line.points} stroke={gridColor} strokeWidth={gridThickness} listening={false} />
-          ))}
-        {gridEnabled && gridType === 'hex' &&
-          buildHexCenters(stageWidth, stageHeight, gridSize).map((c) => (
-            <RegularPolygon
-              key={c.key}
-              x={c.x}
-              y={c.y}
-              sides={6}
-              radius={gridSize / 2}
-              stroke={gridColor}
-              strokeWidth={gridThickness}
-              listening={false}
-            />
-          ))}
+        {squareLines.map((line) => (
+          <Line key={line.key} points={line.points} stroke={gridColor} strokeWidth={gridThickness} listening={false} />
+        ))}
+        {hexCenters.map((c) => (
+          <RegularPolygon
+            key={c.key}
+            x={c.x}
+            y={c.y}
+            sides={6}
+            radius={gridSize / 2}
+            stroke={gridColor}
+            strokeWidth={gridThickness}
+            listening={false}
+          />
+        ))}
         {shapes.map((shape) => renderShape(shape, eraserActive, onEraseShape))}
       </Group>
 

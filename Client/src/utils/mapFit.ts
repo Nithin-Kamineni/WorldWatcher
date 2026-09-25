@@ -87,3 +87,51 @@ export function imagePointsToStage(points: number[], fit: BackgroundFit): number
   }
   return out;
 }
+
+/** An axis-aligned area in a floor's LOCAL (pre-flip, pre-rotation) stage space. */
+export interface GridBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** How much of local space the grid has to rule so that it covers everything the DM can see
+ * of the floor, whatever its rotation.
+ *
+ * Content layers draw inside a Group that flips and rotates about the canvas centre, so the
+ * grid is laid out in that Group's local space. Unrotated, the canvas rectangle is enough.
+ * At 90/270 it is not: that rectangle turns into a tall band down the middle of the screen,
+ * and the image - which at 90/270 is fitted with its sides swapped - overhangs the canvas in
+ * local space. So this is the union of three rectangles:
+ *   - the canvas itself (what the grid always covered, letterbox included);
+ *   - the canvas's footprint seen through the rotation, i.e. the same size with width and
+ *     height swapped about the same centre - the part of local space that lands on screen;
+ *   - the background image, from the fit.
+ * Flips need nothing: they mirror about the centre, which maps each of these onto itself. */
+export function gridBoundsFor(
+  stageW: number,
+  stageH: number,
+  rotation: number | undefined,
+  fit: BackgroundFit | null,
+): GridBounds {
+  const cx = stageW / 2;
+  const cy = stageH / 2;
+  let minX = 0;
+  let minY = 0;
+  let maxX = stageW;
+  let maxY = stageH;
+  if (rotation === 90 || rotation === 270) {
+    minX = Math.min(minX, cx - stageH / 2);
+    maxX = Math.max(maxX, cx + stageH / 2);
+    minY = Math.min(minY, cy - stageW / 2);
+    maxY = Math.max(maxY, cy + stageW / 2);
+  }
+  if (fit) {
+    minX = Math.min(minX, fit.x);
+    minY = Math.min(minY, fit.y);
+    maxX = Math.max(maxX, fit.x + fit.imageWidth * fit.scale);
+    maxY = Math.max(maxY, fit.y + fit.imageHeight * fit.scale);
+  }
+  return { minX, minY, maxX, maxY };
+}

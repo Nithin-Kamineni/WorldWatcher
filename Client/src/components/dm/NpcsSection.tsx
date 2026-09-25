@@ -32,6 +32,8 @@ const RETURN_STATE_MAX_AGE_MS = 15 * 60 * 1000;
 
 interface NpcsSectionProps {
   campaignId: string;
+  /** Pre-fills the search box - the World manager's Overview sends a search hit here. */
+  initialSearch?: string;
   /** World this NpcsSection is rendered under, if any - threaded into NpcFormDialog so it
    * can offer the "also create a world article" checkbox (issue 4c/4g). Omit when this
    * section is rendered without a world in scope. */
@@ -46,10 +48,11 @@ function toggleInArray(arr: string[], value: string): string[] {
   return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
 }
 
-export function NpcsSection({ campaignId, worldId }: NpcsSectionProps) {
+export function NpcsSection({ campaignId, worldId, initialSearch }: NpcsSectionProps) {
   const navigate = useNavigate();
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  // Open when a search arrives pre-filled, so the filter narrowing the list is visible.
+  const [filterOpen, setFilterOpen] = useState(Boolean(initialSearch));
+  const [search, setSearch] = useState(initialSearch ?? '');
   const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
 
   const [page, setPage] = useState(0);

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type DiceBox from '@3d-dice/dice-box';
 import type { DiceBoxResult } from '@3d-dice/dice-box';
-import { useDiceRollStore } from '../../store/useDiceRollStore';
+import { latestDiceSeq, useDiceRollStore, type DiceGroupResult } from '../../store/useDiceRollStore';
 import { BRAND_AMBER } from '../../theme/brandColors';
 
 /** Above every overlay MUI has (modal 1300, snackbar 1400, tooltip 1500). */
@@ -17,7 +17,7 @@ const CONTAINER_ID = 'ww-dice-box';
  * the package is ever upgraded. */
 const ASSET_PATH = '/assets/dice-box/';
 
-/** Minimum gap between two thrown dice. Tapping the button three times fast should read as
+/** Minimum gap between two throws. Tapping the button three times fast should read as
  * three throws, not one handful dropped at once. */
 const THROW_GAP_MS = 260;
 
@@ -80,7 +80,8 @@ const VISUALLY_HIDDEN: CSSProperties = {
  * and the one colour taken from theme/brandColors.ts, which imports nothing.
  *
  * This is a real physics simulation, not an animation of a number we already picked:
- * `@3d-dice/dice-box` (BabylonJS + ammo.js in a web worker) throws an actual d20 mesh - the
+ * `@3d-dice/dice-box` (BabylonJS + ammo.js in a web worker) throws an actual die mesh (d4
+ * to d20) - the
  * real solid, with the real face numbering, readable the whole way down because the numbers
  * are on the model - lets it tumble and settle, then raycasts straight up from the resting
  * die against a collider-face map to see which face ended on top. THAT is the roll. Nothing
@@ -93,8 +94,32 @@ const VISUALLY_HIDDEN: CSSProperties = {
  *     is asleep, so an idle table costs nothing but a retained WebGL context;
  *   - the canvas is `pointer-events: none`, so the app underneath stays fully usable while
  *     dice are on it - clicking anything is in fact how you sweep them away. */
+/** Straight from the simulation - whichever faces are pointing up, grouped per notation. */
+function toGroupResults(results: DiceBoxResult[]): DiceGroupResult[] {
+  return results.map((group) => {
+    const rolls = (group.rolls ?? []).map((r) => r.value);
+    const modifier = group.modifier ?? 0;
+    return {
+      sides: Number(group.sides) || 0,
+      rolls,
+      modifier,
+      total: rolls.reduce((sum, v) => sum + v, 0) + modifier,
+    };
+  });
+}
+
+/** "Rolled 2d6+1: 3, 5 (9); d20: 14" - for the live region. */
+function describeResults(results: DiceGroupResult[]): string {
+  const parts = results.map((g) => {
+    const mod = g.modifier > 0 ? `+${g.modifier}` : g.modifier < 0 ? `${g.modifier}` : '';
+    const label = `${g.rolls.length > 1 ? g.rolls.length : ''}d${g.sides}${mod}`;
+    return g.rolls.length > 1 || g.modifier ? `${label}: ${g.rolls.join(', ')} (${g.total})` : `${label}: ${g.total}`;
+  });
+  return parts.length ? `Rolled ${parts.join('; ')}` : '';
+}
+
 export function DiceRollOverlay() {
-  const requestCount = useDiceRollStore((s) => s.requestCount);
+  const requests = useDiceRollStore((s) => s.requests);
   const dismissCount = useDiceRollStore((s) => s.dismissCount);
   const diceOnTable = useDiceRollStore((s) => s.diceOnTable);
   const dismissSeconds = useDiceRollStore((s) => s.dismissSeconds);
@@ -102,6 +127,7 @@ export function DiceRollOverlay() {
   const dismiss = useDiceRollStore((s) => s.dismiss);
   const setDiceOnTable = useDiceRollStore((s) => s.setDiceOnTable);
   const setResults = useDiceRollStore((s) => s.setResults);
+  const recordRoll = useDiceRollStore((s) => s.recordRoll);
 
   const boxRef = useRef<DiceBox | null>(null);
   const boxPromiseRef = useRef<Promise<DiceBox | null> | null>(null);
@@ -116,10 +142,13 @@ export function DiceRollOverlay() {
   // its own, so each navigation remounted it and re-threw the whole history. Mounting it once
   // at the app root (App.tsx) is the real fix; seeding these makes the bug unreachable even
   // if it is ever mounted somewhere short-lived again.
-  const handledRequestsRef = useRef(useDiceRollStore.getState().requestCount);
+  const handledRequestsRef = useRef(latestDiceSeq(useDiceRollStore.getState().requests));
   const handledDismissRef = useRef(useDiceRollStore.getState().dismissCount);
   const sweepTimerRef = useRef<number | null>(null);
   const onTableRef = useRef(false);
+  /** True from a throw onto a clean table until that throw settles - tells recordRoll
+   * whether this is a new roll or more dice added to the last one. */
+  const freshThrowRef = useRef(false);
   /** Read inside `onRollComplete`, which is installed once when the box is built and so must
    * not close over the setting's value at that moment. */
   const dismissSecondsRef = useRef(dismissSeconds);
@@ -163,8 +192,10 @@ export function DiceRollOverlay() {
           lightIntensity: 1,
         });
         box.onRollComplete = (results: DiceBoxResult[]) => {
-          // Straight from the simulation - whichever faces are pointing up.
-          setResults(results.map((r) => r.value));
+          const groups = toGroupResults(results);
+          setResults(groups);
+          recordRoll(groups, !freshThrowRef.current);
+          freshThrowRef.current = false;
           // The countdown starts when the dice STOP, not when they are thrown, so a long
           // tumble never eats into the time you have to read them.
           cancelSweep();
@@ -179,18 +210,19 @@ export function DiceRollOverlay() {
       }
     })();
     return boxPromiseRef.current;
-  }, [cancelSweep, sweep, setResults]);
+  }, [cancelSweep, sweep, setResults, recordRoll]);
 
   // ---- presses -> throws ------------------------------------------------------------------
   useEffect(() => {
-    if (requestCount <= handledRequestsRef.current) return;
-    const pending = requestCount - handledRequestsRef.current;
-    handledRequestsRef.current = requestCount;
+    const latest = latestDiceSeq(requests);
+    if (latest <= handledRequestsRef.current) return;
+    const pending = requests.filter((r) => r.seq > handledRequestsRef.current);
+    handledRequestsRef.current = latest;
 
     queueRef.current = queueRef.current.then(async () => {
       const box = await ensureBox();
       if (!box) return;
-      for (let i = 0; i < pending; i += 1) {
+      for (const request of pending) {
         const since = Date.now() - lastThrowAtRef.current;
         if (since < THROW_GAP_MS) await new Promise((r) => setTimeout(r, THROW_GAP_MS - since));
         cancelSweep();
@@ -198,14 +230,19 @@ export function DiceRollOverlay() {
         // visible costs a React render the throw should not have to wait behind.
         setDiceOnTable(true);
         // `roll` clears the table first; `add` throws onto the dice already on it. That
-        // distinction is the whole of the "press twice, get two dice" behaviour.
-        if (onTableRef.current) box.add('1d20');
-        else box.roll('1d20');
+        // distinction is the whole of the "press twice, get two dice" behaviour - and a
+        // `fresh` request (the sidebar's Roll button) always wants a clean table, so its
+        // total is the total of what it threw and nothing left over.
+        if (onTableRef.current && request.mode === 'add') box.add(request.notation);
+        else {
+          freshThrowRef.current = true;
+          box.roll(request.notation);
+        }
         onTableRef.current = true;
         lastThrowAtRef.current = Date.now();
       }
     });
-  }, [requestCount, ensureBox, cancelSweep, setDiceOnTable]);
+  }, [requests, ensureBox, cancelSweep, setDiceOnTable]);
 
   // ---- dismiss requests -------------------------------------------------------------------
   useEffect(() => {
@@ -254,10 +291,10 @@ export function DiceRollOverlay() {
       <div
         role="status"
         aria-live="polite"
-        data-dice-results={results.join(',')}
+        data-dice-results={results.map((g) => g.rolls.join('+')).join(',')}
         style={VISUALLY_HIDDEN}
       >
-        {results.length ? `Rolled d20: ${results.join(', ')}` : ''}
+        {describeResults(results)}
       </div>
       {/* The canvas has to be at its final size BEFORE `box.init()` runs, because that is
           when dice-box measures clientWidth/clientHeight to size its drawing buffer AND to

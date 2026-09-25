@@ -46,7 +46,7 @@ export function RightPanel({ worldId, children }: RightPanelProps) {
               ...floatingArrowSx,
               right: 0,
               transform: 'translateY(-50%)',
-              borderRadius: '10px 0 0 10px',
+              borderRadius: '4px 0 0 4px',
             }}
           >
             <ChevronLeftIcon fontSize="small" />
@@ -78,7 +78,7 @@ export function RightPanel({ worldId, children }: RightPanelProps) {
             ...floatingArrowSx,
             left: 0,
             transform: 'translateY(-50%)',
-            borderRadius: '10px',
+            borderRadius: '4px',
           }}
         >
           <ChevronRightIcon fontSize="small" />

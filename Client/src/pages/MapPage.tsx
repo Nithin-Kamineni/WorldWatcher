@@ -18,7 +18,6 @@ import { InitiativeBar } from '../components/map/InitiativeBar';
 import { MapSidebar, type SidebarOpenRequest } from '../components/map/sidebar/MapSidebar';
 import { usePlayItemsStore, compositeId } from '../store/usePlayItemsStore';
 import { MapToolbar } from '../components/map/toolbar/MapToolbar';
-import { TokenManagerPopover, type TokenManagerTab } from '../components/map/toolbar/TokenManagerPopover';
 import { ShortcutQuickBar } from '../components/map/ShortcutQuickBar';
 import { MapNumberInputPopover } from '../components/map/MapNumberInputPopover';
 import { MapTextInputPopover } from '../components/map/MapTextInputPopover';
@@ -27,7 +26,6 @@ import { useCampaignStore, getCampaignById, getMapsForCampaign } from '../store/
 import { useWorldStore, getWorldById } from '../store/useWorldStore';
 import { useNavMemoryStore } from '../store/useNavMemoryStore';
 import { useTokenLibraryStore } from '../store/useTokenLibraryStore';
-import { useTokenManagerUiStore } from '../store/useTokenManagerUiStore';
 import { useEncounterStore, getEncountersForCampaign } from '../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../store/useCreatureStore';
 import { useShortcutStore, getEffectiveCombo } from '../store/useShortcutStore';
@@ -39,9 +37,7 @@ import { getPrimaryFloor, type GridType, type MapFloor } from '../types/map';
 import {
   DEFAULT_TOKEN_HP,
   DEFAULT_TOKEN_OUTLINE_COLOR,
-  DEFAULT_TOKEN_SIZE,
-  MAX_TOKEN_SIZE,
-  MIN_TOKEN_SIZE,
+  tokenSizeFromSquares,
   type PlacedToken,
 } from '../types/token';
 import { DEFAULT_MARKER_WIDTH, DEFAULT_SHAPE_COLOR, type AoEShape } from '../types/shape';
@@ -121,11 +117,6 @@ export function MapPage() {
   const [activeTool, setActiveTool] = useState<MapToolMode>('select');
   const [shapeColor, setShapeColor] = useState(DEFAULT_SHAPE_COLOR);
   const [markerWidth, setMarkerWidth] = useState(DEFAULT_MARKER_WIDTH);
-  const [tokenManagerOpen, setTokenManagerOpen] = useState(false);
-  const [tokenManagerAnchor, setTokenManagerAnchor] = useState<HTMLElement | null>(null);
-  const [tokenManagerPosition, setTokenManagerPosition] = useState<{ top: number; left: number } | null>(null);
-  const [tokenManagerFocusId, setTokenManagerFocusId] = useState<string | null>(null);
-  const [tokenManagerTab, setTokenManagerTab] = useState<TokenManagerTab>('floor');
   const [fitResetEpoch, setFitResetEpoch] = useState(0);
   const [noStatsWarning, setNoStatsWarning] = useState(false);
   /** Bumped to pull the sidebar open on a section - see MapSidebar's SidebarOpenRequest. */
@@ -204,6 +195,37 @@ export function MapPage() {
   // the image's natural (unscaled) dimensions to compute the best-fit rotation.
   const [backgroundImage] = useImage(activeFloor?.imageSrc ?? '');
 
+  // Fullscreen is the BROWSER's fullscreen (the Fullscreen API), not just dropping the app
+  // shell: the tabs, address bar and OS taskbar go too, so the map is the only thing on the
+  // monitor the table is looking at. `isFullscreen` follows `fullscreenchange` rather than
+  // being flipped by the button, because the browser can leave fullscreen on its own - Esc,
+  // or the "exit full screen" hover prompt - and the shell has to come back when it does.
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+    // In the in-page fallback below, there is no browser fullscreen to exit.
+    if (isFullscreen) {
+      setIsFullscreen(false);
+      return;
+    }
+    // Called from a click or a keydown, so the user-activation requirement is met. If the
+    // browser still refuses (an iframe without allowfullscreen, a policy), fall back to the
+    // in-page mode, which at least hides the app chrome.
+    document.documentElement.requestFullscreen().catch(() => setIsFullscreen(true));
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      // Navigating away from the map must not strand the rest of the app in fullscreen.
+      if (document.fullscreenElement) void document.exitFullscreen();
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // While a dialog/popover with its own text field is open (rename/tag/notes/bulk-apply
@@ -218,6 +240,11 @@ export function MapPage() {
         setActiveTool('select');
         return;
       }
+      // Nothing below may fire while typing in a text field - not the combat hotkeys, and
+      // not undo/redo either: Ctrl+Z in a token's name field (the sidebar's Tokens panel) is
+      // the field's own undo, not a rewind of the map.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       const ctrlOrCmd = e.ctrlKey || e.metaKey;
       if (ctrlOrCmd && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -229,10 +256,7 @@ export function MapPage() {
         keyHandlersRef.current.redo();
         return;
       }
-      // Combat shortcuts (t/l/g/y/r/h/e/j/k/n/d and friends) - never fire while typing in any
-      // text input elsewhere on the page.
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      // Combat shortcuts (t/l/g/y/r/h/e/j/k/n/d and friends).
       const combo = comboFromKeyboardEvent(e);
       const handler = keyHandlersRef.current.shortcuts[combo];
       if (handler) {
@@ -499,8 +523,11 @@ export function MapPage() {
     updateFloorInMap(campaignId, map.id, activeFloor.id, () => next);
   };
 
-  const resolvePlacementSize = (relativeSize: number): number =>
-    Math.min(MAX_TOKEN_SIZE, Math.max(MIN_TOKEN_SIZE, relativeSize * DEFAULT_TOKEN_SIZE));
+  // A token's size is grid-relative (1 = one square, the 5e Medium footprint), so it is
+  // multiplied by THIS map's square. It used to multiply a fixed 20px and clamp to 10-50px,
+  // which on the usual 70-80px grid made a Medium creature under a third of a square and no
+  // token able to fill even one.
+  const resolvePlacementSize = (relativeSize: number): number => tokenSizeFromSquares(relativeSize, map?.gridSize);
 
   const handleTokenMove = (tokenId: string, x: number, y: number) => {
     mutateActiveFloorWithHistory((floor) => ({
@@ -807,24 +834,14 @@ export function MapPage() {
 
   const handleDeleteFloorToken = (tokenId: string) => handleDeleteFloorTokens([tokenId]);
 
-  const handleTokenContextMenu = (token: PlacedToken, clientX: number, clientY: number) => {
-    setTokenManagerAnchor(null);
-    setTokenManagerPosition({ top: clientY, left: clientX });
-    setTokenManagerFocusId(token.id);
-    setTokenManagerTab('floor');
-    setTokenManagerOpen(true);
+  /** Right-click a token: open the sidebar's Tokens panel on "On map", at that token's row.
+   * (This used to open a popover at the cursor; the panel stays open while the DM works the
+   * map, which a popover could not.) */
+  const openTokenInSidebar = (tokenId: string) => {
+    setSidebarOpenRequest({ section: 'tokens', nonce: Date.now(), tokenTab: 'floor', focusTokenId: tokenId });
   };
 
-  const handleOpenTokenManager = (anchorEl: HTMLElement) => {
-    setTokenManagerPosition(null);
-    setTokenManagerAnchor(anchorEl);
-    setTokenManagerFocusId(null);
-    // Restore whichever tab (This Floor/Favorites/Encounters) the DM was last on, rather
-    // than always resetting to 'floor' - right-clicking a specific token still forces
-    // 'floor' below, since that's a deliberate jump to that token's row.
-    setTokenManagerTab(useTokenManagerUiStore.getState().lastTab);
-    setTokenManagerOpen(true);
-  };
+  const handleTokenContextMenu = (token: PlacedToken) => openTokenInSidebar(token.id);
 
   const handleShapeComplete = (shape: AoEShape) => {
     mutateActiveFloorWithHistory((floor) => ({ ...floor!, shapes: [...floor!.shapes, shape] }));
@@ -1129,11 +1146,7 @@ export function MapPage() {
   const handleQuickEditHotkey = () => {
     const ids = getActionTargetIds();
     if (ids.length !== 1) return;
-    setTokenManagerAnchor(null);
-    setTokenManagerPosition(QUICK_POPOVER_ANCHOR());
-    setTokenManagerFocusId(ids[0]);
-    setTokenManagerTab('floor');
-    setTokenManagerOpen(true);
+    openTokenInSidebar(ids[0]);
   };
 
   const zoomBy = (factor: number) => {
@@ -1196,7 +1209,8 @@ export function MapPage() {
     clearEncounter: handleClearEncounter,
     cleanEncounter: handleCleanEncounter,
     restoreAllPcHp: handleRestoreAllPcHp,
-    toggleFullScreen: () => setIsFullscreen((f) => !f),
+    toggleFullScreen: toggleFullscreen,
+    rollDice: () => setSidebarOpenRequest({ section: 'dice', nonce: Date.now() }),
     nextTurn: handleNextTurn,
     previousTurn: handlePreviousTurn,
     saveEncounter: () => setSavedToast(true),
@@ -1228,7 +1242,7 @@ export function MapPage() {
   keyHandlersRef.current = {
     undo: handleUndo,
     redo: handleRedo,
-    blocked: tokenManagerOpen || shortcutsDialogOpen || !!quickInputPopover,
+    blocked: shortcutsDialogOpen || !!quickInputPopover,
     shortcuts: shortcutComboMap,
   };
 
@@ -1363,7 +1377,6 @@ export function MapPage() {
               canRedo={redoStack.length > 0}
               onUndo={handleUndo}
               onRedo={handleRedo}
-              onOpenTokenManager={handleOpenTokenManager}
               fogEnabled={fogEnabled}
               onToggleFog={handleToggleFog}
               playerPreview={playerPreview}
@@ -1403,6 +1416,12 @@ export function MapPage() {
           onNextTurn={handleNextTurn}
           onEndEncounter={handleEndEncounter}
           onUpdateToken={handleUpdateFloorToken}
+          onDeleteToken={handleDeleteFloorToken}
+          lockedEncounterId={activeFloor?.lockedEncounterId}
+          onLockEncounter={handleLockEncounter}
+          resolvedEncounterRoster={activeFloor?.resolvedEncounterRoster ?? null}
+          onSetResolvedEncounterRoster={handleSetResolvedEncounterRoster}
+          gridSize={map.gridSize}
           selectedTokenIds={selectedTokenIds}
           onTokenSelect={handleTokenSelect}
           onTokenStatsRequest={handleTokenStatsRequest}
@@ -1416,31 +1435,12 @@ export function MapPage() {
       >
         <Fab
           size="medium"
-          onClick={() => setIsFullscreen((f) => !f)}
+          onClick={toggleFullscreen}
           sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: (theme) => theme.zIndex.fab }}
         >
           {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
         </Fab>
       </Tooltip>
-
-      <TokenManagerPopover
-        open={tokenManagerOpen}
-        anchorEl={tokenManagerAnchor}
-        anchorPosition={tokenManagerPosition}
-        onClose={() => setTokenManagerOpen(false)}
-        placedTokens={activeFloor?.placedTokens ?? []}
-        onUpdateToken={handleUpdateFloorToken}
-        onDeleteToken={handleDeleteFloorToken}
-        focusTokenId={tokenManagerFocusId}
-        initialTab={tokenManagerTab}
-        campaignId={campaignId}
-        lockedEncounterId={activeFloor?.lockedEncounterId}
-        onLockEncounter={handleLockEncounter}
-        resolvedEncounterRoster={activeFloor?.resolvedEncounterRoster ?? null}
-        onSetResolvedEncounterRoster={handleSetResolvedEncounterRoster}
-        encounterActive={activeFloor?.initiative.status === 'active'}
-      />
-
 
       <Snackbar open={noStatsWarning} autoHideDuration={3000} onClose={() => setNoStatsWarning(false)}>
         <Alert severity="warning" onClose={() => setNoStatsWarning(false)} sx={{ width: '100%' }}>

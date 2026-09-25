@@ -66,7 +66,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'cleanEncounter', category: 'encounter', label: 'Clean Encounter', icon: CleaningServicesIcon, defaultCombo: 'alt+del', defaultToolbar: true, wired: true },
   { id: 'libraryReferencePane', category: 'encounter', label: 'Library Reference Pane', icon: LibraryBooksIcon, defaultCombo: 'alt+a', defaultToolbar: true, wired: false },
   { id: 'libraryManager', category: 'encounter', label: 'Library Manager', icon: CollectionsBookmarkIcon, defaultCombo: 'alt+shift+a', defaultToolbar: false, wired: false },
-  { id: 'rollDice', category: 'encounter', label: 'Roll Dice', icon: CasinoIcon, defaultCombo: 'd', defaultToolbar: false, wired: false },
+  { id: 'rollDice', category: 'encounter', label: 'Roll Dice', icon: CasinoIcon, defaultCombo: 'd', defaultToolbar: false, wired: true },
   { id: 'quickAddCombatant', category: 'encounter', label: 'Quick Add Combatant', icon: PersonAddAlt1Icon, defaultCombo: 'alt+q', defaultToolbar: false, wired: false },
   { id: 'restoreAllPcHp', category: 'encounter', label: 'Restore all Player Character HP', icon: HomeIcon, defaultCombo: 'alt+shift+t', defaultToolbar: false, wired: true },
   { id: 'launchPlayerView', category: 'encounter', label: 'Launch Player View', icon: GroupsIcon, defaultCombo: 'alt+w', defaultToolbar: true, wired: false },

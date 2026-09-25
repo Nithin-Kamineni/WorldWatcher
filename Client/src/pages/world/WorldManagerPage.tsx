@@ -35,6 +35,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import DashboardIcon from '@mui/icons-material/SpaceDashboardOutlined';
 import { SectionLayout } from '../../components/shell/SectionLayout';
 import { ComingSoon } from '../../components/shell/ComingSoon';
 import { Breadcrumbs } from '../../components/layout/Breadcrumbs';
@@ -46,6 +47,7 @@ import { FilterChipGroup } from '../../components/dm/FilterChipGroup';
 import { ArticleGridStage, type ArticleGridStageHandle } from '../../components/world/ArticleGridStage';
 import { ArticleTable } from '../../components/world/ArticleTable';
 import { RecentChangesTimeline } from '../../components/world/RecentChangesTimeline';
+import { WorldOverview, type OverviewGroup, type OverviewNavParams } from '../../components/world/WorldOverview';
 import { PlaceBuilderDialog, type PlaceType } from '../../components/world/PlaceBuilderDialog';
 import { getArticleCategoryIcon } from '../../components/world/articleIcons';
 import { useWorldStore, getWorldById, getPrimaryCampaignForWorld } from '../../store/useWorldStore';
@@ -53,6 +55,7 @@ import { useCampaignStore, getCampaignById } from '../../store/useCampaignStore'
 import { useNavMemoryStore } from '../../store/useNavMemoryStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../../store/useCreatureStore';
 import { useFactionStore, getFactionsForCampaign } from '../../store/useFactionStore';
+import { useBastionStore } from '../../store/useBastionStore';
 import {
   useArticleStore,
   getArticlesForWorld,
@@ -63,6 +66,7 @@ import { ARTICLE_TEMPLATES, type ArticleCategory } from '../../types/article';
 import type { EntityRevision } from '../../types/revision';
 
 type Folder =
+  | 'overview'
   | 'people'
   | 'npcs'
   | 'deities'
@@ -247,10 +251,14 @@ export function WorldManagerPage() {
   const { worldId } = useParams<{ worldId: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  /** People is the World manager's landing view. It used to be 'articles' (the all-articles
-   * table), but that view lost its sidebar entry when the Articles folder tree was removed,
-   * which left the front door pointing at a view nothing in the nav could select. */
-  const folder = (searchParams.get('folder') as Folder | null) ?? 'people';
+  /** The Overview is the World manager's landing view: search across everything, the entries
+   * you were last working on, and one card per group. It replaced People, which dropped you a
+   * quarter of the way into the world with no sense of the rest of it. */
+  const folder = (searchParams.get('folder') as Folder | null) ?? 'overview';
+  /** Set by the Overview's search: `q` pre-fills the NPC / Faction search, `open` deep-links a
+   * Compendium entry to its detail. Both are dropped on any sidebar navigation. */
+  const folderQuery = searchParams.get('q') ?? undefined;
+  const folderOpenId = searchParams.get('open') ?? undefined;
   const mode = (searchParams.get('mode') as 'hybrid' | 'table' | null) ?? 'hybrid';
   const articleFolderId = searchParams.get('afid');
   const [articleSearch, setArticleSearch] = useState('');
@@ -278,6 +286,8 @@ export function WorldManagerPage() {
   const fetchCreaturesForCampaign = useCreatureStore((s) => s.fetchCreaturesForCampaign);
   const factionsByCampaignId = useFactionStore((s) => s.factionsByCampaignId);
   const fetchFactionsForCampaign = useFactionStore((s) => s.fetchFactionsForCampaign);
+  const bastionsByCampaignId = useBastionStore((s) => s.bastionsByCampaignId);
+  const fetchBastionsForCampaign = useBastionStore((s) => s.fetchBastionsForCampaign);
 
   const revisionsByWorldId = useRevisionStore((s) => s.revisionsByWorldId);
   const revisionsLoading = useRevisionStore((s) => s.loadingWorldIds);
@@ -306,13 +316,15 @@ export function WorldManagerPage() {
     if (!primaryCampaign) return;
     fetchCreaturesForCampaign(primaryCampaign.id);
     fetchFactionsForCampaign(primaryCampaign.id);
-  }, [primaryCampaign, fetchCreaturesForCampaign, fetchFactionsForCampaign]);
+    fetchBastionsForCampaign(primaryCampaign.id);
+  }, [primaryCampaign, fetchCreaturesForCampaign, fetchFactionsForCampaign, fetchBastionsForCampaign]);
 
   /** History is written server-side as a side effect of every other store's writes, so the
    * copy held here is stale the moment anything else saves - it is refetched on every entry
-   * into the view rather than cached like the content stores. */
+   * into the view rather than cached like the content stores. The Overview reads it too, for
+   * "Continue where you left off" and its activity column. */
   useEffect(() => {
-    if (folder !== 'recent' || !worldId) return;
+    if ((folder !== 'recent' && folder !== 'overview') || !worldId) return;
     fetchRevisions(worldId);
     fetchRevisionPolicy();
   }, [folder, worldId, fetchRevisions, fetchRevisionPolicy]);
@@ -387,14 +399,19 @@ export function WorldManagerPage() {
     ...worldArticles.map((a) => ({ id: a.id, name: a.name, kind: 'article' as const, category: a.category, updatedAt: a.updatedAt })),
   ];
 
-  const setFolder = (f: Folder) =>
+  const setFolder = (f: Folder, params?: OverviewNavParams) =>
     setSearchParams(
       (prev) => {
         prev.set('folder', f);
         if (f !== 'articles') prev.delete('afid');
+        prev.delete('q');
+        prev.delete('open');
+        if (params?.q) prev.set('q', params.q);
+        if (params?.open) prev.set('open', params.open);
         return prev;
       },
-      { replace: true },
+      // Leaving the Overview for a result is a real navigation - Back should return to it.
+      { replace: folder !== 'overview' },
     );
   const setMode = (m: 'hybrid' | 'table') => setSearchParams((prev) => { prev.set('mode', m); return prev; }, { replace: true });
   const openSavedViewEntry = (entry: { id: string; kind: 'npc' | 'faction' | 'article' }) => {
@@ -403,13 +420,39 @@ export function WorldManagerPage() {
     else navigate(entryHref(entry.id));
   };
 
+  const bastionCount = primaryCampaign ? (bastionsByCampaignId[primaryCampaign.id] ?? []).length : 0;
+  /** FOLDER_TREE with a count on every item the page already holds in memory. The Overview
+   * counts the Compendium-backed items itself, from the server's totals. */
+  const overviewGroups: OverviewGroup[] = FOLDER_TREE.map((g) => ({
+    group: g.group,
+    icon: g.icon,
+    headingKey: g.headingKey ?? g.items[0].key,
+    items: g.items.map((item) => ({
+      key: item.key,
+      label: item.label,
+      compendium: item.compendium,
+      categories: item.categories,
+      count: item.categories
+        ? worldArticles.filter((a) => item.categories!.includes(a.category)).length
+        : item.factionType
+          ? factions.filter((f) => f.factionType === item.factionType).length
+          : item.key === 'npcs'
+            ? npcs.length
+            : item.key === 'places-bastions'
+              ? bastionCount
+              : undefined,
+    })),
+  }));
+
   const selectedArticleFolderName = articleFolderId ? worldFolders.find((f) => f.id === articleFolderId)?.name : undefined;
 
   /** The label for the 3rd breadcrumb crumb given the current sidebar folder - also threaded
    * onto article-open links as `from`/`fromLabel` so ArticleDetailPage can render the same
    * label (and a working back arrow) no matter which sidebar entry point was used. */
   const crumbLabel =
-    folder === 'articles'
+    folder === 'overview'
+      ? 'Overview'
+      : folder === 'articles'
       ? selectedArticleFolderName ?? 'All articles'
       : folder === 'all'
         ? 'All entries'
@@ -451,6 +494,48 @@ export function WorldManagerPage() {
       worldId={worldId!}
       sidebar={
         <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+          <List dense disablePadding sx={{ mb: 0.5 }}>
+            <ListItemButton
+              selected={folder === 'overview'}
+              onClick={() => {
+                setFolder('overview');
+                setExpandedGroup(null);
+              }}
+              sx={{
+                borderRadius: 2,
+                py: 0.6,
+                pl: 1,
+                gap: 0.5,
+                position: 'relative',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  left: 0,
+                  top: 6,
+                  bottom: 6,
+                  width: 3,
+                  borderRadius: 3,
+                  bgcolor: folder === 'overview' ? 'primary.main' : 'transparent',
+                  transition: 'background-color 160ms',
+                },
+                '&.Mui-selected': { bgcolor: 'action.selected' },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 0, color: folder === 'overview' ? 'primary.main' : 'text.secondary' }}>
+                <DashboardIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText
+                primary="Overview"
+                slotProps={{
+                  primary: {
+                    variant: 'body2',
+                    sx: { fontWeight: 700, color: folder === 'overview' ? 'text.primary' : 'text.secondary' },
+                  },
+                }}
+              />
+            </ListItemButton>
+          </List>
+          <Divider sx={{ mx: 1, mb: 0.75 }} />
           <List dense disablePadding sx={{ mb: 1 }}>
             {FOLDER_TREE.map((g) => {
               const isExpanded = expandedGroup === g.group;
@@ -589,15 +674,40 @@ export function WorldManagerPage() {
         </Box>
       }
     >
-      <Breadcrumbs
-        items={[
-          { label: world?.name ?? '…' },
-          { label: 'World Manager' },
-          { label: crumbLabel },
-        ]}
-      />
+      {/* The Overview's hero already names the world; a crumb trail there would say it twice. */}
+      {folder !== 'overview' && (
+        <Breadcrumbs
+          items={[
+            { label: world?.name ?? '…' },
+            { label: 'World Manager', to: `/w/${worldId}/manager` },
+            { label: crumbLabel },
+          ]}
+        />
+      )}
 
-      {folder === 'articles' || isCategoryScopedView ? (
+      {folder === 'overview' ? (
+        <WorldOverview
+          worldId={worldId!}
+          worldName={world?.name ?? ''}
+          worldDescription={world?.description}
+          campaignId={primaryCampaign?.id}
+          groups={overviewGroups}
+          articles={worldArticles}
+          npcs={npcs}
+          factions={factions}
+          revisions={getRevisionsForWorld(revisionsByWorldId, worldId)}
+          revisionsLoading={revisionsLoading[worldId ?? ''] === true}
+          onNavigate={(f, params) => {
+            setFolder(f as Folder, params);
+            setExpandedGroup(getFolderGroup(f as Folder)?.group ?? null);
+          }}
+          onOpenArticle={(id) => navigate(entryHref(id))}
+          onCreateArticle={(category) =>
+            navigate(category ? `/w/${worldId}/manager/entry/new?type=${category}` : `/w/${worldId}/manager/entry/new`)
+          }
+          onOpenRevision={openRevisionEntity}
+        />
+      ) : folder === 'articles' || isCategoryScopedView ? (
         <>
           {showPlaceBuilder && (
             <Paper
@@ -743,13 +853,15 @@ export function WorldManagerPage() {
           description="NPCs, Monsters, Factions, Spells, Magic Items, and Bastions are tracked per-campaign today. Create a campaign in this world to start filling these in."
         />
       ) : folder === 'npcs' ? (
-        <NpcsSection campaignId={primaryCampaign!.id} worldId={worldId} />
+        <NpcsSection key={folderQuery ?? ''} campaignId={primaryCampaign!.id} worldId={worldId} initialSearch={folderQuery} />
       ) : isFactionsView ? (
         <FactionsSection
           campaignId={primaryCampaign!.id}
           worldId={worldId}
           factionType={scopedFactionType}
           heading={scopedFactionType ? folderItem!.label : undefined}
+          key={folderQuery ?? ''}
+          initialSearch={folderQuery}
         />
       ) : compendiumView ? (
         // Keyed by catalog so switching Monsters -> Spells remounts: otherwise React reuses
@@ -760,6 +872,9 @@ export function WorldManagerPage() {
           campaignId={primaryCampaign!.id}
           worldId={worldId}
           lockedView={compendiumView}
+          openCreatureId={compendiumView === 'monsters' ? folderOpenId : undefined}
+          openSpellId={compendiumView === 'spells' ? folderOpenId : undefined}
+          openItemId={compendiumView === 'items' ? folderOpenId : undefined}
         />
       ) : folder === 'places-bastions' ? (
         <BastionsSection campaignId={primaryCampaign!.id} worldId={worldId} />

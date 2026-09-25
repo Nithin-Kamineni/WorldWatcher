@@ -26,10 +26,18 @@ class Settings(BaseSettings):
     ww_assets_dir: str = "../Database/Maintainance/assets"
     ww_asset_upload_max_mb: int = 25
 
-    ww_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Vite falls back to 5174, 5175, ... when 5173 is already taken (a second `npm run dev`,
+    # or a stale one holding the port). Allowing only 5173 made that fallback look exactly
+    # like a dead backend: the page loads, every request fails CORS, the app sits spinning.
+    # The whole fallback range is allowed instead, so the symptom cannot recur.
+    ww_cors_origins: str = ",".join(
+        f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in range(5173, 5181)
+    )
 
     ww_host: str = "0.0.0.0"
-    ww_port: int = 8000
+    # Kept in step with Client/.env, which is what the browser actually calls; this said 8000
+    # long after the client moved to 8006.
+    ww_port: int = 8006
     ww_debug: bool = True
 
     @property

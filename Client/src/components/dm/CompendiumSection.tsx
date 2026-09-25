@@ -296,17 +296,45 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
   const fetchSpellsForCampaign = useSpellStore((s) => s.fetchSpellsForCampaign);
   const magicItemsByCampaignId = useMagicItemStore((s) => s.magicItemsByCampaignId);
   const fetchMagicItemsForCampaign = useMagicItemStore((s) => s.fetchMagicItemsForCampaign);
+  const creaturesById = useCreatureStore((s) => s.creaturesById);
+  const fetchCreatureById = useCreatureStore((s) => s.fetchCreatureById);
+  const spellsById = useSpellStore((s) => s.spellsById);
+  const fetchSpellById = useSpellStore((s) => s.fetchSpellById);
+  const magicItemsById = useMagicItemStore((s) => s.magicItemsById);
+  const fetchMagicItemById = useMagicItemStore((s) => s.fetchMagicItemById);
 
+  /** The campaign lists hold only the campaign's own rows, so a deep link to a global catalog
+   * entry (an SRD monster found by the World manager's search, say) is also fetched by id. */
   useEffect(() => {
-    if (openCreatureId) fetchCreaturesForCampaign(campaignId);
-    if (openSpellId) fetchSpellsForCampaign(campaignId);
-    if (openItemId) fetchMagicItemsForCampaign(campaignId);
-  }, [campaignId, openCreatureId, openSpellId, openItemId, fetchCreaturesForCampaign, fetchSpellsForCampaign, fetchMagicItemsForCampaign]);
+    if (openCreatureId) {
+      fetchCreaturesForCampaign(campaignId);
+      fetchCreatureById(openCreatureId);
+    }
+    if (openSpellId) {
+      fetchSpellsForCampaign(campaignId);
+      fetchSpellById(openSpellId);
+    }
+    if (openItemId) {
+      fetchMagicItemsForCampaign(campaignId);
+      fetchMagicItemById(openItemId);
+    }
+  }, [
+    campaignId,
+    openCreatureId,
+    openSpellId,
+    openItemId,
+    fetchCreaturesForCampaign,
+    fetchSpellsForCampaign,
+    fetchMagicItemsForCampaign,
+    fetchCreatureById,
+    fetchSpellById,
+    fetchMagicItemById,
+  ]);
 
   const deepLinkedRef = useRef<string | null>(null);
   useEffect(() => {
     if (openCreatureId && deepLinkedRef.current !== `creature:${openCreatureId}`) {
-      const target = getCreaturesForCampaign(creaturesByCampaignId, campaignId).find((c) => c.id === openCreatureId);
+      const target = getCreaturesForCampaign(creaturesByCampaignId, campaignId).find((c) => c.id === openCreatureId) ?? creaturesById[openCreatureId];
       if (target) {
         deepLinkedRef.current = `creature:${openCreatureId}`;
         setView('monsters');
@@ -314,7 +342,7 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
       }
     }
     if (openSpellId && deepLinkedRef.current !== `spell:${openSpellId}`) {
-      const target = getSpellsForCampaign(spellsByCampaignId, campaignId).find((s) => s.id === openSpellId);
+      const target = getSpellsForCampaign(spellsByCampaignId, campaignId).find((s) => s.id === openSpellId) ?? spellsById[openSpellId];
       if (target) {
         deepLinkedRef.current = `spell:${openSpellId}`;
         setView('spells');
@@ -323,7 +351,7 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
       }
     }
     if (openItemId && deepLinkedRef.current !== `item:${openItemId}`) {
-      const target = getMagicItemsForCampaign(magicItemsByCampaignId, campaignId).find((i) => i.id === openItemId);
+      const target = getMagicItemsForCampaign(magicItemsByCampaignId, campaignId).find((i) => i.id === openItemId) ?? magicItemsById[openItemId];
       if (target) {
         deepLinkedRef.current = `item:${openItemId}`;
         setView('items');
@@ -331,7 +359,7 @@ export function CompendiumSection({ campaignId, worldId, openCreatureId, openSpe
         setItemDialogOpen(true);
       }
     }
-  }, [openCreatureId, openSpellId, openItemId, campaignId, creaturesByCampaignId, spellsByCampaignId, magicItemsByCampaignId]);
+  }, [openCreatureId, openSpellId, openItemId, campaignId, creaturesByCampaignId, spellsByCampaignId, magicItemsByCampaignId, creaturesById, spellsById, magicItemsById]);
 
   /** Follow `lockedView` when it changes rather than only seeding `view` from it. The World
    * manager renders the same <CompendiumSection> element for Monsters, Spells and Magic

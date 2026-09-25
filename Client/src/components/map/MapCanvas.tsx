@@ -16,7 +16,7 @@ import { CONE_ANGLE_DEGREES, DEFAULT_MARKER_WIDTH, THIN_LINE_WIDTH } from '../..
 import type { GridType } from '../../types/map';
 import type { FogState, WallSegment } from '../../types/fog';
 import type { MapToolMode } from '../../types/tool';
-import { computeBackgroundFit, stagePointToImage, type BackgroundFit } from '../../utils/mapFit';
+import { computeBackgroundFit, gridBoundsFor, stagePointToImage, type BackgroundFit } from '../../utils/mapFit';
 import {
   ENCOUNTER_ENTRY_DRAG_MIME,
   FAVORITE_CREATURE_DRAG_MIME,
@@ -275,6 +275,9 @@ export function MapCanvas({
     () => (image && hasAuthored ? computeBackgroundFit(authoredW, authoredH, image.width, image.height, rotation) : null),
     [image, hasAuthored, authoredW, authoredH, rotation],
   );
+
+  // Memoised for the same reason as flipPivot: it feeds the grid's line memo.
+  const gridBounds = useMemo(() => gridBoundsFor(authoredW, authoredH, rotation, fit), [authoredW, authoredH, rotation, fit]);
 
   useEffect(() => {
     onFitChange(fit);
@@ -569,11 +572,11 @@ export function MapCanvas({
           flippedVertical={flippedVertical}
           rotation={rotation}
         />
-        {/* The grid is sized to the AUTHORED canvas, not the live one: it is content, and
-            has to line up with the tokens standing on it whatever the window size. */}
+        {/* The grid is laid out against the AUTHORED canvas, not the live one: it is content,
+            and has to line up with the tokens standing on it whatever the window size. Its
+            extent also covers the rotated image - see gridBoundsFor. */}
         <MapOverlayLayer
-          stageWidth={authoredW}
-          stageHeight={authoredH}
+          gridBounds={gridBounds}
           gridEnabled={gridEnabled}
           gridSize={gridSize}
           gridColor={gridColor}
