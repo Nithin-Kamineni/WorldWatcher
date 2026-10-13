@@ -25,7 +25,7 @@ class Map(Base):
     setting: Mapped[Optional[str]] = mapped_column(Text)
     activity: Mapped[Optional[str]] = mapped_column(Text)
     grid_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    grid_size: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    grid_size: Mapped[int] = mapped_column(Integer, nullable=False, default=18)
     grid_color: Mapped[str] = mapped_column(Text, nullable=False, default="rgba(128,128,128,0.35)")
     grid_thickness: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     grid_type: Mapped[str] = mapped_column(Text, nullable=False, default="square")

@@ -19,6 +19,7 @@ import { MapSidebar, type SidebarOpenRequest } from '../components/map/sidebar/M
 import { usePlayItemsStore, compositeId } from '../store/usePlayItemsStore';
 import { MapToolbar } from '../components/map/toolbar/MapToolbar';
 import { ShortcutQuickBar } from '../components/map/ShortcutQuickBar';
+import { MapContextMenu } from '../components/map/MapContextMenu';
 import { MapNumberInputPopover } from '../components/map/MapNumberInputPopover';
 import { MapTextInputPopover } from '../components/map/MapTextInputPopover';
 import { ShortcutsSettingsDialog } from '../components/settings/ShortcutsSettingsDialog';
@@ -29,6 +30,7 @@ import { useTokenLibraryStore } from '../store/useTokenLibraryStore';
 import { useEncounterStore, getEncountersForCampaign } from '../store/useEncounterStore';
 import { useCreatureStore, getCreaturesForCampaign } from '../store/useCreatureStore';
 import { useShortcutStore, getEffectiveCombo } from '../store/useShortcutStore';
+import { useMapUiStore } from '../store/useMapUiStore';
 import { apiMapShapeToAoEShape, apiMapTokenToPlacedToken, applyApiFloorMetaPatch } from '../api/adapters';
 import * as mapsApi from '../api/resources/maps';
 import { connectRoom, floorRoom } from '../api/ws';
@@ -136,8 +138,15 @@ export function MapPage() {
   const [showWalls, setShowWalls] = useState(false);
   const [detectingWalls, setDetectingWalls] = useState(false);
   const [fogToast, setFogToast] = useState<string | null>(null);
+  /** Grid size when the current grid-slider drag began - see handleGridSizeCommit. */
+  const gridDragBase = useRef<number | null>(null);
+  /** Where the map's own right-click menu is open, in viewport px - see MapContextMenu. */
+  const [mapMenuAt, setMapMenuAt] = useState<{ top: number; left: number } | null>(null);
 
   const shortcutOverrides = useShortcutStore((state) => state.overrides);
+  const turnPerspectiveFog = useMapUiStore((state) => state.turnPerspectiveFog);
+  const setTurnPerspectiveFog = useMapUiStore((state) => state.setTurnPerspectiveFog);
+  const toggleSidebar = useMapUiStore((state) => state.toggleSidebar);
 
   const stageRef = useRef<Konva.Stage>(null);
   /** Accumulated line-of-sight reveals awaiting a debounced store write - see the effect
@@ -410,6 +419,24 @@ export function MapPage() {
     }
     return polygons;
   }, [fit, fogEnabled, floorTokens, floorWalls, defaultVisionRadius]);
+
+  /** Whose eyes the live line-of-sight tier shows. During an active encounter (with the
+   * option on) it is the current combatant's alone, so on each turn the DM sees exactly what
+   * that creature can see - and a Blind one sees nothing. Outside combat, everyone's.
+   *
+   * Only the DISPLAY narrows. The explored mask still accumulates from every token's sight
+   * (the effect below reads `visionPolygons`), so the party's map memory is not rewritten by
+   * whose turn it happens to be. Reads the per-token cache the memo above just filled, so this
+   * costs a lookup, not a sweep. */
+  const currentTurnTokenId =
+    activeFloor?.initiative.status === 'active'
+      ? activeFloor.initiative.entries.find((e) => e.id === activeFloor.initiative.currentEntryId)?.tokenId
+      : undefined;
+  const displayedVisionPolygons = useMemo(() => {
+    if (!turnPerspectiveFog || !currentTurnTokenId) return visionPolygons;
+    const polygon = visionCache.current.byToken.get(currentTurnTokenId)?.polygon;
+    return polygon && polygon.length >= 6 ? [polygon] : [];
+  }, [turnPerspectiveFog, currentTurnTokenId, visionPolygons]);
 
   // Repairs a fog record whose grid was never sized - fog switched on before the background
   // image finished loading, or a floor whose image was swapped for one of a different shape.
@@ -964,7 +991,27 @@ export function MapPage() {
   };
 
   const handleGridSizeChange = (size: number) => {
+    if (gridDragBase.current === null) gridDragBase.current = map.gridSize;
     updateMapInCampaign(campaignId, { ...map, gridSize: size });
+  };
+
+  /** Tokens are sized in squares, so when the square changes they have to follow it - otherwise
+   * shrinking the grid leaves every placed token covering several squares. Applied once when the
+   * slider is released rather than per tick: each floor write PATCHes every changed token. The
+   * ratio is taken against the size the drag STARTED from, so the intermediate ticks (which only
+   * moved the grid) don't compound. Every floor shares the map's grid, so every floor follows. */
+  const handleGridSizeCommit = (size: number) => {
+    const base = gridDragBase.current ?? map.gridSize;
+    gridDragBase.current = null;
+    if (!(base > 0) || !(size > 0) || base === size) return;
+    const ratio = size / base;
+    for (const floor of map.floors) {
+      if (floor.placedTokens.length === 0) continue;
+      updateFloorInMap(campaignId, map.id, floor.id, (f) => ({
+        ...f,
+        placedTokens: f.placedTokens.map((t) => ({ ...t, size: t.size * ratio })),
+      }));
+    }
   };
 
   const handleGridColorChange = (color: string) => {
@@ -1227,15 +1274,47 @@ export function MapPage() {
     selectNext: () => handleSelectRelative(1),
     selectPrevious: () => handleSelectRelative(-1),
     duplicateCombatant: () => handleDuplicateCombatants(getActionTargetIds()),
+    toggleSidebar,
   };
 
-  const dispatchShortcutAction = (actionId: string) => actionHandlers[actionId]?.();
+  /** Why an encounter command would do nothing right now, or null if it would do something.
+   * Drives the toolbar's disabled state and gates the hotkey the same way, so a button that is
+   * greyed out cannot be fired from the keyboard behind the DM's back either. */
+  const initiativeStatus = activeFloor?.initiative.status ?? 'idle';
+  const floorTokenCount = activeFloor?.placedTokens.length ?? 0;
+  const hasDownedTokens = (activeFloor?.placedTokens ?? []).some((t) => !!t.hp && t.hp.current <= 0);
+  const encounterActionUnavailable = (actionId: string): string | null => {
+    switch (actionId) {
+      case 'startEncounter':
+        if (initiativeStatus === 'active') return 'the encounter is already running';
+        return initiativeStatus === 'rolling' ? null : 'roll initiative first';
+      case 'endEncounter':
+        return initiativeStatus === 'idle' ? 'no encounter is running' : null;
+      case 'nextTurn':
+      case 'previousTurn':
+        return initiativeStatus === 'active' ? null : 'only during combat';
+      case 'cleanEncounter':
+        return hasDownedTokens ? null : 'no tokens are at 0 HP';
+      case 'clearEncounter':
+      case 'rerollInitiative':
+        return floorTokenCount > 0 ? null : 'no tokens on this floor';
+      case 'saveEncounter':
+        return 'the map already saves every change automatically';
+      default:
+        return null;
+    }
+  };
+
+  const dispatchShortcutAction = (actionId: string) => {
+    if (encounterActionUnavailable(actionId)) return;
+    actionHandlers[actionId]?.();
+  };
 
   const shortcutComboMap: Record<string, () => void> = {};
   for (const action of SHORTCUT_ACTIONS) {
     if (!action.wired) continue;
     const handler = actionHandlers[action.id];
-    if (!handler) continue;
+    if (!handler || encounterActionUnavailable(action.id)) continue;
     shortcutComboMap[getEffectiveCombo(shortcutOverrides, action.id)] = handler;
   }
 
@@ -1296,7 +1375,7 @@ export function MapPage() {
               fitResetEpoch={fitResetEpoch}
               fog={activeFloor.fog}
               walls={activeFloor.walls}
-              visionPolygons={visionPolygons}
+              visionPolygons={displayedVisionPolygons}
               showWalls={showWalls || activeTool === 'wall-draw' || activeTool === 'wall-erase'}
               playerPreview={playerPreview}
               fogBrushRadius={fogBrushRadius}
@@ -1306,6 +1385,7 @@ export function MapPage() {
               onFitChange={handleFitChange}
               authoredStage={activeFloor.authoredStage}
               onAuthoredStageResolved={handleAuthoredStageResolved}
+              onCanvasContextMenu={(clientX, clientY) => setMapMenuAt({ top: clientY, left: clientX })}
             />
           )}
           {activeFloor && (
@@ -1328,15 +1408,6 @@ export function MapPage() {
               />
             </Box>
           )}
-          {activeFloor && (
-            <Box sx={{ position: 'absolute', top: 16, right: 16, pointerEvents: 'none' }}>
-              <ShortcutQuickBar
-                overrides={shortcutOverrides}
-                hasTarget={actionTargetIds.length > 0}
-                onAction={dispatchShortcutAction}
-              />
-            </Box>
-          )}
           <Box
             sx={{
               position: 'absolute',
@@ -1349,16 +1420,6 @@ export function MapPage() {
             }}
           >
             <MapToolbar
-              gridEnabled={map.gridEnabled}
-              gridSize={map.gridSize}
-              gridColor={map.gridColor}
-              gridThickness={map.gridThickness}
-              gridType={map.gridType}
-              onToggleGrid={handleToggleGrid}
-              onGridSizeChange={handleGridSizeChange}
-              onGridColorChange={handleGridColorChange}
-              onGridThicknessChange={handleGridThicknessChange}
-              onGridTypeChange={handleGridTypeChange}
               onZoomIn={() => zoomBy(ZOOM_STEP)}
               onZoomOut={() => zoomBy(1 / ZOOM_STEP)}
               onResetView={handleResetView}
@@ -1368,11 +1429,21 @@ export function MapPage() {
               onShapeColorChange={setShapeColor}
               markerWidth={markerWidth}
               onMarkerWidthChange={setMarkerWidth}
-              flippedHorizontal={!!activeFloor?.flippedHorizontal}
-              flippedVertical={!!activeFloor?.flippedVertical}
-              onFlipHorizontal={handleFlipHorizontal}
-              onFlipVertical={handleFlipVertical}
-              onRotate={handleRotate}
+              onOpenMapMenu={(anchor) => {
+                const rect = anchor.getBoundingClientRect();
+                setMapMenuAt({ top: rect.top, left: rect.left + rect.width / 2 });
+              }}
+              extraActions={
+                activeFloor && (
+                  <ShortcutQuickBar
+                    embedded
+                    overrides={shortcutOverrides}
+                    hasTarget={actionTargetIds.length > 0}
+                    onAction={dispatchShortcutAction}
+                    unavailableReason={encounterActionUnavailable}
+                  />
+                )
+              }
               canUndo={undoStack.length > 0}
               canRedo={redoStack.length > 0}
               onUndo={handleUndo}
@@ -1381,6 +1452,8 @@ export function MapPage() {
               onToggleFog={handleToggleFog}
               playerPreview={playerPreview}
               onTogglePlayerPreview={() => setPlayerPreview((p) => !p)}
+              turnPerspectiveFog={turnPerspectiveFog}
+              onToggleTurnPerspectiveFog={() => setTurnPerspectiveFog(!turnPerspectiveFog)}
               fogBrushRadius={fogBrushRadius}
               onFogBrushRadiusChange={setFogBrushRadius}
               onRevealAll={() => handleSetAllFog(true)}
@@ -1521,6 +1594,28 @@ export function MapPage() {
           onClose={() => setQuickInputPopover(null)}
         />
       )}
+
+      <MapContextMenu
+        anchorPosition={mapMenuAt}
+        onClose={() => setMapMenuAt(null)}
+        gridEnabled={map.gridEnabled}
+        gridSize={map.gridSize}
+        gridColor={map.gridColor}
+        gridThickness={map.gridThickness}
+        gridType={map.gridType}
+        onToggleGrid={handleToggleGrid}
+        onGridSizeChange={handleGridSizeChange}
+        onGridSizeCommit={handleGridSizeCommit}
+        onGridColorChange={handleGridColorChange}
+        onGridThicknessChange={handleGridThicknessChange}
+        onGridTypeChange={handleGridTypeChange}
+        flippedHorizontal={!!activeFloor?.flippedHorizontal}
+        flippedVertical={!!activeFloor?.flippedVertical}
+        onFlipHorizontal={handleFlipHorizontal}
+        onFlipVertical={handleFlipVertical}
+        onRotate={handleRotate}
+        onResetView={handleResetView}
+      />
 
       <ShortcutsSettingsDialog open={shortcutsDialogOpen} onClose={() => setShortcutsDialogOpen(false)} />
     </>

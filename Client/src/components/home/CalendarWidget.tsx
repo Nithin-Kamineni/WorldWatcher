@@ -7,9 +7,9 @@ import { WidgetCard } from './WidgetCard';
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-/** Static mock month grid + "upcoming session" card - there's no real in-world calendar
- * feature yet (that's Timeline, still comingSoon), so this is explicitly placeholder data
- * per issue 7c. */
+/** Static month grid + a sample "next session" line - there is no in-world calendar or
+ * session schedule yet (Timeline is still coming soon), so the card is titled "(coming soon)"
+ * and can be switched off in Settings > Home dashboard widgets. */
 export function CalendarWidget() {
   const now = new Date();
   const year = now.getFullYear();
@@ -22,10 +22,7 @@ export function CalendarWidget() {
   const cells: (number | null)[] = [...Array(firstWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
 
   return (
-    <WidgetCard title="Calendar" icon={<CalendarMonthIcon fontSize="small" />}>
-      <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 1 }}>
-        Placeholder - no in-world calendar data yet
-      </Typography>
+    <WidgetCard title="Calendar" icon={<CalendarMonthIcon fontSize="small" />} comingSoon>
       <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
         {monthLabel}
       </Typography>

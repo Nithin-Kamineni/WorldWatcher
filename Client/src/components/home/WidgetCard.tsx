@@ -12,6 +12,9 @@ interface WidgetCardProps {
   icon?: ReactNode;
   children: ReactNode;
   minHeight?: number;
+  /** Still showing sample content, not the DM's data - the title says so, so nobody mistakes
+   * it for their own. */
+  comingSoon?: boolean;
 }
 
 /** Shared shell for the Home page's dashboard widgets (calendar, weather, quest progress,
@@ -19,7 +22,7 @@ interface WidgetCardProps {
  * placement" pencil in the top-right corner. The pencil is purely a visual affordance for a
  * future widget-layout editor - it opens a "coming soon" tooltip and does nothing else, per
  * issue 7g ("not a necessity to make it working"). */
-export function WidgetCard({ title, icon, children, minHeight }: WidgetCardProps) {
+export function WidgetCard({ title, icon, children, minHeight, comingSoon }: WidgetCardProps) {
   return (
     <Paper
       variant="outlined"
@@ -30,6 +33,11 @@ export function WidgetCard({ title, icon, children, minHeight }: WidgetCardProps
           {icon && <Box sx={{ color: 'primary.main', display: 'flex' }}>{icon}</Box>}
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
             {title}
+            {comingSoon && (
+              <Typography component="span" variant="body2" color="text.secondary" sx={{ fontWeight: 400, ml: 0.75 }}>
+                (coming soon)
+              </Typography>
+            )}
           </Typography>
         </Stack>
       </Stack>

@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "anthropic.claude-code",
+    "openai.chatgpt",
+    "ms-vscode.remote-explorer",
+    "ms-vscode-remote.remote-ssh",
+    "ms-python.python"
+  ]
+}

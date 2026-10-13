@@ -2396,11 +2396,84 @@ point of this section.
          the Tokens panel. A one-off map_tokens UPDATE (size 20 -> grid
          size where grid_size != 20) would fix them all - not done
          without asking, it rewrites user data.
-❌  MP8  Changing a map's grid size does not rescale tokens already on it.
-         Wants a debounced, single-history-entry rescale across floors.
+⚠️  MP8  Grid size changes now rescale placed tokens on every floor, once
+         on slider release (MapPage.handleGridSizeCommit - MAP3-1). Still
+         not an undo step: the rescale spans floors, history is per floor.
 ❌  MP9  Sunken Grotto Floor 1 has authoredStage 4693x2912 - pinned by a
          Playwright session at 33% zoom (see FOG13's migration note), so
          everything on it renders at ~0.3x in a normal window.
 ❌  MP10 Pressing F11 while a map dialog is open (shortcuts blocked) falls
          through to the browser's native F11, which hides browser chrome
          but not the app shell and fires no fullscreenchange.
+
+#####################################################################
+PART I-MAP3 - MAP ROUND 3: SIZING, RIGHT-CLICK, TURN FOG (2026-09-25)
+#####################################################################
+Seven asks from zz.txt.
+
+✅  MAP3-1 Tokens draw at 0.75 of their footprint (types/token.ts
+          TOKEN_SQUARE_FILL; Medium = 0.75 square) and follow the grid:
+          releasing the grid slider rescales every placed token.
+✅  MAP3-2 Grid range cut 4x: 5-50px (was 20-200), default 18 (was 70) -
+          types/map.ts GRID_SIZE_MIN/MAX; server + 001_schema defaults too.
+✅  MAP3-3 Stage framing (first open, resize, Reset View) contain-fits the
+          IMAGE, not the authored canvas, which double-letterboxed it.
+✅  MAP3-4 Map sidebar panel is drag-resizable per section, persisted in
+          useMapUiStore; double-click the handle resets.
+✅  MAP3-5 Fog: in an active encounter only the current combatant's line of
+          sight draws clear (toggle in the fog popover, default on). The
+          explored mask still accumulates from every token.
+✅  MAP3-6 Effect badges on initiative-bar portraits (components/map/
+          effectIcons.tsx, curated icon per condition/spell marker; letter
+          badge otherwise; concentration flag included; "+N" overflow).
+✅  MAP3-7 Right-click: sidebar initiative row -> Change initiative (unlocks,
+          focuses the d20 field, Enter/blur re-locks; lock button gone).
+          Map canvas -> MapContextMenu (grid, size, style, flip, rotate,
+          reset view); also the toolbar's "more" button. ShortcutQuickBar
+          is embedded in the bottom toolbar - the top-right bar is gone.
+
+✅  MAP3-11 Toolbar groups: [shapes | ruler | color] and [fog] each between
+          dividers. Encounter buttons disable with a reason when they would
+          do nothing (MapPage.encounterActionUnavailable; hotkeys gated the
+          same way). Save Encounter (a no-op toast), Rename and Quick Edit
+          are off the toolbar by default - right-click a token instead; the
+          initiative row menu gained "Edit token" (-> Tokens > On map).
+✅  MAP3-12 Sidebar: Toggle Sidebar shortcut (B, rebindable), a collapse tab
+          on the panel's left edge, collapsed state persisted in
+          useMapUiStore. Rail order Floors, Tokens, Initiative, Dice, Reference.
+
+❌  MAP3-8 Existing maps keep their stored grid size (e.g. 70) - they only
+          shrink when the DM moves the slider, which now rescales tokens.
+          Existing tokens were not migrated to the 0.75 fill either.
+❌  MAP3-9 Effect icons are MUI glyphs, not spell artwork: spells.image_asset_id
+          exists but was not checked for coverage. Worth revisiting if the
+          spell images get populated.
+❌  MAP3-10 Turn-perspective fog verified by type-check/build only - no map in
+          the dev DB had fog on, and turning it on rewrites floor data.
+
+#####################################################################
+PART I-HOME - WORLD MANAGER TRIM + HOME DASHBOARD (2026-09-25)
+#####################################################################
+✅  HM1  People > Characters renamed Players; Players and Deities are
+         "coming soon" (no article table behind them). People heading
+         opens NPCs.
+✅  HM2  Codex > Items and Codex > Lore removed. The 'item'/'plot'/'event'
+         article categories stay - magic items and quests write linked
+         articles in them.
+✅  HM3  Home cover banner (WorldCoverHero) from new worlds.cover_image_asset_id
+         (alembic a7c3e9f1b5d2), with Change cover upload. Meridian and
+         Eboron seeded with their bundled art.
+✅  HM4  App stats is real (worlds, campaigns, entries, maps); Quest progress
+         dropped its fake fallback tracks. Calendar and Weather titled
+         "(coming soon)". Settings > Home dashboard widgets toggles each
+         card (useHomeWidgetsStore); Customize link on the dashboard.
+✅  HM5  Tips 20 -> 62, stale "Manage Tokens" tips rewritten.
+✅  HM6  Backend port 8006 -> 8007 (ghost reloader on 8006 served old code).
+
+❌  HM7  Docker Hub widget can never load in a browser - hub.docker.com
+         sends no CORS header. Needs a small backend proxy endpoint. GitHub
+         widget 404s on /releases/latest until a release exists.
+❌  HM8  The article type picker still offers Character and Deity templates,
+         so those entries can still be created from New entry / All entries.
+❌  HM9  Bundled covers are low resolution (663px / 800px wide) - soft on a
+         wide screen. Upload larger art with Change cover.

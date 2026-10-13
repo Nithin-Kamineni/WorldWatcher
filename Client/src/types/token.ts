@@ -88,16 +88,23 @@ function squarePx(gridSize: number | null | undefined): number {
   return gridSize && gridSize > 0 ? gridSize : DEFAULT_TOKEN_SIZE;
 }
 
+/** How much of its footprint a token's art actually covers. A Medium creature's 1-square
+ * footprint draws at 0.75 of the square, so neighbouring tokens stay visually apart and the grid
+ * line under them stays readable - a token that filled its square edge to edge read as far too
+ * big once the map was fitted to the screen. Footprint math (the "squares" the DM edits) is
+ * unaffected; only the drawn diameter is scaled. */
+export const TOKEN_SQUARE_FILL = 0.75;
+
 /** Grid-relative size (1 = one square) -> the stage-px diameter a PlacedToken stores. */
 export function tokenSizeFromSquares(squares: number, gridSize: number | null | undefined): number {
   const clamped = Math.min(MAX_RELATIVE_SIZE, Math.max(MIN_RELATIVE_SIZE, Number.isFinite(squares) ? squares : 1));
-  return clamped * squarePx(gridSize);
+  return clamped * squarePx(gridSize) * TOKEN_SQUARE_FILL;
 }
 
 /** The inverse, for editing a placed token's size in squares. Rounded to 0.05 so a token
  * placed at 1 square reads back as 1, not 0.99999. */
 export function tokenSizeToSquares(size: number, gridSize: number | null | undefined): number {
-  return Math.round((size / squarePx(gridSize)) * 20) / 20;
+  return Math.round((size / (squarePx(gridSize) * TOKEN_SQUARE_FILL)) * 20) / 20;
 }
 export const DEFAULT_TOKEN_OUTLINE_COLOR = '#f5c542';
 export const TOKEN_OUTLINE_WIDTH = 2;

@@ -11,12 +11,18 @@ interface ShortcutQuickBarProps {
   overrides: Record<string, ShortcutOverride>;
   hasTarget: boolean;
   onAction: (actionId: string) => void;
+  /** Render just the buttons, for embedding in MapToolbar - the map page no longer floats
+   * this as its own bar in the top-right corner (two toolbars on one canvas was one too many). */
+  embedded?: boolean;
+  /** Why an encounter command cannot do anything right now (e.g. Next Turn outside combat), or
+   * null when it can. A button with a reason renders disabled, the reason in its tooltip. */
+  unavailableReason?: (actionId: string) => string | null;
 }
 
 /** Floating icon-button bar reflecting the settings dialog's per-action "Toolbar" checkbox -
  * only wired actions with that checkbox on ever show up here. Combatant-category buttons
  * disable themselves (with an explanatory tooltip) when there's nothing to act on. */
-export function ShortcutQuickBar({ overrides, hasTarget, onAction }: ShortcutQuickBarProps) {
+export function ShortcutQuickBar({ overrides, hasTarget, onAction, embedded, unavailableReason }: ShortcutQuickBarProps) {
   const encounterActions = SHORTCUT_ACTIONS.filter(
     (a) => a.category === 'encounter' && a.wired && getEffectiveToolbar(overrides, a.id),
   );
@@ -26,30 +32,25 @@ export function ShortcutQuickBar({ overrides, hasTarget, onAction }: ShortcutQui
 
   if (encounterActions.length === 0 && combatantActions.length === 0) return null;
 
-  return (
-    <Paper
-      elevation={4}
-      sx={{
-        pointerEvents: 'auto',
-        bgcolor: 'rgba(0,0,0,0.25)',
-        backdropFilter: 'blur(3px)',
-        borderRadius: 3,
-        px: 1,
-        py: 0.5,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 0.25,
-        width: 'fit-content',
-      }}
-    >
+  const buttons = (
+    <>
       <Stack direction="row" spacing={0.25}>
         {encounterActions.map((action) => {
           const Icon = action.icon;
+          const reason = unavailableReason?.(action.id) ?? null;
+          const label = `${action.label} (${formatCombo(getEffectiveCombo(overrides, action.id))})`;
           return (
-            <Tooltip key={action.id} title={`${action.label} (${formatCombo(getEffectiveCombo(overrides, action.id))})`}>
-              <IconButton size="small" onClick={() => onAction(action.id)} sx={{ color: 'common.white' }}>
-                <Icon fontSize="small" />
-              </IconButton>
+            <Tooltip key={action.id} title={reason ? `${label} - ${reason}` : label}>
+              <span>
+                <IconButton
+                  size="small"
+                  disabled={!!reason}
+                  onClick={() => onAction(action.id)}
+                  sx={{ color: 'common.white' }}
+                >
+                  <Icon fontSize="small" />
+                </IconButton>
+              </span>
             </Tooltip>
           );
         })}
@@ -82,6 +83,28 @@ export function ShortcutQuickBar({ overrides, hasTarget, onAction }: ShortcutQui
           );
         })}
       </Stack>
+    </>
+  );
+
+  if (embedded) return buttons;
+
+  return (
+    <Paper
+      elevation={4}
+      sx={{
+        pointerEvents: 'auto',
+        bgcolor: 'rgba(0,0,0,0.25)',
+        backdropFilter: 'blur(3px)',
+        borderRadius: 3,
+        px: 1,
+        py: 0.5,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.25,
+        width: 'fit-content',
+      }}
+    >
+      {buttons}
     </Paper>
   );
 }

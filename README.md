@@ -175,3 +175,23 @@ _Add screenshots to `docs/screenshots/` and reference them here - see
 ## License
 
 See [LICENSE](LICENSE).
+
+## Moving between Windows and Linux
+
+Clone this repository into `/home/vkamineni/Projects/WorldWatcher` on Linux.
+Install Docker with the Compose plugin, then run `bash scripts/up.sh` from the
+repository root and open `http://localhost/campaigns`. The Compose stack uses
+its tracked database backup on first startup. It is a development seed, not a
+live sync of campaigns or uploads.
+
+Local machine variables are excluded from Git. The Windows copies are in
+OneDrive `ProjectSync/WorldWatcher/{.env,Client/.env,Server/.env}`. On Linux,
+copy those files to the matching paths after checking the local port and path
+values. For native development, use Python 3.9+, `python3 -m venv Server/.venv`,
+`Server/.venv/bin/pip install -r Server/requirements.txt`, and
+`npm ci --prefix Client`. Start PostgreSQL (or `docker compose up -d db`), run
+`.venv/bin/python -m alembic upgrade head` from `Server`, then run the
+backend on the port in `Client/.env` and `npm run dev --prefix Client`.
+
+VS Code suggests this repository's extensions from `.vscode/extensions.json`.
+VS Code Settings Sync handles user settings and local extensions separately.

@@ -84,7 +84,11 @@ export interface MapFloor {
   authoredStage?: { width: number; height: number };
 }
 
-export const DEFAULT_GRID_SIZE = 70;
+/** Stage px per 5-ft square. Was 70, which with the map fitted to the screen made even the
+ * densest setting read as a coarse chessboard; the whole range was cut 4x (see GRID_SIZE_MIN/MAX). */
+export const DEFAULT_GRID_SIZE = 18;
+export const GRID_SIZE_MIN = 5;
+export const GRID_SIZE_MAX = 50;
 export type GridType = 'square' | 'hex';
 export const DEFAULT_GRID_COLOR = 'rgba(128,128,128,0.35)';
 export const DEFAULT_GRID_THICKNESS = 1;

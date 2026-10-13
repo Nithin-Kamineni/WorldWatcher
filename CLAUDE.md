@@ -304,18 +304,18 @@ terminal. Everything else about the script works without it.
 ### Ports — read this before starting the backend
 
 The backend port has drifted repeatedly because stale processes hold ports open
-and cannot be killed on this machine (8000 → 8001 → 8002 → 8003 → 8006). **The
-port is whatever `Client/.env` says**, currently `8006`:
+and cannot be killed on this machine (8000 → 8001 → 8002 → 8003 → 8006 → 8007). **The
+port is whatever `Client/.env` says**, currently `8007`:
 
 ```
-VITE_API_BASE_URL=http://localhost:8006/api
-VITE_WS_BASE_URL=ws://localhost:8006/ws
+VITE_API_BASE_URL=http://localhost:8007/api
+VITE_WS_BASE_URL=ws://localhost:8007/ws
 ```
 
 There is no Vite dev proxy, so the client talks to that absolute URL directly.
 If you must move the port, change `Client/.env` and restart Vite, otherwise the
 UI silently fails every request. `Server/.env` and `core/config.py` now both say
-8006 as well (they said 8000 long after the client moved); the README still says
+8007 as well (they said 8000 long after the client moved); the README still says
 8001 and is stale. `dev-backend.ps1` reads the port out of `Client/.env`, so use
 it rather than retyping a `--port` flag.
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -10,6 +10,10 @@ import Tooltip from '@mui/material/Tooltip';
 import Collapse from '@mui/material/Collapse';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
 import CasinoIcon from '@mui/icons-material/Casino';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
@@ -19,8 +23,8 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import ShieldIcon from '@mui/icons-material/Shield';
 import NotesIcon from '@mui/icons-material/Notes';
-import LockIcon from '@mui/icons-material/Lock';
-import LockOpenIcon from '@mui/icons-material/LockOpen';
+import EditIcon from '@mui/icons-material/Edit';
+import TuneIcon from '@mui/icons-material/Tune';
 import AssignmentIndOutlinedIcon from '@mui/icons-material/AssignmentIndOutlined';
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import { SectionHeader } from '../../shell/SectionHeader';
@@ -48,6 +52,8 @@ interface InitiativePanelProps {
   onTokenSelect: (token: PlacedToken, additive: boolean) => void;
   /** Opens this combatant's creature in the sidebar's Reference panel (checklist E13). */
   onTokenStatsRequest: (token: PlacedToken) => void;
+  /** Opens this token's row under Tokens > On map (rename, notes, size...). */
+  onEditToken: (tokenId: string) => void;
   shortcutOverrides: Record<string, ShortcutOverride>;
 }
 
@@ -69,11 +75,41 @@ export function InitiativePanel({
   selectedTokenIds,
   onTokenSelect,
   onTokenStatsRequest,
+  onEditToken,
   shortcutOverrides,
 }: InitiativePanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const sortedEntries = [...initiative.entries].sort((a, b) => b.roll - a.roll);
   const tokenById = new Map(placedTokens.map((t) => [t.id, t]));
+  /** Right-click menu on a row, positioned at the cursor. */
+  const [rowMenu, setRowMenu] = useState<{ entryId: string; tokenId: string; x: number; y: number } | null>(null);
+  /** The row whose initiative was just reopened from that menu - its field takes focus. */
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+
+  /** Changing initiative mid-combat is rare, so there is no lock button on the rows any more:
+   * right-click > Change initiative unlocks the entry, which brings its d20 field back, and
+   * finishing the edit (Enter, or clicking away) locks it again. */
+  const handleChangeInitiative = (entryId: string) => {
+    const entry = initiative.entries.find((e) => e.id === entryId);
+    if (entry?.locked) onToggleEntryLock(entryId);
+    setEditingEntryId(entryId);
+    setRowMenu(null);
+  };
+  const menuToken = rowMenu ? tokenById.get(rowMenu.tokenId) : undefined;
+  const rollInputs = useRef(new Map<string, HTMLInputElement>());
+
+  // Focus the reopened field a tick later rather than via autoFocus: the menu is closing in
+  // the same commit, and an entry that was already unlocked keeps its field mounted, so
+  // autoFocus would either lose to the menu's focus handling or never fire at all.
+  useEffect(() => {
+    if (!editingEntryId) return;
+    const timer = window.setTimeout(() => {
+      const input = rollInputs.current.get(editingEntryId);
+      input?.focus();
+      input?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [editingEntryId]);
 
   return (
     <Stack sx={{ height: '100%' }}>
@@ -130,10 +166,23 @@ export function InitiativePanel({
                 setExpandedId(isExpanded ? null : entry.id);
               };
 
+              const handleRowContextMenu = (e: React.MouseEvent) => {
+                e.preventDefault();
+                setRowMenu({ entryId: entry.id, tokenId: token.id, x: e.clientX, y: e.clientY });
+              };
+
+              // Leaving the field (Enter blurs it) re-locks a mid-combat edit. Rolling-phase
+              // entries are left alone - Start Encounter locks all of them at once.
+              const handleRollCommit = () => {
+                if (editingEntryId === entry.id) setEditingEntryId(null);
+                if (initiative.status === 'active' && !entry.locked) onToggleEntryLock(entry.id);
+              };
+
               return (
                 <Box
                   key={entry.id}
                   onClick={handleRowClick}
+                  onContextMenu={handleRowContextMenu}
                   sx={{
                     borderRadius: 2,
                     cursor: 'pointer',
@@ -198,7 +247,15 @@ export function InitiativePanel({
                           size="small"
                           variant="standard"
                           value={entry.baseRoll}
+                          inputRef={(el: HTMLInputElement | null) => {
+                            if (el) rollInputs.current.set(entry.id, el);
+                            else rollInputs.current.delete(entry.id);
+                          }}
                           onChange={(e) => onUpdateBaseRoll(entry.id, Number(e.target.value))}
+                          onBlur={handleRollCommit}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                          }}
                           sx={{ width: 34 }}
                           slotProps={{ htmlInput: { style: { textAlign: 'right' } } }}
                         />
@@ -252,16 +309,10 @@ export function InitiativePanel({
                   {initiative.status === 'active' && (
                     <Collapse in={isExpanded}>
                       <Stack spacing={1} sx={{ px: 1.5, pb: 1.5 }} onClick={(e) => e.stopPropagation()}>
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <Tooltip title={entry.locked ? 'Unlock to edit initiative' : 'Lock initiative'}>
-                            <IconButton size="small" onClick={() => onToggleEntryLock(entry.id)}>
-                              {entry.locked ? <LockIcon fontSize="small" /> : <LockOpenIcon fontSize="small" color="warning" />}
-                            </IconButton>
-                          </Tooltip>
-                          <Typography variant="caption" color="text.secondary">
-                            Initiative {entry.roll} {entry.locked ? '(locked)' : '(unlocked)'}
-                          </Typography>
-                        </Stack>
+                        <Typography variant="caption" color="text.secondary">
+                          Initiative {entry.roll}
+                          {entry.locked ? ' - right-click the row to change it' : ''}
+                        </Typography>
 
                         <Tooltip
                           title={`Apply Damage (${comboLabel(shortcutOverrides, 'applyDamage')}) / Apply Healing (${comboLabel(shortcutOverrides, 'applyHealing')}) / Apply Temporary HP (${comboLabel(shortcutOverrides, 'applyTempHp')}) - select this combatant on the map to use the shortcut, or edit directly here`}
@@ -382,6 +433,52 @@ export function InitiativePanel({
               );
             })}
           </Stack>
+
+          <Menu
+            open={!!rowMenu}
+            onClose={() => setRowMenu(null)}
+            anchorReference="anchorPosition"
+            anchorPosition={rowMenu ? { top: rowMenu.y, left: rowMenu.x } : undefined}
+            disableRestoreFocus
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setRowMenu(null);
+            }}
+          >
+            {/* Before Start Encounter every roll is already editable - nothing to reopen. */}
+            <MenuItem
+              disabled={initiative.status !== 'active'}
+              onClick={() => rowMenu && handleChangeInitiative(rowMenu.entryId)}
+            >
+              <ListItemIcon>
+                <EditIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Change initiative</ListItemText>
+            </MenuItem>
+            <MenuItem
+              disabled={!menuToken?.creatureId}
+              onClick={() => {
+                if (menuToken) onTokenStatsRequest(menuToken);
+                setRowMenu(null);
+              }}
+            >
+              <ListItemIcon>
+                <AssignmentIndOutlinedIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Open stat block</ListItemText>
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                if (rowMenu) onEditToken(rowMenu.tokenId);
+                setRowMenu(null);
+              }}
+            >
+              <ListItemIcon>
+                <TuneIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Edit token (rename, notes…)</ListItemText>
+            </MenuItem>
+          </Menu>
 
           <Divider />
           <Stack spacing={1} sx={{ p: 1.5 }}>

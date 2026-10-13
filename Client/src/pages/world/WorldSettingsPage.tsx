@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
@@ -18,6 +18,7 @@ import { ShortcutsSettingsDialog } from '../../components/settings/ShortcutsSett
 import { RailLabelsSettingItem } from '../../components/settings/RailLabelsSettingItem';
 import { UiScaleSettingItem } from '../../components/settings/UiScaleSettingItem';
 import { DiceRollSettingItem } from '../../components/settings/DiceRollSettingItem';
+import { HomeWidgetsSettingItem } from '../../components/settings/HomeWidgetsSettingItem';
 import { useWorldStore, getWorldById } from '../../store/useWorldStore';
 import { useThemeMode } from '../../theme/ThemeModeContext';
 import { PageTitle } from '../../components/shell/PageTitle';
@@ -30,6 +31,8 @@ export function WorldSettingsPage() {
   const world = getWorldById(worlds, worldId);
   const { mode, toggleMode } = useThemeMode();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // The Home dashboard's "Customize" link lands here with ?section=widgets, pre-expanded.
+  const [searchParams] = useSearchParams();
 
   return (
     <SectionLayout worldId={worldId!}>
@@ -49,6 +52,7 @@ export function WorldSettingsPage() {
           <UiScaleSettingItem />
           <RailLabelsSettingItem />
           <DiceRollSettingItem />
+          <HomeWidgetsSettingItem defaultOpen={searchParams.get('section') === 'widgets'} />
           <ListItemButton onClick={() => setShortcutsOpen(true)}>
             <ListItemIcon sx={{ minWidth: 36 }}>
               <KeyboardIcon fontSize="small" />

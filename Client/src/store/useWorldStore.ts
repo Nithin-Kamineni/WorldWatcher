@@ -11,7 +11,10 @@ interface WorldStoreState {
 
   fetchWorlds: () => Promise<void>;
   addWorld: (name: string, description?: string, imageAssetId?: string) => Promise<World>;
-  updateWorld: (id: string, patch: { name?: string; description?: string; imageAssetId?: string }) => Promise<void>;
+  updateWorld: (
+    id: string,
+    patch: { name?: string; description?: string; imageAssetId?: string; coverImageAssetId?: string },
+  ) => Promise<void>;
   deleteWorld: (id: string) => Promise<void>;
 }
 
@@ -45,6 +48,7 @@ export const useWorldStore = create<WorldStoreState>((set, get) => ({
       name: patch.name,
       description: patch.description,
       ...(patch.imageAssetId ? { image_asset_id: patch.imageAssetId } : {}),
+      ...(patch.coverImageAssetId ? { cover_image_asset_id: patch.coverImageAssetId } : {}),
     });
     const world = apiWorldToWorld(apiWorld);
     set((state) => ({ worlds: state.worlds.map((w) => (w.id === id ? world : w)) }));

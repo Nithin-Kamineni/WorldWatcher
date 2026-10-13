@@ -23,10 +23,7 @@ const FORECAST: ForecastDay[] = [
 
 export function WeatherWidget() {
   return (
-    <WidgetCard title="Weather" icon={<WbSunnyIcon fontSize="small" />}>
-      <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 1.5 }}>
-        Placeholder - fantasy flavor, not real data
-      </Typography>
+    <WidgetCard title="Weather" icon={<WbSunnyIcon fontSize="small" />} comingSoon>
       <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
         <WbSunnyIcon sx={{ fontSize: 40, color: 'warning.main' }} />
         <Box>

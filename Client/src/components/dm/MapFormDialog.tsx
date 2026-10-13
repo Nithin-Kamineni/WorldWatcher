@@ -52,6 +52,8 @@ import {
   createEmptyFloor,
   DEFAULT_GRID_COLOR,
   DEFAULT_GRID_SIZE,
+  GRID_SIZE_MAX,
+  GRID_SIZE_MIN,
   DEFAULT_GRID_THICKNESS,
   DEFAULT_GRID_TYPE,
   MAP_KIND_OPTIONS,
@@ -728,7 +730,7 @@ export function MapFormDialog({ open, onClose, onSubmit, initialMap }: MapFormDi
                     <Typography variant="caption" color="text.secondary">
                       Cell size — {gridSize}px per 5 ft
                     </Typography>
-                    <Slider value={gridSize} min={20} max={200} step={5} valueLabelDisplay="auto" onChange={(_event, value) => setGridSize(value as number)} />
+                    <Slider value={gridSize} min={GRID_SIZE_MIN} max={GRID_SIZE_MAX} step={1} valueLabelDisplay="auto" onChange={(_event, value) => setGridSize(value as number)} />
                   </Box>
 
                   <Box>

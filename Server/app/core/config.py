@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     ww_host: str = "0.0.0.0"
     # Kept in step with Client/.env, which is what the browser actually calls; this said 8000
     # long after the client moved to 8006.
-    ww_port: int = 8006
+    ww_port: int = 8007
     ww_debug: bool = True
 
     @property

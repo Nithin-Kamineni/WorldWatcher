@@ -1054,7 +1054,8 @@ function SearchResults({
 /** A brand-new world has nothing to continue, so this slot becomes the first step instead. */
 function EmptyWorld({ onCreate }: { onCreate: (category?: ArticleCategory) => void }) {
   const theme = useTheme();
-  const starters: ArticleCategory[] = ['character', 'settlement', 'country', 'plot'];
+  // Characters (now Players) and Lore are not shipping yet, so they are not offered as a first step.
+  const starters: ArticleCategory[] = ['settlement', 'country', 'dungeon', 'faction'];
   return (
     <Paper
       variant="outlined"

@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS worlds (
   created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
+-- Wide home-page banner (alembic a7c3e9f1b5d2); image_asset_id is the small logo.
+ALTER TABLE worlds ADD COLUMN IF NOT EXISTS cover_image_asset_id UUID NULL REFERENCES assets (id);
 DROP TRIGGER IF EXISTS trg_worlds_updated_at ON worlds;
 CREATE TRIGGER trg_worlds_updated_at BEFORE UPDATE ON worlds
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -669,7 +671,7 @@ CREATE TABLE IF NOT EXISTS maps (
   setting             TEXT        NULL CHECK (setting IS NULL OR setting IN ('indoor','outdoor','both')),
   activity            TEXT        NULL,
   grid_enabled        BOOLEAN     NOT NULL DEFAULT false,
-  grid_size           INTEGER     NOT NULL DEFAULT 70,
+  grid_size           INTEGER     NOT NULL DEFAULT 18,
   grid_color          TEXT        NOT NULL DEFAULT 'rgba(128,128,128,0.35)',
   grid_thickness      INTEGER     NOT NULL DEFAULT 1,
   grid_type           TEXT        NOT NULL DEFAULT 'square' CHECK (grid_type IN ('square','hex')),

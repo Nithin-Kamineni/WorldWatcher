@@ -11,6 +11,7 @@ class WorldRead(BaseModel):
     name: str
     description: Optional[str] = None
     image_asset_id: Optional[uuid.UUID] = None
+    cover_image_asset_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 
@@ -19,9 +20,11 @@ class WorldCreate(BaseModel):
     name: str
     description: Optional[str] = None
     image_asset_id: Optional[uuid.UUID] = None
+    cover_image_asset_id: Optional[uuid.UUID] = None
 
 
 class WorldUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     image_asset_id: Optional[uuid.UUID] = None
+    cover_image_asset_id: Optional[uuid.UUID] = None

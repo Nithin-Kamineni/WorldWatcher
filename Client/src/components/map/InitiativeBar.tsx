@@ -12,6 +12,7 @@ import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import type { InitiativeState } from '../../types/initiative';
 import type { PlacedToken } from '../../types/token';
 import { TokenThumbnail } from './TokenThumbnail';
+import { EffectBadge } from './effectIcons';
 
 interface InitiativeBarProps {
   placedTokens: PlacedToken[];
@@ -24,6 +25,20 @@ type BarMode = 'full' | 'compact' | 'hidden';
 
 const NORMAL_SIZE = 56;
 const CURRENT_SIZE = 88;
+/** Effect badges ride along the top edge of each portrait - bigger, and more of them, on
+ * whoever is acting, since that is the token the DM is reading right now. */
+const BADGE_SIZE = { normal: 18, current: 24 } as const;
+const MAX_BADGES = { normal: 3, current: 5 } as const;
+
+/** The token's effects plus its concentration flag, which is tracked as a separate boolean
+ * (the Conc. checkbox) but is exactly the kind of thing the DM needs to see at a glance. */
+function effectsFor(token: PlacedToken): string[] {
+  const names = [...token.effects];
+  if (token.concentrating && !names.some((n) => n.trim().toLowerCase() === 'concentration')) {
+    names.push('Concentration');
+  }
+  return names;
+}
 
 // scrollbar stays invisible until the row is hovered, so it never looks like clutter
 // sitting over the map - it only appears while the DM is actually about to scroll it.
@@ -62,6 +77,12 @@ function TokenBox({
   boxRef?: (el: HTMLDivElement | null) => void;
 }) {
   const size = isCurrent ? CURRENT_SIZE : NORMAL_SIZE;
+  const effects = effectsFor(token);
+  const badgeSize = isCurrent ? BADGE_SIZE.current : BADGE_SIZE.normal;
+  const maxBadges = isCurrent ? MAX_BADGES.current : MAX_BADGES.normal;
+  // One slot goes to the "+N" overflow chip when there are more effects than fit.
+  const shownEffects = effects.length > maxBadges ? effects.slice(0, maxBadges - 1) : effects;
+  const hiddenEffects = effects.slice(shownEffects.length);
   const isBloodied = !!token.hp && token.hp.max > 0 && token.hp.current <= token.hp.max / 2;
   return (
     <Stack
@@ -108,6 +129,44 @@ function TokenBox({
               pointerEvents: 'none',
             }}
           />
+        )}
+        {effects.length > 0 && (
+          <Stack
+            direction="row"
+            sx={{
+              position: 'absolute',
+              top: -badgeSize / 3,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              gap: '2px',
+            }}
+          >
+            {shownEffects.map((name) => (
+              <EffectBadge key={name} name={name} size={badgeSize} />
+            ))}
+            {hiddenEffects.length > 0 && (
+              <Tooltip title={hiddenEffects.join(', ')}>
+                <Box
+                  sx={{
+                    height: badgeSize,
+                    minWidth: badgeSize,
+                    px: '3px',
+                    borderRadius: badgeSize / 2 + 'px',
+                    bgcolor: 'rgba(15,15,20,0.85)',
+                    border: '1px solid rgba(255,255,255,0.7)',
+                    color: 'common.white',
+                    fontSize: badgeSize * 0.5,
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  +{hiddenEffects.length}
+                </Box>
+              </Tooltip>
+            )}
+          </Stack>
         )}
       </Box>
       <Typography variant="caption" noWrap sx={{ maxWidth: size, color: 'common.white', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
@@ -201,6 +260,9 @@ export function InitiativeBar({ placedTokens, initiative, onAdvanceTurn, onToken
           overflowX: mode === 'full' ? 'auto' : 'visible',
           overflowY: 'hidden',
           pb: 0.5,
+          // headroom for the effect badges, which overhang the top of each portrait and
+          // would otherwise be clipped by overflowY
+          pt: `${Math.ceil(BADGE_SIZE.current / 3) + 2}px`,
           ...scrollbarSx,
         }}
       >

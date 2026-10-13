@@ -36,7 +36,7 @@ Python, restarts the server whenever it exits (with backoff), and logs to
 `Server/logs/`. Use it instead of running uvicorn by hand - a bare
 
 ```bash
-cd Server && .venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8006
+cd Server && .venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8007
 ```
 
 is a child of your shell and dies with the session, which is why the backend
@@ -48,8 +48,8 @@ Two rules that have burned this project before:
 - **Always `.venv/Scripts/python.exe -m uvicorn`, never a bare `uvicorn`.**
   Backgrounding a bare `uvicorn` here has silently run under the pyenv global
   Python instead of the venv, producing confusing import errors.
-- **The port must match `Client/.env`**, currently `8006`. Ports have drifted
-  repeatedly (8000 → 8001 → 8002 → 8003 → 8006) because stale processes hold
+- **The port must match `Client/.env`**, currently `8007`. Ports have drifted
+  repeatedly (8000 → 8001 → 8002 → 8003 → 8006 → 8007) because stale processes hold
   them open and cannot be killed on this machine. `Server/.env` says
   `WW_PORT=8000` and the README says 8001 — both are stale. The `--port` flag
   wins.
@@ -57,7 +57,7 @@ Two rules that have burned this project before:
 Confirm it is actually up before moving on:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8006/health
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8007/health
 ```
 
 If the port is already taken, do **not** pick a new port silently. Bump both

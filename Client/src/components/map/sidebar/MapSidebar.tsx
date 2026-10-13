@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import IconButton from '@mui/material/IconButton';
@@ -23,6 +23,9 @@ import type { ShortcutOverride } from '../../../store/useShortcutStore';
 import { useTokenManagerUiStore, type TokenManagerTab } from '../../../store/useTokenManagerUiStore';
 import type { EncounterCreatureEntry } from '../../../types/encounter';
 import { MAP_RAIL_WIDTH, MAP_PANEL_WIDTH, MAP_WIDE_PANEL_WIDTH } from '../../../theme/layout';
+import { useMapUiStore, MAP_SIDEBAR_MAX_WIDTH, MAP_SIDEBAR_MIN_WIDTH } from '../../../store/useMapUiStore';
+import { getEffectiveCombo } from '../../../store/useShortcutStore';
+import { formatCombo } from '../../../types/shortcut';
 
 export type SidebarSection = 'tokens' | 'floors' | 'initiative' | 'dice' | 'reference';
 
@@ -102,12 +105,44 @@ export function MapSidebar({
   shortcutOverrides,
   openRequest,
 }: MapSidebarProps) {
-  const [collapsed, setCollapsed] = useState(true);
+  const collapsed = useMapUiStore((state) => state.sidebarCollapsed);
+  const setCollapsed = useMapUiStore((state) => state.setSidebarCollapsed);
+  const toggleCollapsed = useMapUiStore((state) => state.toggleSidebar);
+  const toggleCombo = formatCombo(getEffectiveCombo(shortcutOverrides, 'toggleSidebar'));
   const [section, setSection] = useState<SidebarSection>('tokens');
   // Restores whichever tab the DM was last on, rather than always resetting to "On map" -
   // right-clicking a specific token still forces 'floor', since that is a jump to its row.
   const [tokenTab, setTokenTab] = useState<TokenManagerTab>(() => useTokenManagerUiStore.getState().lastTab);
   const [focusTokenId, setFocusTokenId] = useState<string | null>(null);
+  const storedWidth = useMapUiStore((state) => state.sidebarWidths[section]);
+  const setSidebarWidth = useMapUiStore((state) => state.setSidebarWidth);
+  const resetSidebarWidth = useMapUiStore((state) => state.resetSidebarWidth);
+  /** Width while a drag is in progress - committed to the store once, on release. */
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const dragStart = useRef<{ x: number; width: number } | null>(null);
+  const defaultWidth = section === 'reference' || section === 'tokens' ? WIDE_PANEL_WIDTH : PANEL_WIDTH;
+  const panelWidth = dragWidth ?? storedWidth ?? defaultWidth;
+
+  // The panel sits to the RIGHT of the canvas with its handle on its left edge, so dragging
+  // left widens it. Pointer capture keeps the drag alive when the cursor outruns the handle.
+  const handleResizeStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStart.current = { x: e.clientX, width: panelWidth };
+    setDragWidth(panelWidth);
+  };
+  const handleResizeMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const start = dragStart.current;
+    if (!start) return;
+    const next = start.width + (start.x - e.clientX);
+    setDragWidth(Math.min(MAP_SIDEBAR_MAX_WIDTH, Math.max(MAP_SIDEBAR_MIN_WIDTH, next)));
+  };
+  const handleResizeEnd = () => {
+    if (!dragStart.current) return;
+    dragStart.current = null;
+    if (dragWidth !== null) setSidebarWidth(section, dragWidth);
+    setDragWidth(null);
+  };
 
   useEffect(() => {
     if (!openRequest) return;
@@ -115,7 +150,16 @@ export function MapSidebar({
     if (openRequest.tokenTab) setTokenTab(openRequest.tokenTab);
     setFocusTokenId(openRequest.focusTokenId ?? null);
     setCollapsed(false);
-  }, [openRequest]);
+  }, [openRequest, setCollapsed]);
+
+  /** Jumps to a token's row under Tokens > On map, where its name, notes, size and the rest
+   * are edited - the initiative list's right-click "Edit token" lands here. */
+  const openTokenOnMap = (tokenId: string) => {
+    setSection('tokens');
+    setTokenTab('floor');
+    setFocusTokenId(tokenId);
+    setCollapsed(false);
+  };
 
   const handleSectionClick = (next: SidebarSection) => {
     if (!collapsed && section === next) {
@@ -129,10 +173,59 @@ export function MapSidebar({
   return (
     <Stack direction="row" sx={{ height: '100%', flexShrink: 0 }}>
       {!collapsed && (
+        <Box sx={{ position: 'relative', display: 'flex', flexShrink: 0 }}>
+        <Tooltip title={`Collapse sidebar (${toggleCombo})`} placement="left">
+          <IconButton
+            size="small"
+            onClick={() => setCollapsed(true)}
+            aria-label="Collapse sidebar"
+            sx={{
+              position: 'absolute',
+              top: '50%',
+              left: -14,
+              transform: 'translateY(-50%)',
+              zIndex: 2,
+              width: 22,
+              height: 44,
+              borderRadius: '8px 0 0 8px',
+              bgcolor: 'background.paper',
+              border: 1,
+              borderRight: 0,
+              borderColor: 'divider',
+              '&:hover': { bgcolor: 'action.selected' },
+            }}
+          >
+            <ChevronRightIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Drag to resize - double-click to reset" placement="left" enterDelay={600}>
+          <Box
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={handleResizeStart}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeEnd}
+            onPointerCancel={handleResizeEnd}
+            onDoubleClick={() => resetSidebarWidth(section)}
+            sx={{
+              width: 6,
+              flexShrink: 0,
+              cursor: 'col-resize',
+              touchAction: 'none',
+              bgcolor: dragWidth !== null ? 'primary.main' : 'transparent',
+              transition: 'background-color 0.15s',
+              '&:hover': { bgcolor: 'action.hover' },
+            }}
+          />
+        </Tooltip>
+        </Box>
+      )}
+      {!collapsed && (
         <Paper
           elevation={0}
           sx={{
-            width: section === 'reference' || section === 'tokens' ? WIDE_PANEL_WIDTH : PANEL_WIDTH,
+            width: panelWidth,
+            flexShrink: 0,
             borderRight: 1,
             borderColor: 'divider',
             borderRadius: 0,
@@ -175,6 +268,7 @@ export function MapSidebar({
               selectedTokenIds={selectedTokenIds}
               onTokenSelect={onTokenSelect}
               onTokenStatsRequest={onTokenStatsRequest}
+              onEditToken={openTokenOnMap}
               shortcutOverrides={shortcutOverrides}
             />
           )}
@@ -199,23 +293,13 @@ export function MapSidebar({
         }}
         spacing={1}
       >
-        <Tooltip title="Collapse sidebar" placement="left">
-          <IconButton size="small" onClick={() => setCollapsed((c) => !c)}>
+        <Tooltip title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (${toggleCombo})`} placement="left">
+          <IconButton size="small" onClick={toggleCollapsed}>
             {collapsed ? <ChevronLeftIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
 
         <Box sx={{ width: '70%', borderTop: 1, borderColor: 'divider', my: 0.5 }} />
-
-        <Tooltip title="Tokens - on this map, library, encounters" placement="left">
-          <IconButton
-            size="small"
-            color={!collapsed && section === 'tokens' ? 'primary' : 'default'}
-            onClick={() => handleSectionClick('tokens')}
-          >
-            <PeopleAltIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
 
         <Tooltip title="Floors" placement="left">
           <IconButton
@@ -224,6 +308,16 @@ export function MapSidebar({
             onClick={() => handleSectionClick('floors')}
           >
             <LayersIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+
+        <Tooltip title="Tokens - on this map, library, encounters" placement="left">
+          <IconButton
+            size="small"
+            color={!collapsed && section === 'tokens' ? 'primary' : 'default'}
+            onClick={() => handleSectionClick('tokens')}
+          >
+            <PeopleAltIcon fontSize="small" />
           </IconButton>
         </Tooltip>
 

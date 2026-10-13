@@ -308,6 +308,8 @@ export interface ApiWorld {
   name: string;
   description: string | null;
   image_asset_id: string | null;
+  /** Wide Home-page banner; image_asset_id is the small logo. */
+  cover_image_asset_id?: string | null;
   created_at: string;
   updated_at: string;
 }

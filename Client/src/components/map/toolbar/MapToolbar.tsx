@@ -10,9 +10,6 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import GridOnIcon from '@mui/icons-material/GridOn';
-import GridOffIcon from '@mui/icons-material/GridOff';
-import TuneIcon from '@mui/icons-material/Tune';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
@@ -26,13 +23,12 @@ import DragHandleIcon from '@mui/icons-material/DragHandle';
 import GestureIcon from '@mui/icons-material/Gesture';
 import AutoFixNormalIcon from '@mui/icons-material/AutoFixNormal';
 import StraightenIcon from '@mui/icons-material/Straighten';
-import FlipIcon from '@mui/icons-material/Flip';
-import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
 import NearMeIcon from '@mui/icons-material/NearMe';
 import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import Button from '@mui/material/Button';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -46,21 +42,10 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import type { MapToolMode } from '../../../types/tool';
 import { AOE_COLOR_PRESETS, MAX_MARKER_WIDTH, MIN_MARKER_WIDTH } from '../../../types/shape';
-import type { GridType } from '../../../types/map';
 import type { WallDetectMode } from '../../../types/fog';
 import { FOG_BRUSH_MAX, FOG_BRUSH_MIN, WALL_DETECT_MODES } from '../../../types/fog';
 
 interface MapToolbarProps {
-  gridEnabled: boolean;
-  gridSize: number;
-  gridColor: string;
-  gridThickness: number;
-  gridType: GridType;
-  onToggleGrid: () => void;
-  onGridSizeChange: (size: number) => void;
-  onGridColorChange: (color: string) => void;
-  onGridThicknessChange: (thickness: number) => void;
-  onGridTypeChange: (type: GridType) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetView: () => void;
@@ -70,11 +55,12 @@ interface MapToolbarProps {
   onShapeColorChange: (color: string) => void;
   markerWidth: number;
   onMarkerWidthChange: (width: number) => void;
-  flippedHorizontal: boolean;
-  flippedVertical: boolean;
-  onFlipHorizontal: () => void;
-  onFlipVertical: () => void;
-  onRotate: () => void;
+  /** Opens the map's right-click menu (grid, flip, rotate) from a button, for anyone who
+   * has not discovered the right-click yet, and for touch. */
+  onOpenMapMenu: (anchor: HTMLElement) => void;
+  /** The combat shortcut buttons (ShortcutQuickBar), which used to be a second toolbar in
+   * the map's top-right corner. */
+  extraActions?: ReactNode;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -84,6 +70,9 @@ interface MapToolbarProps {
   onToggleFog: () => void;
   playerPreview: boolean;
   onTogglePlayerPreview: () => void;
+  /** Show only the current combatant's line of sight during an encounter. */
+  turnPerspectiveFog: boolean;
+  onToggleTurnPerspectiveFog: () => void;
   fogBrushRadius: number;
   onFogBrushRadiusChange: (radius: number) => void;
   onRevealAll: () => void;
@@ -135,16 +124,6 @@ function shapeIconFor(tool: MapToolMode) {
 }
 
 export function MapToolbar({
-  gridEnabled,
-  gridSize,
-  gridColor,
-  gridThickness,
-  gridType,
-  onToggleGrid,
-  onGridSizeChange,
-  onGridColorChange,
-  onGridThicknessChange,
-  onGridTypeChange,
   onZoomIn,
   onZoomOut,
   onResetView,
@@ -154,11 +133,8 @@ export function MapToolbar({
   onShapeColorChange,
   markerWidth,
   onMarkerWidthChange,
-  flippedHorizontal,
-  flippedVertical,
-  onFlipHorizontal,
-  onFlipVertical,
-  onRotate,
+  onOpenMapMenu,
+  extraActions,
   canUndo,
   canRedo,
   onUndo,
@@ -167,6 +143,8 @@ export function MapToolbar({
   onToggleFog,
   playerPreview,
   onTogglePlayerPreview,
+  turnPerspectiveFog,
+  onToggleTurnPerspectiveFog,
   fogBrushRadius,
   onFogBrushRadiusChange,
   onRevealAll,
@@ -185,7 +163,6 @@ export function MapToolbar({
 }: MapToolbarProps) {
   const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
   const [shapesAnchor, setShapesAnchor] = useState<HTMLElement | null>(null);
-  const [gridAnchor, setGridAnchor] = useState<HTMLElement | null>(null);
   const [fogAnchor, setFogAnchor] = useState<HTMLElement | null>(null);
   const [detectMode, setDetectMode] = useState<WallDetectMode>('painted');
   const [detectSensitivity, setDetectSensitivity] = useState(50);
@@ -198,7 +175,6 @@ export function MapToolbar({
   const handleCollapseToggle = () => {
     setColorAnchor(null);
     setShapesAnchor(null);
-    setGridAnchor(null);
     setFogAnchor(null);
     setCollapsed((c) => !c);
   };
@@ -250,32 +226,6 @@ export function MapToolbar({
 
       <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: 'rgba(255,255,255,0.3)' }} />
 
-      <Tooltip title={gridEnabled ? 'Disable grid' : 'Enable grid'}>
-        <IconButton size="small" color={gridEnabled ? 'primary' : 'default'} onClick={onToggleGrid}>
-          {gridEnabled ? <GridOnIcon fontSize="small" /> : <GridOffIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
-      {gridEnabled && (
-        <>
-          <Slider
-            size="small"
-            value={gridSize}
-            min={20}
-            max={200}
-            step={5}
-            onChange={(_e, value) => onGridSizeChange(value as number)}
-            sx={{ width: 100, mx: 1 }}
-          />
-          <Tooltip title="Grid style">
-            <IconButton size="small" onClick={(e) => setGridAnchor(e.currentTarget)}>
-              <TuneIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </>
-      )}
-
-      <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: 'rgba(255,255,255,0.3)' }} />
-
       <Tooltip title="Zoom in">
         <IconButton size="small" onClick={onZoomIn}>
           <ZoomInIcon fontSize="small" />
@@ -312,15 +262,6 @@ export function MapToolbar({
           <StraightenIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="Fog of war & walls">
-        <IconButton
-          size="small"
-          color={fogEnabled || isFogToolActive ? 'primary' : 'default'}
-          onClick={(e) => setFogAnchor(e.currentTarget)}
-        >
-          <CloudIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
       <Tooltip title="Shape / marker color">
         <IconButton size="small" onClick={(e) => setColorAnchor(e.currentTarget)}>
           <Box
@@ -337,24 +278,30 @@ export function MapToolbar({
 
       <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: 'rgba(255,255,255,0.3)' }} />
 
-      <Tooltip title="Flip horizontal">
-        <IconButton size="small" color={flippedHorizontal ? 'primary' : 'default'} onClick={onFlipHorizontal}>
-          <FlipIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-      <Tooltip title="Flip vertical">
-        <IconButton size="small" color={flippedVertical ? 'primary' : 'default'} onClick={onFlipVertical}>
-          <FlipIcon fontSize="small" sx={{ transform: 'rotate(90deg)' }} />
-        </IconButton>
-      </Tooltip>
-      <Tooltip title="Rotate 90°">
-        <IconButton size="small" onClick={onRotate}>
-          <Rotate90DegreesCwIcon fontSize="small" />
+      <Tooltip title="Fog of war & walls">
+        <IconButton
+          size="small"
+          color={fogEnabled || isFogToolActive ? 'primary' : 'default'}
+          onClick={(e) => setFogAnchor(e.currentTarget)}
+        >
+          <CloudIcon fontSize="small" />
         </IconButton>
       </Tooltip>
 
       <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: 'rgba(255,255,255,0.3)' }} />
 
+      {extraActions && (
+        <>
+          {extraActions}
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: 'rgba(255,255,255,0.3)' }} />
+        </>
+      )}
+
+      <Tooltip title="Grid, flip & rotate (or right-click the map)">
+        <IconButton size="small" onClick={(e) => onOpenMapMenu(e.currentTarget)}>
+          <MoreVertIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
       <Tooltip title="Collapse toolbar">
         <IconButton size="small" onClick={handleCollapseToggle}>
           <UnfoldLessIcon fontSize="small" />
@@ -446,64 +393,6 @@ export function MapToolbar({
       </Popover>
 
       <Popover
-        open={!!gridAnchor}
-        anchorEl={gridAnchor}
-        onClose={() => setGridAnchor(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-        transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Box sx={{ p: 1.5, width: 220 }}>
-          <Typography variant="caption" color="text.secondary">
-            Grid type
-          </Typography>
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={gridType}
-            onChange={(_e, value) => value && onGridTypeChange(value)}
-            fullWidth
-            sx={{ mt: 0.5, mb: 1.5 }}
-          >
-            <ToggleButton value="square">Square</ToggleButton>
-            <ToggleButton value="hex">Hex</ToggleButton>
-          </ToggleButtonGroup>
-
-          <Typography variant="caption" color="text.secondary">
-            Grid color
-          </Typography>
-          <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 1.5 }}>
-            {['rgba(128,128,128,0.35)', '#ffffff', '#000000', '#f5c542', '#3b82f6'].map((color) => (
-              <Box
-                key={color}
-                onClick={() => onGridColorChange(color)}
-                sx={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
-                  bgcolor: color,
-                  cursor: 'pointer',
-                  border: gridColor === color ? '2px solid' : '1px solid rgba(0,0,0,0.2)',
-                  borderColor: gridColor === color ? 'text.primary' : undefined,
-                }}
-              />
-            ))}
-          </Stack>
-
-          <Typography variant="caption" color="text.secondary">
-            Grid thickness: {gridThickness}px
-          </Typography>
-          <Slider
-            size="small"
-            value={gridThickness}
-            min={1}
-            max={6}
-            step={1}
-            onChange={(_e, value) => onGridThicknessChange(value as number)}
-          />
-        </Box>
-      </Popover>
-
-      <Popover
         open={!!fogAnchor}
         anchorEl={fogAnchor}
         onClose={() => setFogAnchor(null)}
@@ -519,6 +408,12 @@ export function MapToolbar({
           <FormControlLabel
             control={<Switch size="small" checked={playerPreview} onChange={onTogglePlayerPreview} />}
             label="Preview as players see it"
+            disabled={!fogEnabled}
+            slotProps={{ typography: { variant: 'body2' } }}
+          />
+          <FormControlLabel
+            control={<Switch size="small" checked={turnPerspectiveFog} onChange={onToggleTurnPerspectiveFog} />}
+            label="In combat, show only the current turn's sight"
             disabled={!fogEnabled}
             slotProps={{ typography: { variant: 'body2' } }}
           />

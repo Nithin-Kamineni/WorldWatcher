@@ -88,10 +88,8 @@ type Folder =
   | 'factions-military-orders'
   | 'factions-religious-orders'
   | 'codex'
-  | 'codex-items'
   | 'codex-magic-items'
   | 'codex-spells'
-  | 'codex-lore'
   | 'articles'
   | 'all'
   | 'recent';
@@ -147,13 +145,14 @@ const FOLDER_TREE: FolderGroupDef[] = [
   {
     group: 'People',
     icon: <GroupsIcon fontSize="small" />,
-    headingKey: 'people',
-    categories: ['character', 'deity'],
-    createLabel: 'Create person',
+    // Players and Deities are not shipping yet (both "coming soon"), which leaves People with
+    // no article-backed child for a combined heading table to span - so the heading opens NPCs,
+    // the group's main working view.
+    headingKey: 'npcs',
     items: [
       { key: 'npcs', label: 'NPCs' },
-      { key: 'characters', label: 'Characters', categories: ['character'] },
-      { key: 'deities', label: 'Deities', categories: ['deity'] },
+      { key: 'characters', label: 'Players', comingSoon: true },
+      { key: 'deities', label: 'Deities', comingSoon: true },
       { key: 'monsters', label: 'Monsters', compendium: 'monsters' },
     ],
   },
@@ -196,13 +195,15 @@ const FOLDER_TREE: FolderGroupDef[] = [
     group: 'Codex',
     icon: <MenuBookIcon fontSize="small" />,
     headingKey: 'codex',
-    categories: ['item', 'spell', 'plot', 'event'],
+    // Items and Lore were removed from the Codex (2026-09-25). Their article categories
+    // ('item', 'plot', 'event') still exist - magic items and quests write linked articles in
+    // them - they just no longer get a Codex page of their own; those entries stay reachable
+    // from All entries and the Articles tree.
+    categories: ['spell'],
     createLabel: 'Create codex entry',
     items: [
-      { key: 'codex-items', label: 'Items', categories: ['item'] },
       { key: 'codex-magic-items', label: 'Magic Items', compendium: 'items' },
       { key: 'codex-spells', label: 'Spells', compendium: 'spells' },
-      { key: 'codex-lore', label: 'Lore', categories: ['plot', 'event'] },
     ],
   },
 ];
@@ -846,6 +847,17 @@ export function WorldManagerPage() {
             />
           )}
         </>
+      ) : folderItem?.comingSoon ? (
+        <ComingSoon
+          icon={<BadgeIcon sx={{ fontSize: 56 }} />}
+          title={`${folderItem.label} - coming soon`}
+          description={
+            folder === 'characters'
+              ? 'Player pages - each player character with their backstory, portrait and ties to your world - are still being built.'
+              : 'Deity pages - pantheons, domains and the faithful who serve them - are still being built.'
+          }
+          note="Use NPCs or an article in the Articles tree in the meantime."
+        />
       ) : needsCampaign && !primaryCampaign ? (
         <ComingSoon
           icon={<FolderIcon sx={{ fontSize: 56 }} />}

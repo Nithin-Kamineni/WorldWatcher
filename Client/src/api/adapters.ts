@@ -239,6 +239,7 @@ export function apiWorldToWorld(w: ApiWorld): World {
     id: w.id,
     name: w.name,
     imageSrc: assetFileUrl(w.image_asset_id),
+    coverImageSrc: assetFileUrl(w.cover_image_asset_id ?? null),
     description: w.description ?? '',
     createdAt: toEpochMs(w.created_at),
     updatedAt: toEpochMs(w.updated_at),

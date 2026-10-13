@@ -36,6 +36,7 @@ import KeyboardDoubleArrowUpIcon from '@mui/icons-material/KeyboardDoubleArrowUp
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ViewSidebarIcon from '@mui/icons-material/ViewSidebar';
 
 export type ShortcutCategory = 'encounter' | 'combatant';
 
@@ -55,7 +56,10 @@ export interface ShortcutActionDef {
   wired: boolean;
 }
 
-// Defaults match the "Improved Initiative" web app's own defaults, as pasted by the user.
+// Defaults match the "Improved Initiative" web app's own defaults, as pasted by the user -
+// except the toolbar flags for Save Encounter (a no-op toast: the map already autosaves every
+// change), Rename and Quick Edit Combatant (right-click a token instead: it opens the token's
+// "On map" row in the sidebar, where name, notes and the rest are edited).
 export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   // ---- Encounter commands ----
   { id: 'toggleWideMenu', category: 'encounter', label: 'Toggle Wide Menu', icon: MenuIcon, defaultCombo: 'alt+m', defaultToolbar: true, wired: false },
@@ -73,7 +77,9 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'toggleFullScreen', category: 'encounter', label: 'Toggle Full Screen', icon: FullscreenIcon, defaultCombo: 'f11', defaultToolbar: false, wired: true },
   { id: 'nextTurn', category: 'encounter', label: 'Next Turn', icon: SkipNextIcon, defaultCombo: 'n', defaultToolbar: true, wired: true },
   { id: 'previousTurn', category: 'encounter', label: 'Previous Turn', icon: SkipPreviousIcon, defaultCombo: 'alt+n', defaultToolbar: false, wired: true },
-  { id: 'saveEncounter', category: 'encounter', label: 'Save Encounter', icon: SaveIcon, defaultCombo: 'alt+s', defaultToolbar: true, wired: true },
+  { id: 'saveEncounter', category: 'encounter', label: 'Save Encounter', icon: SaveIcon, defaultCombo: 'alt+s', defaultToolbar: false, wired: true },
+  // Map sidebar open/closed. Not an Improved Initiative command - WorldWatcher's own.
+  { id: 'toggleSidebar', category: 'encounter', label: 'Toggle Sidebar', icon: ViewSidebarIcon, defaultCombo: 'b', defaultToolbar: false, wired: true },
   { id: 'openSettings', category: 'encounter', label: 'Settings', icon: SettingsIcon, defaultCombo: '?', defaultToolbar: true, wired: true },
 
   // ---- Combatant commands ----
@@ -83,12 +89,12 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'addTag', category: 'combatant', label: 'Add Tag', icon: LocalOfferIcon, defaultCombo: 'g', defaultToolbar: false, defaultInline: true, wired: true },
   { id: 'updatePersistentNotes', category: 'combatant', label: 'Update Persistent Notes', icon: NotesIcon, defaultCombo: 'y', defaultToolbar: false, defaultInline: false, wired: true },
   { id: 'removeFromEncounter', category: 'combatant', label: 'Remove from Encounter', icon: CloseIcon, defaultCombo: 'del', defaultToolbar: true, defaultInline: false, wired: true },
-  { id: 'rename', category: 'combatant', label: 'Rename', icon: DriveFileRenameOutlineIcon, defaultCombo: 'f2', defaultToolbar: true, defaultInline: false, wired: true },
+  { id: 'rename', category: 'combatant', label: 'Rename', icon: DriveFileRenameOutlineIcon, defaultCombo: 'f2', defaultToolbar: false, defaultInline: false, wired: true },
   { id: 'toggleSpentReaction', category: 'combatant', label: 'Toggle Spent Reaction', icon: ReplyIcon, defaultCombo: 'r', defaultToolbar: false, defaultInline: false, wired: true },
   { id: 'hideRevealInPlayerView', category: 'combatant', label: 'Hide/Reveal in Player View', icon: VisibilityIcon, defaultCombo: 'h', defaultToolbar: false, defaultInline: true, wired: false },
   { id: 'revealHideAcInPlayerView', category: 'combatant', label: 'Reveal/Hide AC in Player View', icon: ShieldIcon, defaultCombo: 'alt+h', defaultToolbar: false, defaultInline: false, wired: false },
   { id: 'editUniqueStatblock', category: 'combatant', label: 'Edit Unique Statblock', icon: EditNoteIcon, defaultCombo: 'shift+e', defaultToolbar: false, defaultInline: false, wired: false },
-  { id: 'quickEditCombatant', category: 'combatant', label: 'Quick Edit Combatant', icon: AutoFixHighIcon, defaultCombo: 'e', defaultToolbar: true, defaultInline: false, wired: true },
+  { id: 'quickEditCombatant', category: 'combatant', label: 'Quick Edit Combatant', icon: AutoFixHighIcon, defaultCombo: 'e', defaultToolbar: false, defaultInline: false, wired: true },
   { id: 'editInitiative', category: 'combatant', label: 'Edit Initiative', icon: TimerIcon, defaultCombo: 'alt+i', defaultToolbar: false, defaultInline: false, wired: false },
   { id: 'linkInitiative', category: 'combatant', label: 'Link Initiative', icon: LinkIcon, defaultCombo: 'alt+l', defaultToolbar: false, defaultInline: false, wired: false },
   { id: 'moveDown', category: 'combatant', label: 'Move Down', icon: KeyboardDoubleArrowDownIcon, defaultCombo: 'alt+j', defaultToolbar: true, defaultInline: false, wired: false },

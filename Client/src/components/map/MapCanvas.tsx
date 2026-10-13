@@ -77,6 +77,8 @@ interface MapCanvasProps {
   authoredStage?: { width: number; height: number };
   /** Fired once for a floor that has no authored size yet, with the size to adopt. */
   onAuthoredStageResolved: (size: { width: number; height: number }) => void;
+  /** Right-click on the map itself (not on a token), in viewport px - opens the map menu. */
+  onCanvasContextMenu: (clientX: number, clientY: number) => void;
 }
 
 const MIN_DRAFT_SIZE = 6;
@@ -218,6 +220,7 @@ export function MapCanvas({
   onFitChange,
   authoredStage,
   onAuthoredStageResolved,
+  onCanvasContextMenu,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { width, height } = useResponsiveStageSize(containerRef);
@@ -283,19 +286,29 @@ export function MapCanvas({
     onFitChange(fit);
   }, [fit, onFitChange]);
 
-  // Contain-fit the authored canvas into whatever the window actually gives us. This is a
-  // Stage transform, so it scales background, tokens, grid and fog as one - nothing moves
-  // relative to anything else. Reapplied when the container resizes or Reset View bumps the
-  // epoch, which does mean a resize re-frames the map; that is the same thing every map
-  // viewer does, and the alternative is content drifting out of view.
+  // Contain-fit the MAP IMAGE into whatever the window actually gives us. This is a Stage
+  // transform, so it scales background, tokens, grid and fog as one - nothing moves relative
+  // to anything else. Reapplied when the container resizes, the image loads, or Reset View
+  // bumps the epoch, which does mean a resize re-frames the map; that is the same thing every
+  // map viewer does, and the alternative is content drifting out of view.
+  //
+  // It frames the image, not the authored canvas. The image is itself contain-fitted into the
+  // authored canvas, so fitting the canvas letterboxed it twice whenever the window's shape
+  // differed from the one the floor was authored at - the map sat centred with gaps on all
+  // four sides. The image's contain-fit is centred on the canvas, so its on-screen box is
+  // centred on flipPivot, with width and height swapped at 90/270.
+  const imageFrameW = fit ? (rotation === 90 || rotation === 270 ? fit.imageHeight : fit.imageWidth) * fit.scale : 0;
+  const imageFrameH = fit ? (rotation === 90 || rotation === 270 ? fit.imageWidth : fit.imageHeight) * fit.scale : 0;
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || !hasAuthored || width <= 0 || height <= 0) return;
-    const scale = Math.min(width / authoredW, height / authoredH);
+    const frameW = imageFrameW > 0 ? imageFrameW : authoredW;
+    const frameH = imageFrameH > 0 ? imageFrameH : authoredH;
+    const scale = Math.min(width / frameW, height / frameH);
     stage.scale({ x: scale, y: scale });
-    stage.position({ x: (width - authoredW * scale) / 2, y: (height - authoredH * scale) / 2 });
+    stage.position({ x: width / 2 - (authoredW / 2) * scale, y: height / 2 - (authoredH / 2) * scale });
     stage.batchDraw();
-  }, [stageRef, hasAuthored, authoredW, authoredH, width, height, fitResetEpoch]);
+  }, [stageRef, hasAuthored, authoredW, authoredH, imageFrameW, imageFrameH, width, height, fitResetEpoch]);
 
   const getStagePoint = (): StagePoint | null => {
     const stage = stageRef.current;
@@ -519,6 +532,16 @@ export function MapCanvas({
     if (e.target === e.target.getStage()) onClearSelection();
   };
 
+  // The browser's menu never opens over the map. A token's own right-click handler (Konva,
+  // on the canvas element inside this box) runs first and calls preventDefault, which is how
+  // this tells "right-clicked a token" (sidebar row) from "right-clicked the map" (map menu).
+  const handleContainerContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    const handledByToken = e.defaultPrevented;
+    e.preventDefault();
+    if (handledByToken) return;
+    onCanvasContextMenu(e.clientX, e.clientY);
+  };
+
   const cursor = activeTool === 'select' ? 'default' : 'crosshair';
 
   return (
@@ -526,6 +549,7 @@ export function MapCanvas({
       ref={containerRef}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onContextMenu={handleContainerContextMenu}
       sx={{
         flexGrow: 1,
         width: '100%',

@@ -43,7 +43,7 @@ class MapCreate(BaseModel):
     setting: Optional[Setting] = None
     activity: Optional[str] = None
     grid_enabled: bool = False
-    grid_size: int = 70
+    grid_size: int = 18
     grid_color: str = "rgba(128,128,128,0.35)"
     grid_thickness: int = 1
     grid_type: GridType = "square"

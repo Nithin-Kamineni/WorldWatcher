@@ -12,16 +12,9 @@ interface QuestProgressWidgetProps {
   campaignId?: string;
 }
 
-const DUMMY_TRACKS = [
-  { label: 'Main Quest: The Sundered Crown', done: 3, total: 7 },
-  { label: 'Side Quest: Missing Caravan', done: 1, total: 3 },
-  { label: 'Faction: Silver Hand standing', done: 4, total: 5 },
-];
-
-/** Quest tracking progress - reads real objective counts from `useQuestStore` when an active
- * campaign has quests with objectives (cheap: the store is already fetched elsewhere and this
- * just derives counts), and falls back to static dummy tracks otherwise. Static data is
- * explicitly fine per issue 7b. */
+/** Quest tracking progress - real objective counts from `useQuestStore` for the active
+ * campaign. When there is nothing to show it says so, rather than inventing sample quests
+ * (it used to fall back to three made-up tracks, which read as the DM's own). */
 export function QuestProgressWidget({ campaignId }: QuestProgressWidgetProps) {
   const questsByCampaignId = useQuestStore((s) => s.questsByCampaignId);
   const fetchQuestsForCampaign = useQuestStore((s) => s.fetchQuestsForCampaign);
@@ -36,15 +29,15 @@ export function QuestProgressWidget({ campaignId }: QuestProgressWidgetProps) {
     .map((q) => ({ label: q.name, ...questProgress(q.objectives) }))
     .filter((t) => t.total > 0)
     .slice(0, 4);
-  const hasRealQuests = !!campaignId && realTracks.length > 0;
-
-  const tracks = hasRealQuests ? realTracks : DUMMY_TRACKS;
+  const tracks = campaignId ? realTracks : [];
 
   return (
     <WidgetCard title="Quest progress" icon={<AssignmentIcon fontSize="small" />}>
-      {!hasRealQuests && (
-        <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 1.5 }}>
-          Placeholder - start tracking quests in a campaign to see real progress
+      {tracks.length === 0 && (
+        <Typography variant="body2" color="text.secondary">
+          {campaignId
+            ? 'No active quests with objectives in this campaign yet. Add objectives to a quest to track it here.'
+            : 'Open a campaign to see its quest progress here.'}
         </Typography>
       )}
       <Stack spacing={1.75}>
