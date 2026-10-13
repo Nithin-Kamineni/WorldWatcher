@@ -195,3 +195,14 @@ backend on the port in `Client/.env` and `npm run dev --prefix Client`.
 
 VS Code suggests this repository's extensions from `.vscode/extensions.json`.
 VS Code Settings Sync handles user settings and local extensions separately.
+### Current Windows data snapshot
+
+The tracked SQL backup starts a seeded database, but it may lag behind current
+campaigns. A current PostgreSQL custom dump and the ignored upload assets are
+saved in OneDrive under `ProjectSync/WorldWatcher/Database/`:
+`WorldWatcher_DB_current.dump` and `Maintainance/assets/`. On a fresh Linux
+checkout, copy the assets into `Database/Maintainance/assets`, start only the
+Compose `db` service, restore the custom dump into `WorldWatcher_DB` with
+`pg_restore`, and then start the full stack with `bash scripts/up.sh`. Restore
+before starting the server to avoid writes to the older seed database. This
+snapshot is not ongoing two-way database synchronization.
